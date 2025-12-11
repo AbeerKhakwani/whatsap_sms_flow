@@ -58,7 +58,9 @@ global.mockDb = {
     const idx = this.conversations.findIndex(c => c.id === id);
     if (idx >= 0) {
       this.conversations[idx] = { ...this.conversations[idx], ...updates };
+      return this.conversations[idx];
     }
+    return null;
   }
 };
 
@@ -66,8 +68,19 @@ global.mockDb = {
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     from: (table) => ({
-      select: () => ({
+      select: (columns) => ({
         eq: (field, value) => ({
+          single: async () => {
+            if (table === 'sellers') {
+              const seller = global.mockDb.findSellerByPhone(value);
+              return { data: seller, error: null };
+            }
+            if (table === 'sms_conversations') {
+              const conv = global.mockDb.findConversation(value);
+              return { data: conv, error: null };
+            }
+            return { data: null, error: null };
+          },
           maybeSingle: async () => {
             if (table === 'sellers') {
               const seller = global.mockDb.findSellerByPhone(value);
@@ -93,7 +106,6 @@ vi.mock('@supabase/supabase-js', () => ({
         }),
         or: (condition) => ({
           maybeSingle: async () => {
-            // Parse email from condition like "email.ilike.test@test.com,paypal_email.ilike.test@test.com"
             const emailMatch = condition.match(/email\.ilike\.([^,]+)/);
             if (emailMatch) {
               const seller = global.mockDb.findSellerByEmail(emailMatch[1]);
@@ -103,6 +115,7 @@ vi.mock('@supabase/supabase-js', () => ({
           }
         })
       }),
+      
       insert: (data) => ({
         select: () => ({
           single: async () => {
@@ -124,8 +137,30 @@ vi.mock('@supabase/supabase-js', () => ({
           return cb({ error: null });
         }
       }),
+      
       update: (updates) => ({
         eq: (field, value) => ({
+          // Support .select().single() chain after update
+          select: () => ({
+            single: async () => {
+              if (table === 'sellers') {
+                const seller = global.mockDb.sellers.find(s => s.id === value);
+                if (seller) {
+                  Object.assign(seller, updates);
+                  return { data: seller, error: null };
+                }
+              }
+              if (table === 'sms_conversations') {
+                const conv = global.mockDb.conversations.find(c => c.id === value);
+                if (conv) {
+                  Object.assign(conv, updates);
+                  return { data: conv, error: null };
+                }
+              }
+              return { data: null, error: null };
+            }
+          }),
+          // Also support direct .then() for backwards compatibility
           then: async (cb) => {
             if (table === 'sellers') {
               const seller = global.mockDb.sellers.find(s => s.id === value);

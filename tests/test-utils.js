@@ -73,18 +73,14 @@ export async function sendSms(handler, phone, message) {
 }
 
 /**
- * Run a full conversation flow
+ * Run a full conversation flow - returns array of message strings
  */
 export async function runConversation(handler, phone, messages) {
   const results = [];
   
   for (const message of messages) {
     const result = await sendSms(handler, phone, message);
-    results.push({
-      sent: message,
-      received: result.message,
-      statusCode: result.statusCode
-    });
+    results.push(result.message);
   }
   
   return results;
