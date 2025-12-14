@@ -65,13 +65,7 @@ Example: yourname@gmail.com`,
 
 What email did you sign up with?`,
 
-    VERIFIED: `All set! 👍 You're verified.
-
-What would you like to do?
-
-1. SELL / LIST an item
-2. BUY
-3. MY LISTINGS`,
+    VERIFIED: `All set! 👍 You're verified.`,
 
     EMAIL_NO_MATCH: (attempt) => `Hmm, that email doesn't match our records.
 Please try again. (Attempt ${attempt}/3)
@@ -130,14 +124,10 @@ Example: yourname@gmail.com
 Please try again.`,
 
     // ============ SELL FLOW (placeholder) ============
-    SELL_START: `What would you like to list today?
+    SELL_START: `Just send anything to begin:
+a photo, designer name, description — whatever you have right now.
 
-Share anything to start:
-- Designer name, size, price
-- Photos 📸
-- Voice note 🎤
-
-Send as much or as little as you want!`,
+I’ll collect the details and guide you step by step 💫`,
 
     // ============ BUY FLOW (placeholder) ============
     BUY_START: `Browse our collection at thephirstory.com 🛍️

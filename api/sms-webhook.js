@@ -9,13 +9,22 @@ import { detectIntent } from './sms/intent.js';
 import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from './sms/flows/auth.js';
 import { handleSellFlow } from './sms/flows/sell.js';
 
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { From, Body = '' } = req.body;
+    const { From, Body = '', NumMedia, MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4 } = req.body;
+    
+    // Collect media URLs
+    const mediaUrls = [MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4].filter(Boolean);
+    
+    if (mediaUrls.length > 0) {
+      console.log('📸 Photos received:', mediaUrls.length);
+    }
+
     const phone = normalizePhone(From);
     const message = Body.trim();
 
@@ -27,7 +36,7 @@ export default async function handler(req, res) {
     logState(phone, seller, conv);// just for logs in vercel
 
     // Route message
-    const response = await route(message, conv, seller, phone);
+    const response = await route(message, conv, seller, phone, mediaUrls);
     return sendResponse(res, response);
 
   } catch (error) {
@@ -36,7 +45,7 @@ export default async function handler(req, res) {
   }
 }
 
-async function route(message, conv, seller, phone) {
+async function route(message, conv, seller, phone, mediaUrls = []) {
   const state = conv.state || 'new';
 
   // 1. Global commands
@@ -67,7 +76,7 @@ async function route(message, conv, seller, phone) {
   if (state === 'awaiting_existing_email') return handleAwaitingExistingEmail(message, conv, phone);
   if (state === 'awaiting_new_email') return handleAwaitingNewEmail(message, conv, phone);
   if (state === 'awaiting_email') return handleAwaitingEmail(message, conv, seller);
-  if (state.startsWith('sell_')) return handleSellFlow(message, conv, seller);
+  if (state.startsWith('sell_')) return handleSellFlow(message, conv, seller, mediaUrls);
 
   // 4. New user
   if (state === 'new') {

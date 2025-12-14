@@ -130,10 +130,11 @@ describe('SMS Webhook', () => {
       });
 
       const res = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, TEST_EMAILS.EXISTING);
-      
+
       expect(res.message).toContain('verified');
-      expect(res.message).toContain('What would you like to do');
-      
+      // Since pending_intent is 'sell', should go to sell flow
+      expect(res.message).toContain('send anything');
+
       const conv = global.mockDb.findConversation(TEST_PHONES.EXISTING_SELLER);
       expect(conv.is_authorized).toBe(true);
     });
@@ -192,8 +193,8 @@ describe('SMS Webhook', () => {
       });
 
       const res = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, 'sell');
-      
-      expect(res.message).toContain('list');
+
+      expect(res.message).toContain('send anything');
     });
 
     it('AUTHORIZED - buy intent works', async () => {
@@ -244,7 +245,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         seller_id: 'seller-123'
       });
       const res1 = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, '1');
-      expect(res1.message).toContain('list');
+      expect(res1.message).toContain('send anything');
 
       // Reset state for next test
       global.mockDb.updateConversation(
@@ -491,8 +492,8 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         const res = await sendSms(handler, SELL_PHONE, 'sell');
 
         expect(res.statusCode).toBe(200);
-        expect(res.message).toContain('list');
-        expect(res.message).toContain('Share');
+        expect(res.message).toContain('send anything');
+        expect(res.message).toContain('photo');
 
         const conv = global.mockDb.findConversation(SELL_PHONE);
         expect(conv.state).toBe('sell_started');
@@ -591,7 +592,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         const res = await sendSms(handler, SELL_PHONE, 'Size M');
 
         expect(res.statusCode).toBe(200);
-        expect(res.message).toContain('list'); // SELL_START message
+        expect(res.message).toContain('send anything'); // SELL_START message
 
         const conv = global.mockDb.findConversation(SELL_PHONE);
         expect(conv.state).toBe('sell_started');
@@ -714,7 +715,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
 
         // Step 1: Start sell flow
         let res = await sendSms(handler, SELL_PHONE, 'sell');
-        expect(res.message).toContain('list');
+        expect(res.message).toContain('send anything');
 
         // Step 2: Provide initial item info
         res = await sendSms(handler, SELL_PHONE, 'Sana Safinaz 3 piece suit, size M, like new');
@@ -903,7 +904,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
     // Step 2: User provides correct email - should verify AND start sell flow
     res = await sendSms(handler, '+1234567890', 'test@example.com');
     expect(res.message.toLowerCase()).toContain('verified');
-    expect(res.message.toLowerCase()).toContain('list');
+    expect(res.message.toLowerCase()).toContain('send anything');
   });
 
   it('should start buy flow after email verification when user originally said buy', async () => {
