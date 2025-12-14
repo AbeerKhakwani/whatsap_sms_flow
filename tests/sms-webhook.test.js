@@ -484,4 +484,104 @@ describe('SMS Webhook', () => {
       expect(res3.message).toContain('here to help');
     });
   });
+
+  describe('Pending Intent After Verification', () => {
+  beforeEach(() => {
+    global.mockDb.reset();
+  });
+
+  it('should start sell flow after email verification when user originally said sell', async () => {
+    // Setup: known seller, not authorized
+    global.mockDb.addSeller({
+      id: 'seller-1',
+      phone: '+1234567890',
+      email: 'test@example.com',
+      name: 'Test User'
+    });
+    global.mockDb.addConversation({
+      id: 'conv-1',
+      phone_number: '+1234567890',
+      seller_id: 'seller-1',
+      state: 'awaiting_action',
+      is_authorized: false,
+      context: {}
+    });
+
+    // Step 1: User says "sell" - should ask for email verification
+    let res = await sendSms(handler, '+1234567890', 'sell');
+    expect(res.message.toLowerCase()).toContain('verify');
+
+    // Check that pending_intent was saved correctly
+    const conv = global.mockDb.conversations.find(c => c.phone_number === '+1234567890');
+    expect(conv.context.pending_intent).toBe('sell');
+    expect(conv.state).toBe('awaiting_email');
+
+    // Step 2: User provides correct email - should verify AND start sell flow
+    res = await sendSms(handler, '+1234567890', 'test@example.com');
+    expect(res.message.toLowerCase()).toContain('verified');
+    expect(res.message.toLowerCase()).toContain('list');
+  });
+
+  it('should start buy flow after email verification when user originally said buy', async () => {
+    // Setup: known seller, not authorized
+    global.mockDb.addSeller({
+      id: 'seller-1',
+      phone: '+1234567890',
+      email: 'test@example.com',
+      name: 'Test User'
+    });
+    global.mockDb.addConversation({
+      id: 'conv-1',
+      phone_number: '+1234567890',
+      seller_id: 'seller-1',
+      state: 'awaiting_action',
+      is_authorized: false,
+      context: {}
+    });
+
+    // Step 1: User says "buy" - should ask for email verification
+    let res = await sendSms(handler, '+1234567890', 'buy');
+    expect(res.message.toLowerCase()).toContain('verify');
+
+    // Check that pending_intent was saved correctly
+    const conv = global.mockDb.conversations.find(c => c.phone_number === '+1234567890');
+    expect(conv.context.pending_intent).toBe('buy');
+
+    // Step 2: User provides correct email - should verify AND show buy info
+    res = await sendSms(handler, '+1234567890', 'test@example.com');
+    expect(res.message.toLowerCase()).toContain('verified');
+    expect(res.message.toLowerCase()).toContain('browse');
+  });
+
+  it('should start listings flow after email verification when user originally said listings', async () => {
+    // Setup: known seller, not authorized
+    global.mockDb.addSeller({
+      id: 'seller-1',
+      phone: '+1234567890',
+      email: 'test@example.com',
+      name: 'Test User'
+    });
+    global.mockDb.addConversation({
+      id: 'conv-1',
+      phone_number: '+1234567890',
+      seller_id: 'seller-1',
+      state: 'awaiting_action',
+      is_authorized: false,
+      context: {}
+    });
+
+    // Step 1: User says "listings" - should ask for email verification
+    let res = await sendSms(handler, '+1234567890', 'my listings');
+    expect(res.message.toLowerCase()).toContain('verify');
+
+    // Check that pending_intent was saved correctly
+    const conv = global.mockDb.conversations.find(c => c.phone_number === '+1234567890');
+    expect(conv.context.pending_intent).toBe('listings');
+
+    // Step 2: User provides correct email - should verify AND show listings
+    res = await sendSms(handler, '+1234567890', 'test@example.com');
+    expect(res.message.toLowerCase()).toContain('verified');
+    expect(res.message.toLowerCase()).toContain('listing');
+  });
+});
 });

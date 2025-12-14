@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     let conv = await findConversation(phone);
     if (!conv) conv = await createConversation(phone, seller?.id);
 
-    logState(phone, seller, conv);
+    logState(phone, seller, conv);// just for logs in vercel
 
     // Route message
     const response = await route(message, conv, seller, phone);
@@ -83,7 +83,7 @@ async function route(message, conv, seller, phone) {
     
     if (intent === 'sell') {
       if (!conv.is_authorized && seller) {
-        await setState(conv.id, 'awaiting_email', { intent: 'sell' });
+        await setState(conv.id, 'awaiting_email', { pending_intent: 'sell' });
         return msg('ASK_EMAIL_VERIFY');
       }
       return msg('SELL_START');
@@ -91,7 +91,7 @@ async function route(message, conv, seller, phone) {
     
     if (intent === 'buy') {
       if (!conv.is_authorized && seller) {
-        await setState(conv.id, 'awaiting_email', { intent: 'buy' });
+        await setState(conv.id, 'awaiting_email', { pending_intent: 'buy' });
         return msg('ASK_EMAIL_VERIFY');
       }
       return msg('BUY_START');
@@ -99,7 +99,7 @@ async function route(message, conv, seller, phone) {
     
     if (intent === 'listings') {
       if (!conv.is_authorized && seller) {
-        await setState(conv.id, 'awaiting_email', { intent: 'listings' });
+        await setState(conv.id, 'awaiting_email', { pending_intent: 'listings' });
         return msg('ASK_EMAIL_VERIFY');
       }
       return msg('LISTINGS_START');
