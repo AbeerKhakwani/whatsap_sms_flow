@@ -114,7 +114,8 @@ export async function handleAwaitingEmail(message, conversation, seller) {
     await authorize(conversation.id, seller.id);
 
 
-    if (pendingIntent === 'sell') {
+     if (pendingIntent === 'sell') {
+      await setState(conversation.id, 'sell_started', {});
       return msg('VERIFIED') + '\n\n' + msg('SELL_START');
     }
     if (pendingIntent === 'buy') {
@@ -140,15 +141,4 @@ export async function handleAwaitingEmail(message, conversation, seller) {
     email_attempts: attempts
   });
   return msg('EMAIL_NO_MATCH', attempts);
-}
-
-/**
- * Trigger email verification with a pending intent
- */
-export async function triggerVerification(conversation, intent) {
-  await setState(conversation.id, 'awaiting_email', {
-    pending_intent: intent,
-    email_attempts: 0
-  });
-  return msg('ASK_EMAIL_VERIFY');
 }

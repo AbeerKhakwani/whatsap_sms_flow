@@ -235,20 +235,30 @@ describe('SMS Webhook', () => {
       expect(res.message).toContain('What would you like to do');
     });
 
-    it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
+it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
+      // Test 1 - sell
       global.mockDb.addConversation({
         phone_number: TEST_PHONES.EXISTING_SELLER,
         state: 'authorized',
         is_authorized: true,
         seller_id: 'seller-123'
       });
-
       const res1 = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, '1');
       expect(res1.message).toContain('list');
 
+      // Reset state for next test
+      global.mockDb.updateConversation(
+        global.mockDb.findConversation(TEST_PHONES.EXISTING_SELLER).id,
+        { state: 'authorized', context: {} }
+      );
       const res2 = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, '2');
       expect(res2.message).toContain('Browse');
 
+      // Reset state for next test
+      global.mockDb.updateConversation(
+        global.mockDb.findConversation(TEST_PHONES.EXISTING_SELLER).id,
+        { state: 'authorized', context: {} }
+      );
       const res3 = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, '3');
       expect(res3.message).toContain('listing');
     });
@@ -451,6 +461,380 @@ describe('SMS Webhook', () => {
       
       expect(messages[0]).toContain('verify');
       expect(messages[1]).toContain('verified');
+    });
+  });
+
+  describe('Sell Flow', () => {
+    const SELL_PHONE = '+15550001111';
+
+    beforeEach(() => {
+      global.mockDb.reset();
+
+      // Create an authorized seller for sell flow tests
+      global.mockDb.addSeller({
+        id: 'sell-seller-123',
+        name: 'Sell Test User',
+        email: 'selltest@example.com',
+        phone: SELL_PHONE
+      });
+    });
+
+    describe('Starting Sell Flow', () => {
+      it('authorized user says "sell" → state becomes sell_started, returns SELL_START', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'authorized',
+          is_authorized: true,
+          seller_id: 'sell-seller-123'
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'sell');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('list');
+        expect(res.message).toContain('Share');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_started');
+      });
+
+      it('SELL_STARTED - user sends item info → creates listing, state becomes sell_collecting', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_started',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'Sana Safinaz kurta size M');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('Got it');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_collecting');
+        expect(conv.context.listing_id).toBeDefined();
+
+        // Verify listing was created with extracted data
+        const listing = global.mockDb.findListing(conv.context.listing_id);
+        expect(listing).not.toBeNull();
+        expect(listing.listing_data.designer).toBe('Sana Safinaz');
+        expect(listing.listing_data.item_type).toBe('kurta');
+      });
+
+      it('SELL_STARTED - no data extracted → stays in sell_started', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_started',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'hello');
+
+        expect(res.statusCode).toBe(200);
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        // Should stay in sell_started since no data was extracted
+        expect(conv.state).toBe('sell_started');
+      });
+    });
+
+    describe('Collecting Listing Data', () => {
+      it('SELL_COLLECTING - user provides more data → updates listing', async () => {
+        // Create listing first
+        const listing = global.mockDb.addListing({
+          id: 'test-listing-1',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Sana Safinaz', item_type: 'kurta' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_collecting',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {
+            listing_id: listing.id,
+            history: [
+              { role: 'user', content: 'Sana Safinaz kurta' },
+              { role: 'assistant', content: 'What size?' }
+            ]
+          }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'Size M, like new condition');
+
+        expect(res.statusCode).toBe(200);
+
+        // Verify listing was updated
+        const updatedListing = global.mockDb.findListing(listing.id);
+        expect(updatedListing.listing_data.size).toBe('M');
+        expect(updatedListing.listing_data.condition).toBe('like new');
+      });
+
+      it('SELL_COLLECTING - listing not found → restarts sell flow', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_collecting',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {
+            listing_id: 'non-existent-listing',
+            history: []
+          }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'Size M');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('list'); // SELL_START message
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_started');
+      });
+
+      it('SELL_COLLECTING - all fields complete → state becomes sell_confirming', async () => {
+        // Create listing with most fields already filled
+        const listing = global.mockDb.addListing({
+          id: 'test-listing-complete',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: {
+            designer: 'Elan',
+            item_type: 'suit',
+            size: 'M',
+            condition: 'like new',
+            pieces: 3
+          }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_collecting',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {
+            listing_id: listing.id,
+            history: []
+          }
+        });
+
+        // Provide the last missing field (price)
+        const res = await sendSms(handler, SELL_PHONE, '$150');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('YES'); // SELL_CONFIRM message
+        expect(res.message).toContain('NO');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_confirming');
+
+        // Verify price was saved
+        const updatedListing = global.mockDb.findListing(listing.id);
+        expect(updatedListing.listing_data.asking_price_usd).toBe(150);
+      });
+    });
+
+    describe('Confirming Listing', () => {
+      it('SELL_CONFIRMING - user says "yes" → status becomes draft, returns SELL_COMPLETE', async () => {
+        const listing = global.mockDb.addListing({
+          id: 'test-listing-confirm',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: {
+            designer: 'Maria B',
+            item_type: 'kurta',
+            size: 'S',
+            condition: 'new with tags',
+            asking_price_usd: 200,
+            pieces: 3
+          }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_confirming',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: listing.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'yes');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('ready for review');
+
+        const updatedListing = global.mockDb.findListing(listing.id);
+        expect(updatedListing.status).toBe('draft');
+      });
+
+      it('SELL_CONFIRMING - user says "no" → allows edits', async () => {
+        const listing = global.mockDb.addListing({
+          id: 'test-listing-edit',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: {
+            designer: 'Khaadi',
+            item_type: 'shirt',
+            size: 'L',
+            condition: 'gently used',
+            asking_price_usd: 50,
+            pieces: 1
+          }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_confirming',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: listing.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'no');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message.toLowerCase()).toContain('change');
+      });
+    });
+
+    describe('Full Sell Conversation', () => {
+      it('complete sell flow: sell → describe item → answer questions → confirm', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'authorized',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        // Step 1: Start sell flow
+        let res = await sendSms(handler, SELL_PHONE, 'sell');
+        expect(res.message).toContain('list');
+
+        // Step 2: Provide initial item info
+        res = await sendSms(handler, SELL_PHONE, 'Sana Safinaz 3 piece suit, size M, like new');
+        expect(res.message).toContain('Got it');
+
+        // Step 3: Provide price
+        res = await sendSms(handler, SELL_PHONE, '$120');
+
+        // Should either ask for more info or be ready to confirm
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(['sell_collecting', 'sell_confirming']).toContain(conv.state);
+
+        // Verify listing has data
+        if (conv.context.listing_id) {
+          const listing = global.mockDb.findListing(conv.context.listing_id);
+          expect(listing.listing_data.designer).toBe('Sana Safinaz');
+          expect(listing.listing_data.asking_price_usd).toBe(120);
+        }
+      });
+
+      it('sell flow with all data in one message', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_started',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        // Provide all info at once
+        const res = await sendSms(
+          handler,
+          SELL_PHONE,
+          'Elan kurta, size S, like new, 3 piece, $200'
+        );
+
+        expect(res.statusCode).toBe(200);
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.context.listing_id).toBeDefined();
+
+        const listing = global.mockDb.findListing(conv.context.listing_id);
+        expect(listing.listing_data.designer).toBe('Elan');
+        expect(listing.listing_data.size).toBe('S');
+        expect(listing.listing_data.condition).toBe('like new');
+        expect(listing.listing_data.pieces).toBe(3);
+        expect(listing.listing_data.asking_price_usd).toBe(200);
+      });
+    });
+
+    describe('Sell Flow Edge Cases', () => {
+      it('global command MENU during sell flow resets to menu', async () => {
+        const listing = global.mockDb.addListing({
+          id: 'test-listing-menu',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Test' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_collecting',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: listing.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'menu');
+
+        expect(res.message).toContain('What would you like to do');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('authorized');
+      });
+
+      it('global command HELP during sell flow shows help', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_started',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'help');
+
+        expect(res.message).toContain('here to help');
+      });
+
+      it('conversation history is preserved across messages', async () => {
+        const listing = global.mockDb.addListing({
+          id: 'test-listing-history',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Agha Noor' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_collecting',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {
+            listing_id: listing.id,
+            history: [
+              { role: 'user', content: 'Agha Noor kurta' },
+              { role: 'assistant', content: 'What size?' }
+            ]
+          }
+        });
+
+        await sendSms(handler, SELL_PHONE, 'Size L');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.context.history.length).toBeGreaterThan(2);
+
+        // Should have user message and assistant response added
+        const userMessages = conv.context.history.filter(h => h.role === 'user');
+        expect(userMessages.length).toBe(2);
+      });
     });
   });
 

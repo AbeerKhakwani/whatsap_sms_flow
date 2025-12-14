@@ -49,13 +49,6 @@ Text START when you're ready — we'll pick up where you left off.`,
 Let's try that again — just text MENU to restart.`,
 
     // ============ ACCOUNT CHECK ============
-    ASK_ACCOUNT_CHECK: `Question 1 of 3:
-
-Have you used The Phir Story before?
-
-Reply YES or NO
-(ہاں یا نہیں)`,
-
     ASK_EXISTING_EMAIL: `Step 2 of 3:
 What email did you use when signing up?`,
 
@@ -137,9 +130,14 @@ Example: yourname@gmail.com
 Please try again.`,
 
     // ============ SELL FLOW (placeholder) ============
-    SELL_START: `Let's list your item! 📸
+    SELL_START: `What would you like to list today?
 
-Send me photos of your item, or send a voice-note describing it.`,
+Share anything to start:
+- Designer name, size, price
+- Photos 📸
+- Voice note 🎤
+
+Send as much or as little as you want!`,
 
     // ============ BUY FLOW (placeholder) ============
     BUY_START: `Browse our collection at thephirstory.com 🛍️
@@ -152,6 +150,14 @@ Looking for something specific? Tell me the designer or style!`,
     LISTINGS_EMPTY: `You don't have any listings yet.
 
 Text SELL to list your first item! 💛`,
+SELL_CONFIRM: `Does this look right? Reply YES to submit or NO to make changes.`,
+SELL_COMPLETE: `Your listing is ready for review. 🎉
+
+We'll text you once it's live (usually within 72 hours).
+
+Text MENU to list another item!`,
+
+SELL_EDIT: `No problem! What would you like to change?`,
 };
 
 /**

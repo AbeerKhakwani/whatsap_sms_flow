@@ -7,6 +7,7 @@ import { normalizePhone, sendResponse, getGlobalCommand, logState } from './sms/
 import { findSellerByPhone, findConversation, createConversation, updateConversation, setState } from './sms/db.js';
 import { detectIntent } from './sms/intent.js';
 import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from './sms/flows/auth.js';
+import { handleSellFlow } from './sms/flows/sell.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -66,6 +67,7 @@ async function route(message, conv, seller, phone) {
   if (state === 'awaiting_existing_email') return handleAwaitingExistingEmail(message, conv, phone);
   if (state === 'awaiting_new_email') return handleAwaitingNewEmail(message, conv, phone);
   if (state === 'awaiting_email') return handleAwaitingEmail(message, conv, seller);
+  if (state.startsWith('sell_')) return handleSellFlow(message, conv, seller);
 
   // 4. New user
   if (state === 'new') {
@@ -86,6 +88,7 @@ async function route(message, conv, seller, phone) {
         await setState(conv.id, 'awaiting_email', { pending_intent: 'sell' });
         return msg('ASK_EMAIL_VERIFY');
       }
+      await setState(conv.id, 'sell_started', {});
       return msg('SELL_START');
     }
     

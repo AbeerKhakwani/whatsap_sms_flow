@@ -12,10 +12,39 @@ process.env.OPENAI_API_KEY = 'test-openai-key';
 global.mockDb = {
   sellers: [],
   conversations: [],
-  
+  listings: [],
+
   reset() {
     this.sellers = [];
     this.conversations = [];
+    this.listings = [];
+  },
+
+  addListing(listing) {
+    const id = listing.id || `listing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newListing = {
+      id,
+      status: 'incomplete',
+      listing_data: {},
+      conversation: [],
+      created_at: new Date().toISOString(),
+      ...listing
+    };
+    this.listings.push(newListing);
+    return newListing;
+  },
+
+  findListing(id) {
+    return this.listings.find(l => l.id === id) || null;
+  },
+
+  updateListing(id, updates) {
+    const idx = this.listings.findIndex(l => l.id === id);
+    if (idx >= 0) {
+      this.listings[idx] = { ...this.listings[idx], ...updates };
+      return this.listings[idx];
+    }
+    return null;
   },
   
   addSeller(seller) {
@@ -79,6 +108,10 @@ vi.mock('@supabase/supabase-js', () => ({
               const conv = global.mockDb.findConversation(value);
               return { data: conv, error: null };
             }
+            if (table === 'listings') {
+              const listing = global.mockDb.findListing(value);
+              return { data: listing, error: null };
+            }
             return { data: null, error: null };
           },
           maybeSingle: async () => {
@@ -89,6 +122,10 @@ vi.mock('@supabase/supabase-js', () => ({
             if (table === 'sms_conversations') {
               const conv = global.mockDb.findConversation(value);
               return { data: conv, error: null };
+            }
+            if (table === 'listings') {
+              const listing = global.mockDb.findListing(value);
+              return { data: listing, error: null };
             }
             return { data: null, error: null };
           },
@@ -115,7 +152,7 @@ vi.mock('@supabase/supabase-js', () => ({
           }
         })
       }),
-      
+
       insert: (data) => ({
         select: () => ({
           single: async () => {
@@ -127,6 +164,10 @@ vi.mock('@supabase/supabase-js', () => ({
               const conv = global.mockDb.addConversation(data);
               return { data: conv, error: null };
             }
+            if (table === 'listings') {
+              const listing = global.mockDb.addListing(data);
+              return { data: listing, error: null };
+            }
             return { data: null, error: null };
           }
         }),
@@ -134,10 +175,13 @@ vi.mock('@supabase/supabase-js', () => ({
           if (table === 'sms_conversations') {
             global.mockDb.addConversation(data);
           }
+          if (table === 'listings') {
+            global.mockDb.addListing(data);
+          }
           return cb({ error: null });
         }
       }),
-      
+
       update: (updates) => ({
         eq: (field, value) => ({
           // Support .select().single() chain after update
@@ -157,6 +201,13 @@ vi.mock('@supabase/supabase-js', () => ({
                   return { data: conv, error: null };
                 }
               }
+              if (table === 'listings') {
+                const listing = global.mockDb.listings.find(l => l.id === value);
+                if (listing) {
+                  Object.assign(listing, updates);
+                  return { data: listing, error: null };
+                }
+              }
               return { data: null, error: null };
             }
           }),
@@ -170,6 +221,10 @@ vi.mock('@supabase/supabase-js', () => ({
               const conv = global.mockDb.conversations.find(c => c.id === value);
               if (conv) Object.assign(conv, updates);
             }
+            if (table === 'listings') {
+              const listing = global.mockDb.listings.find(l => l.id === value);
+              if (listing) Object.assign(listing, updates);
+            }
             return cb ? cb({ error: null }) : { error: null };
           }
         })
@@ -178,19 +233,150 @@ vi.mock('@supabase/supabase-js', () => ({
   })
 }));
 
-// Mock OpenAI fetch for intent detection
+// Mock OpenAI fetch for intent detection and sell flow AI
 const originalFetch = global.fetch;
 global.fetch = async (url, options) => {
   if (url.includes('openai.com')) {
     const body = JSON.parse(options.body);
-    const userMessage = body.messages.find(m => m.role === 'user')?.content?.toLowerCase() || '';
-    
-    // Simulate AI intent detection
+    const messages = body.messages || [];
+    const userMessage = messages.find(m => m.role === 'user')?.content?.toLowerCase() || '';
+    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+
+    // Check if this is a sell flow AI request (has system prompt about listing assistant)
+    const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+    const isSellFlowRequest = systemPrompt.includes('listing') || systemPrompt.includes('designer clothing');
+
+    if (isSellFlowRequest) {
+      // Simulate AI response for sell flow - extract data from user message
+      const extractedData = {};
+      const msgLower = lastUserMessage.toLowerCase();
+
+      // Extract designer
+      const designers = ['sana safinaz', 'elan', 'agha noor', 'maria b', 'khaadi', 'zara shahjahan'];
+      for (const d of designers) {
+        if (msgLower.includes(d)) {
+          extractedData.designer = d.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        }
+      }
+
+      // Extract item type
+      const itemTypes = ['kurta', 'suit', 'lehnga', 'saree', 'choli', 'shirt', 'dress'];
+      for (const t of itemTypes) {
+        if (msgLower.includes(t)) {
+          extractedData.item_type = t;
+        }
+      }
+
+      // Extract size (must be preceded by "size" or be a standalone word)
+      const sizePatterns = [
+        { pattern: /\bsize\s+xs\b/i, value: 'XS' },
+        { pattern: /\bsize\s+s\b/i, value: 'S' },
+        { pattern: /\bsize\s+m\b/i, value: 'M' },
+        { pattern: /\bsize\s+l\b/i, value: 'L' },
+        { pattern: /\bsize\s+xl\b/i, value: 'XL' },
+        { pattern: /\bsize\s+xxl\b/i, value: 'XXL' },
+        { pattern: /\bsmall\b/i, value: 'S' },
+        { pattern: /\bmedium\b/i, value: 'M' },
+        { pattern: /\blarge\b/i, value: 'L' },
+        { pattern: /\bxs\b/i, value: 'XS' },
+        { pattern: /\bxxl\b/i, value: 'XXL' },
+        { pattern: /\bxl\b/i, value: 'XL' },
+      ];
+      for (const { pattern, value } of sizePatterns) {
+        if (pattern.test(msgLower)) {
+          extractedData.size = value;
+          break;
+        }
+      }
+
+      // Extract condition
+      if (msgLower.includes('new with tags') || msgLower.includes('nwt')) {
+        extractedData.condition = 'new with tags';
+      } else if (msgLower.includes('like new')) {
+        extractedData.condition = 'like new';
+      } else if (msgLower.includes('gently used')) {
+        extractedData.condition = 'gently used';
+      } else if (msgLower.includes('used')) {
+        extractedData.condition = 'used';
+      }
+
+      // Extract price (must have $ or word "price" nearby, avoid matching "3 piece")
+      const pricePatterns = [
+        /\$(\d+)/,                    // $120
+        /(\d+)\s*(?:dollars?|usd)/i,  // 120 dollars, 120 USD
+        /price[:\s]+(\d+)/i,          // price: 120, price 120
+      ];
+      for (const pattern of pricePatterns) {
+        const match = msgLower.match(pattern);
+        if (match) {
+          extractedData.asking_price_usd = parseInt(match[1]);
+          break;
+        }
+      }
+
+      // Extract pieces
+      if (msgLower.includes('3 piece') || msgLower.includes('3-piece') || msgLower.includes('three piece')) {
+        extractedData.pieces = 3;
+      } else if (msgLower.includes('2 piece') || msgLower.includes('2-piece') || msgLower.includes('two piece')) {
+        extractedData.pieces = 2;
+      } else if (msgLower.includes('1 piece') || msgLower.includes('one piece')) {
+        extractedData.pieces = 1;
+      }
+
+      // Get what's still needed from the system context
+      const contextMsg = messages.find(m => m.content?.includes('Still need:'))?.content || '';
+      const stillNeedMatch = contextMsg.match(/Still need: (.*)/);
+      const stillNeeded = stillNeedMatch ? stillNeedMatch[1].split(', ').filter(f => f && f !== 'Nothing - ready to confirm!') : [];
+
+      // Generate appropriate response message
+      let responseMessage = '';
+      if (Object.keys(extractedData).length > 0) {
+        responseMessage = `Got it! `;
+        if (extractedData.designer) responseMessage += `${extractedData.designer} `;
+        if (extractedData.item_type) responseMessage += `${extractedData.item_type}. `;
+      }
+
+      // Filter out what we just extracted
+      const remaining = stillNeeded.filter(f => !extractedData[f]);
+
+      if (remaining.length === 0 && Object.keys(extractedData).length > 0) {
+        responseMessage += `I have everything I need!`;
+      } else if (remaining.length > 0) {
+        const nextField = remaining[0];
+        if (nextField === 'designer') responseMessage += `What designer/brand is this?`;
+        else if (nextField === 'item_type') responseMessage += `What type of item is it?`;
+        else if (nextField === 'size') responseMessage += `What size is it?`;
+        else if (nextField === 'condition') responseMessage += `What condition is it in?`;
+        else if (nextField === 'asking_price_usd') responseMessage += `What price are you asking?`;
+        else if (nextField === 'pieces') responseMessage += `How many pieces (1, 2, or 3)?`;
+        else responseMessage += `What else can you tell me about it?`;
+      } else {
+        responseMessage = `Tell me about the item you want to list.`;
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                message: responseMessage,
+                extractedData: extractedData,
+                isComplete: remaining.length === 0 && Object.keys(extractedData).length > 0
+              })
+            }
+          }]
+        })
+      };
+    }
+
+    // Default: intent detection for menu/action states
     let intent = 'unknown';
     if (userMessage.includes('sell') || userMessage.includes('list')) intent = 'sell';
     else if (userMessage.includes('buy') || userMessage.includes('shop') || userMessage.includes('browse')) intent = 'buy';
     else if (userMessage.includes('listing') || userMessage.includes('my item')) intent = 'listings';
-    
+
     return {
       ok: true,
       status: 200,
