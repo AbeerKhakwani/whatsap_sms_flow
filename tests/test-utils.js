@@ -4,12 +4,13 @@
 /**
  * Create a mock request object simulating Twilio webhook
  */
-export function createMockRequest(phone, message) {
+export function createMockRequest(phone, message, extraParams = {}) {
   return {
     method: 'POST',
     body: {
       From: phone,
-      Body: message
+      Body: message,
+      ...extraParams
     }
   };
 }
@@ -58,8 +59,8 @@ export function extractMessageFromXml(xml) {
 /**
  * Send a simulated SMS and get the response
  */
-export async function sendSms(handler, phone, message) {
-  const req = createMockRequest(phone, message);
+export async function sendSms(handler, phone, message, extraParams = {}) {
+  const req = createMockRequest(phone, message, extraParams);
   const res = createMockResponse();
   
   await handler(req, res);

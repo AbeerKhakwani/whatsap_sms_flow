@@ -101,8 +101,10 @@ Still need: ${missingFields.join(', ') || 'Nothing - ready to confirm!'}`
       })
     });
 
-    if (!response.ok) {
-      throw new Error('OpenAI API error');
+     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenAI API error:', response.status, errorText);
+      throw new Error(`OpenAI API error: ${response.status}`);
     }
 
     const data = await response.json();

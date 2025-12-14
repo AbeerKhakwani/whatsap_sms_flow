@@ -90,8 +90,7 @@ export async function handleSellFlow(message, conversation, seller, mediaUrls = 
         const ai = await generateAIResponse({
             conversationHistory: history,
             currentData: currentData,
-            missingFields: missingFields,
-            photos: mediaUrls  // ← Add this
+            missingFields: missingFields
         });
 
         // 5. Merge new data with existing
