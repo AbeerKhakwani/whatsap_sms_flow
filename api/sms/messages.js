@@ -1,159 +1,189 @@
-
 // api/sms/messages.js
-// // All SMS message content - optimized for Pakistani women 30s-50s
+// All SMS message content - The Phir Story
 
 export const MESSAGES = {
     // ============ WELCOME & MENU ============
-    WELCOME_NEW_USER: `Hi! 👋 Welcome to The Phir Story.
+    WELCOME_NEW_USER: `Hey! 👋 Welcome to The Phir Story — Pakistani designer resale made easy.
 
-So happy you're here. Everything is simple — you can even send voice-notes later if typing is hard.
+Quick question: Have you sold with us before?
 
-Question 1 of 3:
-Have you used The Phir Story before?
+Reply YES or NO`,
 
-Reply: YES or NO
-(ہاں یا نہیں)`,
+    WELCOME_KNOWN_SELLER: `Hey, welcome back! 👋
 
-    WELCOME_KNOWN_SELLER: `Hi! 👋 Welcome back to The Phir Story.
+What are we doing today?
 
-What would you like to do today?
+Reply:
+SELL → List something
+BUY → Browse & shop
+LISTINGS → See your items`,
 
-1. SELL / LIST an item (photos or voice-note)
-2. BUY – Browse and shop
-3. MY LISTINGS – See your items`,
+    MENU: `What's next?
 
-    MENU: `What would you like to do today?
-
-1. SELL / LIST an item (photos or voice-note)
-2. BUY – Browse and shop
-3. MY LISTINGS – See your items`,
+Reply:
+SELL → List something
+BUY → Browse & shop
+LISTINGS → See your items`,
 
     // ============ GLOBAL COMMANDS ============
-    HELP: `I'm here to help. 💛
+    HELP: `Here to help! 💛
 
-Type:
-SELL – List an item
-BUY – Browse items
-LISTINGS – See your items
-MENU – Start again
-STOP – Unsubscribe
-اردو – Urdu (coming soon)`,
+Commands:
+SELL → List an item
+BUY → Browse items
+LISTINGS → Your items
+MENU → Main menu
+STOP → Unsubscribe
 
-    STOP: `You've been unsubscribed.
-Text START anytime — your account stays safe. 💛`,
+Questions? Reply or email hello@thephirstory.com`,
 
-    UNSUBSCRIBED_BLOCK: `You're unsubscribed right now.
-Text START when you're ready — we'll pick up where you left off.`,
+    STOP: `You're unsubscribed. 💛
 
-    ERROR: `Koi baat nahi! (No worries!) 💛
-Let's try that again — just text MENU to restart.`,
+Text START anytime to come back — your account stays safe.`,
+
+    UNSUBSCRIBED_BLOCK: `You're currently unsubscribed.
+
+Text START when you're ready!`,
+
+    ERROR: `Oops, something went wrong! 💛
+
+Text MENU to start fresh.`,
 
     // ============ ACCOUNT CHECK ============
-    ASK_EXISTING_EMAIL: `Step 2 of 3:
-What email did you use when signing up?`,
+    ASK_EXISTING_EMAIL: `What email did you sign up with?`,
 
-    ASK_NEW_EMAIL: `Step 2 of 3:
-What email would you like to use?
+    ASK_NEW_EMAIL: `What email should we use for your account?
 
-Example: yourname@gmail.com`,
+Example: you@gmail.com`,
 
-    ACCOUNT_CHECK_INVALID: `Please reply YES if you have an account, or NO to make a new one.
-(ہاں یا نہیں)`,
+    ACCOUNT_CHECK_INVALID: `Just need a quick YES or NO — have you used The Phir Story before?`,
 
     // ============ EMAIL VERIFICATION ============
-    ASK_EMAIL_VERIFY: `Let's verify your account (your email stays private 🔒).
+    ASK_EMAIL_VERIFY: `Quick verification! 🔒
 
-What email did you sign up with?`,
+What email is your account under?`,
 
-    VERIFIED: `All set! 👍 You're verified.`,
+    VERIFIED: `You're in! ✅`,
 
-    EMAIL_NO_MATCH: (attempt) => `Hmm, that email doesn't match our records.
-Please try again. (Attempt ${attempt}/3)
+    EMAIL_NO_MATCH: (attempt) => `Hmm, that email doesn't match what we have.
 
-Need help? Text HELP`,
+Try again? (Attempt ${attempt}/3)
 
-    EMAIL_TOO_MANY_ATTEMPTS: `Koi baat nahi — it happens. 💛
-Let's start fresh.
+Or text HELP if you're stuck.`,
 
-Text MENU to begin again.`,
+    EMAIL_TOO_MANY_ATTEMPTS: `No worries — let's start over. 💛
+
+Text MENU to try again.`,
 
     // ============ EXISTING EMAIL LOOKUP ============
-    EMAIL_FOUND_LINKED: (name) => `Welcome back${name ? `, ${name}` : ''}! 👋
-Your phone is now linked — only you can access your account. 🔒
+    EMAIL_FOUND_LINKED: (name) => `Welcome back${name ? ` ${name}` : ''}! 🎉
 
-What would you like to do?
+You're all set. What's next?
 
-1. SELL / LIST an item
-2. BUY
-3. MY LISTINGS`,
+Reply:
+SELL → List something
+BUY → Browse & shop
+LISTINGS → See your items`,
 
-    EMAIL_NOT_FOUND: (attempt) => `We couldn't find an account with that email.
-Please try again. (Attempt ${attempt}/3)
+    EMAIL_NOT_FOUND: (attempt) => `Can't find that email in our system.
 
-Or type NEW to create a new account.`,
+Try again? (Attempt ${attempt}/3)
 
-    EMAIL_NOT_FOUND_MAX: `Still no account found.
+Or reply NEW to create an account.`,
 
-Would you like to create a new one?
+    EMAIL_NOT_FOUND_MAX: `Still not finding that email.
+
+Want to create a new account?
+
 Reply YES or NO`,
 
     // ============ NEW ACCOUNT CREATION ============
-    ACCOUNT_CREATED: `All done! 🎉 Step 3 of 3 complete.
-Welcome to The Phir Story. 💛
+    ACCOUNT_CREATED: `You're all set! 🎉 Welcome to The Phir Story.
 
 What would you like to do?
 
-1. SELL / LIST an item
-2. BUY
-3. MY LISTINGS`,
+Reply:
+SELL → List something
+BUY → Browse & shop
+LISTINGS → See your items`,
 
-    EMAIL_EXISTS_LINKED: (name) => `Great news — this email already has an account!
+    EMAIL_EXISTS_LINKED: (name) => `Good news — found your account!${name ? ` Hey ${name}!` : ''} 🎉
 
-Your phone is now linked${name ? `, ${name}` : ''}. 💛
-Only you can access your account. 🔒
+Phone linked & ready to go.
 
-What would you like to do?
+Reply:
+SELL → List something
+BUY → Browse & shop
+LISTINGS → See your items`,
 
-1. SELL / LIST an item
-2. BUY
-3. MY LISTINGS`,
+    INVALID_EMAIL: `That doesn't look like an email.
 
-    INVALID_EMAIL: `That doesn't look like an email address.
-Example: yourname@gmail.com
+Example: you@gmail.com`,
 
-Please try again.`,
+    // ============ SELL FLOW ============
+    SELL_START: `Let's get your item listed! 📸
 
-    // ============ SELL FLOW (placeholder) ============
-    SELL_START: `To begin: send me photos of your item(s) 📸
-or the designer name, description etc. or all of them at the same time!
+Send me:
+→ Photos (at least 3)
+→ Designer name
+→ Any details you have
 
-type exit at any time to leave the sell flow.`,
+Or all of the above at once!
 
-    // ============ BUY FLOW (placeholder) ============
-    BUY_START: `Browse our collection at thephirstory.com 🛍️
+(Reply BACK anytime to save & exit)`,
 
-Looking for something specific? Tell me the designer or style!`,
+    SELL_CONFIRM: `Does everything look right?
 
-    // ============ LISTINGS FLOW (placeholder) ============
-    LISTINGS_START: `Checking your listings...`,
+Reply:
+YES → Submit for review
+NO → Make changes`,
 
-    LISTINGS_EMPTY: `You don't have any listings yet.
+    SELL_COMPLETE: `Done! 🎉 Your listing is submitted.
 
-Text SELL to list your first item! 💛`,
-SELL_CONFIRM: `Does this look right? Reply YES to submit or NO to make changes.`,
-SELL_COMPLETE: `Your listing is ready for review. 🎉
+We'll review & text you once it's live (usually 24-72 hrs).
 
-We'll text you once it's live (usually within 72 hours).
+Reply:
+SELL → List another
+MENU → Main menu`,
 
-Text MENU to list another item!`,
+    SELL_EDIT: `No problem! What do you want to change?
 
-SELL_EDIT: `No problem! What would you like to change?`,
-SELL_DRAFT_FOUND: (designer, itemType) => 
-  `Welcome back! You have a draft: "${designer || ''} ${itemType || 'item'}"\n\nReply CONTINUE to finish or NEW to start fresh.`,
+Just tell me and I'll update it.`,
 
-SELL_DRAFT_SAVED: `Got it! Your draft is saved.\nSay "sell" whenever you're ready to finish. 👋`,
+    SELL_DRAFT_FOUND: (designer, itemType) => {
+        const item = [designer, itemType].filter(Boolean).join(' ') || 'your item';
+        return `Welcome back! 👋
 
-SELL_DRAFT_DELETED: `Draft deleted. Let's start fresh!\n\nSend me photos of your item, or tell me what you're selling.`
+You have a draft in progress: "${item}"
+
+Reply:
+CONTINUE → Pick up where you left off
+NEW → Start fresh (deletes draft)`;
+    },
+
+    SELL_DRAFT_SAVED: `Draft saved! 💛
+
+Your progress is safe. Just text SELL when you're ready to finish.`,
+
+    SELL_DRAFT_DELETED: `Draft deleted — fresh start! 📸
+
+Send me photos of your item or tell me what you're listing.
+
+(Reply BACK anytime to save & exit)`,
+
+    // ============ BUY FLOW ============
+    BUY_START: `Browse the collection at thephirstory.com 🛍️
+
+Looking for something specific? Tell me the designer or style and I'll help you find it!`,
+
+    // ============ LISTINGS FLOW ============
+    LISTINGS_START: `Pulling up your listings... ⏳`,
+
+    LISTINGS_EMPTY: `No listings yet!
+
+Ready to sell something?
+
+Reply SELL to get started 💛`,
 };
 
 /**

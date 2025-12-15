@@ -45,7 +45,7 @@ describe('Webhook Media Integration', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.message).toContain('verify your account'); // Should ask for email since not authorized
+      expect(res.message).toContain('email'); // Should ask for email since not authorized
 
       // Check that conversation was created with awaiting_email state
       const conv = global.mockDb.findConversation('+15551234567');
@@ -68,7 +68,7 @@ describe('Webhook Media Integration', () => {
 
       // Should show error message
       expect(res.statusCode).toBe(200);
-      expect(res.message).toContain('Koi baat nahi');
+      expect(res.message).toContain('wrong');
     });
 
     it('processes multiple photos', async () => {
@@ -88,7 +88,7 @@ describe('Webhook Media Integration', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.message).toContain('verify your account'); // Should ask for email since not authorized
+      expect(res.message).toContain('email'); // Should ask for email since not authorized
     });
 
     it('skips media processing for non-sellers', async () => {

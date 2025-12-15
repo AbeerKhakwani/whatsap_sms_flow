@@ -73,12 +73,26 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
     return msg('WELCOME_NEW_USER');
   }
 
-  // 2. If media URLs are present, treat as sell intent
-if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
+  // 2. If media URLs are present AND not already in sell flow, treat as sell intent
+  if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
     if (!conv.is_authorized) {
       await setState(conv.id, 'awaiting_email', { pending_intent: 'sell', media_urls: supabaseUrls });
       return msg('ASK_EMAIL_VERIFY');
     }
+
+    // Check for existing draft first
+    const draft = await getIncompleteListing(seller.id);
+    if (draft) {
+      const designer = draft.listing_data?.designer || '';
+      const itemType = draft.listing_data?.item_type || '';
+      // Store the new photos in context so we don't lose them
+      await setState(conv.id, 'sell_draft_check', {
+        listing_id: draft.id,
+        pending_media_urls: supabaseUrls
+      });
+      return msg('SELL_DRAFT_FOUND', designer, itemType);
+    }
+
     await setState(conv.id, 'sell_started', { media_urls: supabaseUrls });
     return msg('SELL_START');
   }
@@ -96,14 +110,20 @@ if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
   if (state === 'sell_draft_check') {
     const lower = message.toLowerCase().trim();
     const listingId = conv.context?.listing_id;
+    const pendingPhotos = conv.context?.pending_media_urls || [];
 
     if (lower === 'continue' || lower === 'c' || lower === '1') {
       // Resume the draft
       const listing = await getIncompleteListing(seller.id);
       if (listing) {
+        // Merge any pending photos from the new message
+        const existingPhotos = listing.listing_data?.photos || [];
+        const allPhotos = [...existingPhotos, ...pendingPhotos];
+
         await setState(conv.id, 'sell_collecting', {
           listing_id: listing.id,
-          history: listing.conversation || []
+          history: listing.conversation || [],
+          media_urls: allPhotos
         });
         const designer = listing.listing_data?.designer || '';
         return `Let's continue! ${designer ? `You were listing a ${designer}.` : ''} What else can you tell me?`;
@@ -111,9 +131,9 @@ if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
     }
 
     if (lower === 'new' || lower === 'n' || lower === '2') {
-      // Delete old draft, start fresh
+      // Delete old draft, start fresh with pending photos
       if (listingId) await deleteListing(listingId);
-      await setState(conv.id, 'sell_started', {});
+      await setState(conv.id, 'sell_started', { media_urls: pendingPhotos });
       return msg('SELL_DRAFT_DELETED');
     }
 
@@ -125,8 +145,16 @@ if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
   if (state.startsWith('sell_')) {
     const lower = message.toLowerCase().trim();
 
-    // Handle "exit" - save draft and leave
-    if (lower === 'exit') {
+    // Handle exit commands - save draft and leave
+    const exitCommands = [
+      'exit', 'cancel', 'quit', 'stop', 'menu',     // formal
+      'nvm', 'nevermind', 'never mind',              // changed mind
+      'back', 'done', 'later',                       // stepping away
+      'wait', 'hold on', 'one sec', 'brb',           // pausing
+      'not now', 'not rn', 'gtg', 'busy'             // life happened
+    ];
+    
+    if (exitCommands.includes(lower)) {
       await setState(conv.id, 'authorized', {});
       return msg('SELL_DRAFT_SAVED');
     }
