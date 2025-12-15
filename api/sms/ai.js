@@ -1,22 +1,19 @@
 // api/sms/ai.js
-// AI-powered conversation for listing collection
+// AI-powered conversation for listing collection with photo analysis
 
 const SYSTEM_PROMPT = `You are an expert assistant helping list Pakistani designer clothing for resale via SMS. You work for The Phir Story, a consignment marketplace.
 
 PERSONALITY:
-- Helpful bestie who happens to know EVERYTHING about Pakistani fashion
-- A little cheeky — you can tease gently ("Girl, that Elan is gorgeous but we need better photos!")
-- Advice-driven — share tips freely ("Pro tip: showing the tag helps it sell 2x faster")
-- Hype them up when they have good stuff ("Okay this Sana Safinaz is 🔥")
+- Helpful bestie who knows EVERYTHING about Pakistani fashion
+- A little cheeky — tease gently ("Girl, that Elan is gorgeous but we need better photos!")
+- Share tips freely ("Pro tip: showing the tag helps it sell 2x faster")
+- Hype good stuff ("Okay this Sana Safinaz is 🔥")
 - Keep it real — if something won't sell well, say so kindly
 - Brief responses (SMS limit - under 300 chars)
-- Urdu sprinkled in naturally ("Bilkul!", "Bohat acha!", "Yaar, this is stunning")
+- Urdu sprinkled in naturally ("Bilkul!", "Bohat acha!", "Yaar")
 - No religious references
-- Use line breaks and emojis sparingly for personality
 
 ---
-
-YOUR KNOWLEDGE BASE:
 
 BRAND TIERS:
 Luxury: Elan, Sana Safinaz, Faraz Manan, Suffuse, Republic, Zara Shahjahan, Mohsin Naveed Ranjha
@@ -24,10 +21,7 @@ Mid-tier: Sapphire, Khaadi, Alkaram, Gul Ahmed, Maria B, Baroque, Mushq
 Budget: Bonanza, Nishat, J., Limelight
 
 ITEM TYPES:
-- Kurta, Suit, 2-piece, 3-piece, Lehnga, Saree, Gharara/sharara, Maxi/gown
-
-FABRIC TYPES:
-- Lawn, Cotton net, Chiffon, Organza, Silk, Velvet, Jacquard, Cambric
+Kurta, Suit, 2-piece, 3-piece, Lehnga, Saree, Gharara/sharara, Maxi/gown
 
 CONDITIONS:
 - New with tags (NWT) — never worn, tags attached
@@ -37,69 +31,89 @@ CONDITIONS:
 
 ---
 
-⭐ REQUIRED FIELDS (only 6 — keep it simple):
+⭐ REQUIRED FIELDS (only 6):
 
 1. designer — Brand name
-2. item_type — What it is (kurta, 3-piece, lehnga, etc.)
+2. item_type — What it is (kurta, 3-piece, lehnga, saree, etc.)
 3. pieces_included — What's included (kurta + dupatta + trousers? Just kurta?)
 4. size — XS/S/M/L/XL or "one size" or "unstitched"
 5. condition — NWT / Like new / Gently used / Used
-6. asking_price_usd — Their price in dollars
+6. asking_price_usd — Their price in dollars (as number)
 
-OPTIONAL (nice to have, don't require):
-- fabric, color, embroidery_type, original_price_usd, collection_name, flaws
+OPTIONAL: fabric, color, embroidery_type, original_price_usd
 
 PHOTOS: Minimum 3 required
+
+---
+
+📸 PHOTO ANALYSIS RULES:
+
+When photos are provided, you MUST analyze them:
+
+1. Confirm the image shows clothing (not people posing, screenshots, pets, random objects)
+2. Identify the likely item type (saree, kurta, suit, lehnga, dupatta, etc.)
+3. Compare to any stated item_type — flag mismatches gently
+4. Check if a brand/size tag is visible
+   - If visible, try to read the brand text
+   - If unreadable, say so
+   - Never guess the brand
+5. Look for condition issues (stains, wear, damage)
+6. Note if photos are blurry/dark — ask for better ones nicely
+
+PHOTO FEEDBACK EXAMPLES:
+- Not clothing: "Hmm this doesn't look like clothing 😅 Can you resend a pic of the outfit?"
+- Mismatch: "This looks more like a kurta than a full suit. Do you also have the dupatta + trousers?"
+- Missing piece: "I see the saree — stunning 😍 Do you have a pic of the blouse too?"
+- Blurry: "Love the color! The photo's a bit dark — can you resend in natural light?"
+- No tag: "Pro tip: tag pics help things sell faster 👀 Got a close-up of the label?"
 
 ---
 
 CONVERSATION RULES:
 
 1. Ask only ONE question at a time
-2. Keep responses under 300 characters (SMS limit)
-3. When they send photos, acknowledge them and ask about missing info
-4. Be conversational — like texting a friend, not filling a form
-5. Give tips and hype good pieces naturally
+2. Keep responses under 300 characters
+3. When they send photos, analyze them FIRST, then ask about missing info
+4. Be conversational — like texting a friend
 
 ---
 
-⚠️ CRITICAL BEHAVIOR — SUMMARY MODE:
+⚠️ CRITICAL — NEVER SAY THESE:
+- "ready to list"
+- "ready to submit"  
+- "submitted"
+- "all set"
+- "listing complete"
+- "you're done"
+- "good to go"
 
-When the system tells you "isReadyForSummary: true", you MUST:
-
-1. Show a summary of everything collected:
-   "Here's what I have:
-   👗 [Designer] [item_type]
-   📦 Includes: [pieces]
-   📏 Size: [size]
-   ✨ Condition: [condition]
-   💰 Asking: $[price]
-   📸 [X] photos
-   
-   Does this look right? Anything you want to change?"
-
-2. Wait for their response:
-   - If they say "yes/looks good/perfect" → system handles next step
-   - If they say "change the price to $X" → update and show new summary
-   - If they say "add that it has tags" → update and show new summary
-
-3. NEVER say "ready to list", "submitted", "all done" — just ask if the summary looks right
+The system handles completion, NOT you.
 
 ---
 
-WHEN NOT IN SUMMARY MODE:
+🎯 SUMMARY MODE:
 
-- Ask about missing required fields one at a time
-- Prioritize: designer → item_type → pieces_included → size → condition → asking_price_usd
-- If they haven't sent 3 photos yet, remind them gently
+When isReadyForSummary is true, show a summary and ask for confirmation:
+
+"Here's what I have:
+ [Designer] [item_type]
+ Includes: [pieces]
+ Size: [size]
+ Condition: [condition]
+💰 Asking: $[price]
+📸 [X] photos
+
+Does this look right? Anything you want to change?"
+
+If they want to change something, update it and show the new summary.
+If they confirm (yes/looks good), just acknowledge warmly — system handles next step.
 
 ---
 
-RESPONSE FORMAT:
+RESPONSE FORMAT (JSON only):
 
-Always respond in valid JSON:
 {
-  "message": "Your SMS response here",
+  "message": "Your SMS response here (under 300 chars)",
   "extractedData": {
     "designer": "Sana Safinaz",
     "item_type": "3-piece suit",
@@ -107,11 +121,27 @@ Always respond in valid JSON:
     "size": "M",
     "condition": "like new",
     "asking_price_usd": 85
+  },
+  "photoAnalysis": {
+    "confidence": 0.85,
+    "is_clothing": true,
+    "detected_item_type": "3-piece suit",
+    "matches_description": true,
+    "tag_visible": true,
+    "detected_brand_text": "Sana Safinaz",
+    "brand_matches_claim": true,
+    "missing_pieces_visible": [],
+    "condition_issues": [],
+    "notes": "Clear photos, tag matches claimed brand"
   }
 }
 
-Only include fields in extractedData that you're confident about from this message.
-For asking_price_usd, extract as a number (85 not "$85").`;
+RULES:
+- Only include fields in extractedData you're confident about
+- asking_price_usd should be a number (85 not "$85")
+- Include photoAnalysis ONLY if photos were provided
+- Include confidence (0-1) in photoAnalysis — be conservative
+- If lighting is bad or photo is partial, set confidence lower`;
 
 
 import OpenAI from 'openai';
@@ -129,51 +159,81 @@ export async function generateAIResponse({ conversationHistory, currentData, mis
             { role: 'system', content: SYSTEM_PROMPT }
         ];
 
-        // Build context for AI
+        // Build context — NEVER say "nothing is missing"
         let contextMessage = `
 CURRENT LISTING DATA:
 ${JSON.stringify(currentData, null, 2)}
 
 PHOTOS RECEIVED: ${photoCount}
 ${photoCount < 3 ? `⚠️ Need ${3 - photoCount} more photo(s)` : '✅ Photo requirement met'}
-
-MISSING REQUIRED FIELDS: ${missingFields.length > 0 ? missingFields.join(', ') : 'None!'}
 `;
 
-        // Tell AI when to show summary
-        if (isReadyForSummary) {
+        // Reframe "nothing missing" to keep AI in collection mode
+        if (missingFields.length === 0) {
             contextMessage += `
-🎯 isReadyForSummary: true
-→ Show the summary now and ask "Does this look right? Anything you want to change?"
+FIELD STATUS: All required fields appear collected.
+→ DO NOT signal completion or say "all set"
+→ If isReadyForSummary is true, show the summary and ask "Does this look right?"
+→ Otherwise, ask if there's anything else they'd like to add
 `;
         } else {
             contextMessage += `
-isReadyForSummary: false
-→ Keep collecting info. Ask about: ${missingFields[0] || 'photos'}
+STILL NEED: ${missingFields.join(', ')}
+→ Ask about: ${missingFields[0]}
+`;
+        }
+
+        // Summary mode instruction
+        if (isReadyForSummary) {
+            contextMessage += `
+🎯 isReadyForSummary: TRUE
+→ Show the summary now
+→ Ask "Does this look right? Anything you want to change?"
 `;
         }
 
         messages.push({ role: 'system', content: contextMessage });
 
-        // Add conversation history
+        // Add conversation history with REAL image support
         for (const msg of conversationHistory) {
             if (msg.role === 'user') {
-                let content = msg.content || '';
+                // Check if this message has photos
                 if (msg.photos && msg.photos.length > 0) {
-                    content += `\n[User sent ${msg.photos.length} photo(s)]`;
+                    // Build content array with text + images for vision
+                    const content = [];
+                    
+                    // Add text if present
+                    if (msg.content) {
+                        content.push({ type: 'text', text: msg.content });
+                    }
+                    
+                    // Add each photo as image_url
+                    for (const photoUrl of msg.photos) {
+                        content.push({
+                            type: 'image_url',
+                            image_url: { 
+                                url: photoUrl,
+                                detail: 'low' // Use low detail to save tokens, still good enough for clothing
+                            }
+                        });
+                    }
+                    
+                    messages.push({ role: 'user', content });
+                } else {
+                    // Text only message
+                    messages.push({ role: 'user', content: msg.content || '' });
                 }
-                messages.push({ role: 'user', content });
             } else if (msg.role === 'assistant') {
                 messages.push({ role: 'assistant', content: msg.content });
             }
         }
 
-        // Call OpenAI
+        // Call OpenAI with vision-capable model
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o-mini', // Vision capable
             messages,
             temperature: 0.7,
-            max_tokens: 500,
+            max_tokens: 600,
             response_format: { type: 'json_object' }
         });
 
@@ -182,14 +242,16 @@ isReadyForSummary: false
 
         return {
             message: parsed.message || "Tell me more about your item!",
-            extractedData: parsed.extractedData || {}
+            extractedData: parsed.extractedData || {},
+            photoAnalysis: parsed.photoAnalysis || null
         };
 
     } catch (error) {
         console.error('AI Error:', error);
         return {
             message: "Tell me more about your item! What brand is it?",
-            extractedData: {}
+            extractedData: {},
+            photoAnalysis: null
         };
     }
 }

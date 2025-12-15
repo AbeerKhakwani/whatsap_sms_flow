@@ -16,6 +16,42 @@ const REQUIRED_FIELDS = ['designer', 'item_type', 'size', 'condition', 'asking_p
 const MIN_PHOTOS = 3;
 
 /**
+ * Banned phrases the AI should never say (but might slip through)
+ * We strip these before saving to history
+ */
+const BANNED_PHRASES = [
+    'ready to list',
+    'ready to submit',
+    'submitted',
+    'all set',
+    'listing complete',
+    "you're done",
+    "you are done",
+    'good to go',
+    'listing is complete',
+    'all done'
+];
+
+/**
+ * Sanitize AI message - remove banned phrases
+ */
+function sanitizeAIMessage(text) {
+    if (!text) return text;
+    
+    let clean = text;
+    BANNED_PHRASES.forEach(phrase => {
+        const regex = new RegExp(phrase, 'gi');
+        clean = clean.replace(regex, '');
+    });
+    
+    // Clean up any double spaces or awkward punctuation left behind
+    clean = clean.replace(/\s+/g, ' ').trim();
+    clean = clean.replace(/\s+([.,!?])/g, '$1');
+    
+    return clean;
+}
+
+/**
  * Handle all sell flow states
  */
 export async function handleSellFlow(message, conversation, seller, mediaUrls = []) {
@@ -36,33 +72,55 @@ export async function handleSellFlow(message, conversation, seller, mediaUrls = 
             isReadyForSummary: false
         });
 
+        // Handle photo analysis issues first
+        const photoIssue = checkPhotoAnalysis(ai.photoAnalysis, {});
+        if (photoIssue) {
+            await setState(conversation.id, 'sell_started', {
+                history: [
+                    { role: 'user', content: message, photos: mediaUrls },
+                    // Don't store photoIssue in history
+                ],
+                media_urls: mediaUrls
+            });
+            return photoIssue;
+        }
+        
+        // Build photo_flags for future trust scoring
+        const photoFlags = buildPhotoFlags(ai.photoAnalysis);
+
         if (Object.keys(ai.extractedData).length > 0) {
             const listingData = {
                 ...ai.extractedData,
-                photos: mediaUrls
+                photos: mediaUrls,
+                photo_flags: photoFlags
             };
             
             const listing = await createListing(seller.id, listingData);
+            const sanitizedMessage = sanitizeAIMessage(ai.message);
 
             await setState(conversation.id, 'sell_collecting', {
                 listing_id: listing.id,
                 history: [
                     { role: 'user', content: message, photos: mediaUrls },
-                    { role: 'assistant', content: ai.message }
+                    { role: 'assistant', content: sanitizedMessage }
                 ],
                 media_urls: mediaUrls
             });
+
+            return sanitizedMessage;
         } else {
+            const sanitizedMessage = sanitizeAIMessage(ai.message);
+            
             await setState(conversation.id, 'sell_started', {
                 history: [
                     { role: 'user', content: message, photos: mediaUrls },
-                    { role: 'assistant', content: ai.message }
+                    { role: 'assistant', content: sanitizedMessage }
                 ],
                 media_urls: mediaUrls
             });
-        }
 
-        return ai.message;
+            return sanitizedMessage;
+        }
     }
 
     // SELL_COLLECTING - ongoing conversation
@@ -115,33 +173,62 @@ export async function handleSellFlow(message, conversation, seller, mediaUrls = 
             isReadyForSummary: isReadyForSummary
         });
 
-        // Merge new data
+        // Handle photo analysis issues
+        const photoIssue = checkPhotoAnalysis(ai.photoAnalysis, currentData);
+        if (photoIssue && mediaUrls.length > 0) {
+            // Only block on photo issues if they just sent new photos
+            // NOTE: Don't store photoIssue in history — it's a system correction, not conversation
+            // This prevents AI from referencing its own corrections weirdly later
+            
+            await updateListingData(listingId, { ...currentData, photos: allPhotos }, history);
+            await setState(conversation.id, 'sell_collecting', {
+                listing_id: listingId,
+                history: history,  // history unchanged — photoIssue not added
+                media_urls: allPhotos,
+                showed_summary: false
+            });
+            
+            return photoIssue;
+        }
+        
+        // Save photo_flags for future trust scoring / QA
+        const photoFlags = buildPhotoFlags(ai.photoAnalysis);
+
+        // Merge new data (include photo_flags for future trust scoring)
         const updatedData = { 
             ...currentData, 
             ...ai.extractedData,
-            photos: allPhotos
+            photos: allPhotos,
+            photo_flags: {
+                ...currentData.photo_flags,
+                ...photoFlags
+            }
         };
 
-        // Add AI response to history
-        history.push({ role: 'assistant', content: ai.message });
+        // Sanitize and add AI response to history
+        const sanitizedMessage = sanitizeAIMessage(ai.message);
+        history.push({ role: 'assistant', content: sanitizedMessage });
 
         // Save everything
         await updateListingData(listingId, updatedData, history);
 
-        // Check completion AFTER AI response (in case AI extracted new data)
+        // Check completion AFTER AI response
         const stillMissing = REQUIRED_FIELDS.filter(f => !updatedData[f]);
         const finalPhotoCount = allPhotos.length;
         const isNowComplete = stillMissing.length === 0 && finalPhotoCount >= MIN_PHOTOS;
 
+        // If user just edited something, reset showed_summary so they see updated summary
+        const userMadeEdit = alreadyShowedSummary && !isConfirmation(message);
+        
         // Update state - track if we showed summary
         await setState(conversation.id, 'sell_collecting', {
             listing_id: listingId,
             history: history,
             media_urls: allPhotos,
-            showed_summary: isNowComplete
+            showed_summary: userMadeEdit ? false : isNowComplete
         });
 
-        return ai.message;
+        return sanitizedMessage;
     }
 
     // SELL_CONFIRMING - final YES/NO to submit
@@ -175,6 +262,65 @@ export async function handleSellFlow(message, conversation, seller, mediaUrls = 
 }
 
 /**
+ * Check photo analysis for issues that need user correction
+ * Returns a message string if there's a BLOCKING issue, null if OK
+ * Note: Brand mismatch is handled conversationally by AI, not blocked here
+ */
+function checkPhotoAnalysis(photoAnalysis, currentData) {
+    if (!photoAnalysis) return null;
+    
+    const pa = photoAnalysis;
+    
+    // Confidence gate — don't block on uncertain analysis
+    if (pa.confidence !== undefined && pa.confidence < 0.6) {
+        return null;
+    }
+    
+    // Not clothing at all — this IS a blocker
+    if (pa.is_clothing === false) {
+        return "Hmm I might be off, but this pic doesn't look like clothing 😅 Can you resend a photo of the outfit itself? Front view works best 📸";
+    }
+    
+    // Item type mismatch — soft blocker, ask for clarification
+    if (pa.matches_description === false && pa.detected_item_type && currentData.item_type) {
+        return `Yaar this is really pretty 😍 Just checking — from the pic it looks like a ${pa.detected_item_type}. Am I missing a piece here?`;
+    }
+    
+    // Brand mismatch — NOT a blocker, just let AI ask conversationally
+    // Vintage/altered/re-tagged pieces exist, don't halt progress
+    // The AI will handle this gently in its response
+    
+    // Claims NWT but no tag visible — soft prompt, not a hard block
+    if (pa.tag_visible === false && currentData.condition?.toLowerCase().includes('new with tags')) {
+        return "Quick q — since this is NWT, could you send a clear pic of the tag? Helps buyers trust it 💯";
+    }
+    
+    return null;
+}
+
+/**
+ * Build photo_flags object for future trust scoring / QA
+ * This persists photo analysis insights to listing_data
+ */
+function buildPhotoFlags(photoAnalysis) {
+    if (!photoAnalysis) return {};
+    
+    const pa = photoAnalysis;
+    
+    return {
+        tag_seen: pa.tag_visible || false,
+        brand_verified: pa.tag_visible && pa.brand_matches_claim === true,
+        detected_brand: pa.detected_brand_text || null,
+        item_type_confidence: pa.confidence || null,
+        detected_item_type: pa.detected_item_type || null,
+        matches_description: pa.matches_description !== false,
+        condition_issues: pa.condition_issues || [],
+        needs_better_photos: pa.confidence !== undefined && pa.confidence < 0.6,
+        last_analyzed: new Date().toISOString()
+    };
+}
+
+/**
  * Check if user message is confirming the summary
  */
 function isConfirmation(message) {
@@ -187,7 +333,7 @@ function isConfirmation(message) {
         'all good', 'all set', 'good to go',
         'submit', 'done', 'finish', 'list it',
         'ok', 'okay', 'k', 'sure', 'confirmed', 'confirm',
-        '👍', '✅', 'lgtm'
+        '👍', '✅', 'lgtm', 'haan', 'bilkul', 'theek hai'
     ];
     
     return confirmPhrases.some(phrase => lower === phrase || lower.startsWith(phrase + ' ') || lower.endsWith(' ' + phrase));
