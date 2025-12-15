@@ -104,4 +104,36 @@ export async function authorize(id, sellerId) {
   });
 }
 
+
+/**
+ * Get the most recent incomplete listing for a seller
+ * @param {string} sellerId - The seller's ID
+ * @returns {object|null} - The incomplete listing or null
+ */
+export async function getIncompleteListing(sellerId) {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('seller_id', sellerId)
+    .eq('status', 'incomplete')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+  return data;
+}
+
+/**
+ * Delete a listing
+ * @param {string} listingId - The listing ID to delete
+ */
+export async function deleteListing(listingId) {
+  const { error } = await supabase
+    .from('listings')
+    .delete()
+    .eq('id', listingId);
+
+  if (error) throw error;
+}
 export { supabase };

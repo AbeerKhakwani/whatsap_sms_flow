@@ -124,10 +124,10 @@ Example: yourname@gmail.com
 Please try again.`,
 
     // ============ SELL FLOW (placeholder) ============
-    SELL_START: `Just send anything to begin:
-a photo, designer name, description — whatever you have right now.
+    SELL_START: `To begin: send me photos of your item(s) 📸
+or the designer name, description etc. or all of them at the same time!
 
-I’ll collect the details and guide you step by step 💫`,
+type exit at any time to leave the sell flow.`,
 
     // ============ BUY FLOW (placeholder) ============
     BUY_START: `Browse our collection at thephirstory.com 🛍️
@@ -148,6 +148,12 @@ We'll text you once it's live (usually within 72 hours).
 Text MENU to list another item!`,
 
 SELL_EDIT: `No problem! What would you like to change?`,
+SELL_DRAFT_FOUND: (designer, itemType) => 
+  `Welcome back! You have a draft: "${designer || ''} ${itemType || 'item'}"\n\nReply CONTINUE to finish or NEW to start fresh.`,
+
+SELL_DRAFT_SAVED: `Got it! Your draft is saved.\nSay "sell" whenever you're ready to finish. 👋`,
+
+SELL_DRAFT_DELETED: `Draft deleted. Let's start fresh!\n\nSend me photos of your item, or tell me what you're selling.`
 };
 
 /**

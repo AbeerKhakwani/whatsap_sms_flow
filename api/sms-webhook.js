@@ -4,7 +4,7 @@
 
 import { msg } from './sms/messages.js';
 import { normalizePhone, sendResponse, getGlobalCommand, logState } from './sms/helpers.js';
-import { findSellerByPhone, findConversation, createConversation, updateConversation, setState } from './sms/db.js';
+import { findSellerByPhone, findConversation, createConversation, updateConversation, setState, getIncompleteListing, deleteListing } from './sms/db.js';
 import { detectIntent } from './sms/intent.js';
 import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from './sms/flows/auth.js';
 import { handleSellFlow } from './sms/flows/sell.js';
@@ -86,19 +86,58 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
   // 3. Blocked if unsubscribed
   if (state === 'unsubscribed') return msg('UNSUBSCRIBED_BLOCK');
 
-  // 3. Route by state
+  // 4. Route by state
   if (state === 'awaiting_account_check') return handleAwaitingAccountCheck(message, conv, phone);
   if (state === 'awaiting_existing_email') return handleAwaitingExistingEmail(message, conv, phone);
   if (state === 'awaiting_new_email') return handleAwaitingNewEmail(message, conv, phone);
   if (state === 'awaiting_email') return handleAwaitingEmail(message, conv, seller);
+
+  // 5. Handle draft check response (CONTINUE or NEW)
+  if (state === 'sell_draft_check') {
+    const lower = message.toLowerCase().trim();
+    const listingId = conv.context?.listing_id;
+
+    if (lower === 'continue' || lower === 'c' || lower === '1') {
+      // Resume the draft
+      const listing = await getIncompleteListing(seller.id);
+      if (listing) {
+        await setState(conv.id, 'sell_collecting', {
+          listing_id: listing.id,
+          history: listing.conversation || []
+        });
+        const designer = listing.listing_data?.designer || '';
+        return `Let's continue! ${designer ? `You were listing a ${designer}.` : ''} What else can you tell me?`;
+      }
+    }
+
+    if (lower === 'new' || lower === 'n' || lower === '2') {
+      // Delete old draft, start fresh
+      if (listingId) await deleteListing(listingId);
+      await setState(conv.id, 'sell_started', {});
+      return msg('SELL_DRAFT_DELETED');
+    }
+
+    // Unclear response - ask again
+    return msg('SELL_DRAFT_FOUND', '', '');
+  }
+
+  // 6. Handle sell flow states
   if (state.startsWith('sell_')) {
+    const lower = message.toLowerCase().trim();
+
+    // Handle "exit" - save draft and leave
+    if (lower === 'exit') {
+      await setState(conv.id, 'authorized', {});
+      return msg('SELL_DRAFT_SAVED');
+    }
+
     // Merge stored media URLs with any new ones
     const storedUrls = conv.context?.media_urls || [];
     const allUrls = [...storedUrls, ...supabaseUrls];
     return handleSellFlow(message, conv, seller, allUrls);
   }
 
-  // 4. New user
+  // 7. New user
   if (state === 'new') {
     if (seller) {
       await updateConversation(conv.id, { state: 'awaiting_action', seller_id: seller.id });
@@ -108,7 +147,7 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
     return msg('WELCOME_NEW_USER');
   }
 
-  // 5. Ready for action
+  // 8. Ready for action - detect intent
   if (state === 'awaiting_action' || state === 'authorized') {
     const intent = await detectIntent(message);
     
@@ -117,6 +156,16 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
         await setState(conv.id, 'awaiting_email', { pending_intent: 'sell' });
         return msg('ASK_EMAIL_VERIFY');
       }
+      
+      // Check for existing draft
+      const draft = await getIncompleteListing(seller.id);
+      if (draft) {
+        const designer = draft.listing_data?.designer || '';
+        const itemType = draft.listing_data?.item_type || '';
+        await setState(conv.id, 'sell_draft_check', { listing_id: draft.id });
+        return msg('SELL_DRAFT_FOUND', designer, itemType);
+      }
+      
       await setState(conv.id, 'sell_started', {});
       return msg('SELL_START');
     }

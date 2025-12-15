@@ -52,12 +52,39 @@ describe('Media Processing', () => {
     });
   });
 
+  describe('getExtensionFromContentType', () => {
+    it('returns correct extensions for common MIME types', async () => {
+      const { getExtensionFromContentType } = await import('../api/sms/media.js');
+
+      expect(getExtensionFromContentType('image/jpeg')).toBe('jpg');
+      expect(getExtensionFromContentType('image/png')).toBe('png');
+      expect(getExtensionFromContentType('image/gif')).toBe('gif');
+      expect(getExtensionFromContentType('image/webp')).toBe('webp');
+      expect(getExtensionFromContentType('video/mp4')).toBe('mp4');
+      expect(getExtensionFromContentType('video/quicktime')).toBe('mov');
+      expect(getExtensionFromContentType('audio/mpeg')).toBe('mp3');
+      expect(getExtensionFromContentType('audio/ogg')).toBe('ogg');
+      expect(getExtensionFromContentType('audio/wav')).toBe('wav');
+    });
+
+    it('returns jpg as default for unknown MIME types', async () => {
+      const { getExtensionFromContentType } = await import('../api/sms/media.js');
+
+      expect(getExtensionFromContentType('application/octet-stream')).toBe('jpg');
+      expect(getExtensionFromContentType('unknown/type')).toBe('jpg');
+      expect(getExtensionFromContentType('')).toBe('jpg');
+    });
+  });
+
   describe('downloadTwilioMedia', () => {
     it('downloads media from Twilio URL with correct auth headers', async () => {
       const mockBuffer = Buffer.from('fake image data');
       const mockResponse = {
         ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer)
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          get: vi.fn().mockReturnValue('image/jpeg')
+        }
       };
 
       global.fetch.mockResolvedValue(mockResponse);
@@ -71,7 +98,8 @@ describe('Media Processing', () => {
           'Authorization': expect.stringContaining('Basic ')
         }
       });
-      expect(result).toEqual(mockBuffer);
+      expect(result.buffer).toEqual(mockBuffer);
+      expect(result.contentType).toBe('image/jpeg');
     });
 
     it('throws error on failed download', async () => {
@@ -127,10 +155,13 @@ describe('Media Processing', () => {
     it('processes multiple media URLs successfully', async () => {
       const mockBuffer = Buffer.from('fake image data');
 
-      // Mock Twilio download
+      // Mock Twilio download with headers
       global.fetch.mockResolvedValue({
         ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer)
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          get: vi.fn().mockReturnValue('image/jpeg')
+        }
       });
 
       const { processMediaUrls } = await import('../api/sms/media.js');
@@ -162,7 +193,10 @@ describe('Media Processing', () => {
       // Second call succeeds
       global.fetch.mockResolvedValueOnce({
         ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(Buffer.from('data'))
+        arrayBuffer: vi.fn().mockResolvedValue(Buffer.from('data')),
+        headers: {
+          get: vi.fn().mockReturnValue('image/png')
+        }
       });
 
       const { processMediaUrls } = await import('../api/sms/media.js');
@@ -181,7 +215,10 @@ describe('Media Processing', () => {
 
       global.fetch.mockResolvedValue({
         ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer)
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          get: vi.fn().mockReturnValue('image/jpeg')
+        }
       });
 
       let capturedFilePath;
@@ -211,7 +248,10 @@ describe('Media Processing', () => {
 
       global.fetch.mockResolvedValue({
         ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer)
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          get: vi.fn().mockReturnValue('image/png')
+        }
       });
 
       let capturedContentType;
@@ -234,6 +274,122 @@ describe('Media Processing', () => {
       );
 
       expect(capturedContentType).toBe('image/png');
+    });
+
+    it('handles Twilio URLs without file extensions (uses content-type header)', async () => {
+      // This is the critical bug fix test - Twilio media URLs often look like:
+      // https://api.twilio.com/2010-04-01/Accounts/.../Messages/.../Media/...
+      // with NO file extension, so we must get the type from headers
+      const mockBuffer = Buffer.from('fake image data');
+      const twilioUrlWithoutExtension = 'https://api.twilio.com/2010-04-01/Accounts/AC123/Messages/SM456/Media/ME789';
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          get: vi.fn().mockReturnValue('image/jpeg')
+        }
+      });
+
+      let capturedFilePath;
+      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+
+      supabase.storage.from.mockReturnValue({
+        upload: vi.fn().mockImplementation((path) => {
+          capturedFilePath = path;
+          return { data: {}, error: null };
+        }),
+        getPublicUrl: vi.fn().mockReturnValue({
+          data: { publicUrl: 'https://supabase.co/storage/listing-photos/photo.jpg' }
+        })
+      });
+
+      await processMediaUrls(
+        [twilioUrlWithoutExtension],
+        'seller123',
+        'SM456'
+      );
+
+      // Should generate clean path with .jpg extension from content-type header
+      // NOT a broken path like: listings/seller123/SM456_1.com/2010-04-01/accounts/...
+      expect(capturedFilePath).toBe('listings/seller123/SM456_1.jpg');
+      expect(capturedFilePath).not.toContain('2010-04-01');
+      expect(capturedFilePath).not.toContain('Accounts');
+    });
+
+    it('uses content-type from headers, not URL, for file extension', async () => {
+      // Even if URL has .png, we should use the content-type header
+      const mockBuffer = Buffer.from('fake data');
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          // Header says jpeg even though URL might suggest otherwise
+          get: vi.fn().mockReturnValue('image/jpeg')
+        }
+      });
+
+      let capturedFilePath;
+      let capturedContentType;
+      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+
+      supabase.storage.from.mockReturnValue({
+        upload: vi.fn().mockImplementation((path, buffer, options) => {
+          capturedFilePath = path;
+          capturedContentType = options.contentType;
+          return { data: {}, error: null };
+        }),
+        getPublicUrl: vi.fn().mockReturnValue({
+          data: { publicUrl: 'https://supabase.co/storage/listing-photos/photo.jpg' }
+        })
+      });
+
+      await processMediaUrls(
+        ['https://api.twilio.com/media/something'],
+        'seller123',
+        'msg123'
+      );
+
+      expect(capturedFilePath).toContain('.jpg');
+      expect(capturedContentType).toBe('image/jpeg');
+    });
+
+    it('defaults to image/jpeg when content-type header is missing', async () => {
+      const mockBuffer = Buffer.from('fake data');
+
+      global.fetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: vi.fn().mockResolvedValue(mockBuffer),
+        headers: {
+          get: vi.fn().mockReturnValue(null) // No content-type header
+        }
+      });
+
+      let capturedFilePath;
+      let capturedContentType;
+      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+
+      supabase.storage.from.mockReturnValue({
+        upload: vi.fn().mockImplementation((path, buffer, options) => {
+          capturedFilePath = path;
+          capturedContentType = options.contentType;
+          return { data: {}, error: null };
+        }),
+        getPublicUrl: vi.fn().mockReturnValue({
+          data: { publicUrl: 'https://supabase.co/storage/listing-photos/photo.jpg' }
+        })
+      });
+
+      await processMediaUrls(
+        ['https://api.twilio.com/media/unknown'],
+        'seller123',
+        'msg123'
+      );
+
+      // Should default to jpeg
+      expect(capturedFilePath).toContain('.jpg');
+      expect(capturedContentType).toBe('image/jpeg');
     });
   });
 });

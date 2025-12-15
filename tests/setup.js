@@ -46,7 +46,22 @@ global.mockDb = {
     }
     return null;
   },
-  
+
+  findIncompleteListingBySeller(sellerId) {
+    return this.listings
+      .filter(l => l.seller_id === sellerId && l.status === 'incomplete')
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+  },
+
+  deleteListing(id) {
+    const idx = this.listings.findIndex(l => l.id === id);
+    if (idx >= 0) {
+      this.listings.splice(idx, 1);
+      return true;
+    }
+    return false;
+  },
+
   addSeller(seller) {
     const id = seller.id || `seller-${Date.now()}`;
     const newSeller = { id, ...seller };
@@ -98,49 +113,71 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     from: (table) => ({
       select: (columns) => ({
-        eq: (field, value) => ({
-          single: async () => {
-            if (table === 'sellers') {
-              const seller = global.mockDb.findSellerByPhone(value);
-              return { data: seller, error: null };
-            }
-            if (table === 'sms_conversations') {
-              const conv = global.mockDb.findConversation(value);
-              return { data: conv, error: null };
-            }
-            if (table === 'listings') {
-              const listing = global.mockDb.findListing(value);
-              return { data: listing, error: null };
-            }
-            return { data: null, error: null };
-          },
-          maybeSingle: async () => {
-            if (table === 'sellers') {
-              const seller = global.mockDb.findSellerByPhone(value);
-              return { data: seller, error: null };
-            }
-            if (table === 'sms_conversations') {
-              const conv = global.mockDb.findConversation(value);
-              return { data: conv, error: null };
-            }
-            if (table === 'listings') {
-              const listing = global.mockDb.findListing(value);
-              return { data: listing, error: null };
-            }
-            return { data: null, error: null };
-          },
-          order: () => ({
-            limit: () => ({
-              maybeSingle: async () => {
-                if (table === 'sms_conversations') {
-                  const conv = global.mockDb.findConversation(value);
-                  return { data: conv, error: null };
-                }
-                return { data: null, error: null };
+        eq: (field, value) => {
+          // Store filter context for chained calls
+          const filters = { [field]: value };
+
+          const chainable = {
+            eq: (field2, value2) => {
+              filters[field2] = value2;
+              return chainable;
+            },
+            single: async () => {
+              if (table === 'sellers') {
+                const seller = global.mockDb.findSellerByPhone(filters.phone);
+                return { data: seller, error: null };
               }
+              if (table === 'sms_conversations') {
+                const conv = global.mockDb.findConversation(filters.phone_number);
+                return { data: conv, error: null };
+              }
+              if (table === 'listings') {
+                // Support both id lookup and seller_id+status lookup
+                if (filters.seller_id && filters.status === 'incomplete') {
+                  const listing = global.mockDb.findIncompleteListingBySeller(filters.seller_id);
+                  return { data: listing, error: listing ? null : { code: 'PGRST116' } };
+                }
+                const listing = global.mockDb.findListing(filters.id);
+                return { data: listing, error: null };
+              }
+              return { data: null, error: null };
+            },
+            maybeSingle: async () => {
+              if (table === 'sellers') {
+                const seller = global.mockDb.findSellerByPhone(filters.phone);
+                return { data: seller, error: null };
+              }
+              if (table === 'sms_conversations') {
+                const conv = global.mockDb.findConversation(filters.phone_number);
+                return { data: conv, error: null };
+              }
+              if (table === 'listings') {
+                const listing = global.mockDb.findListing(filters.id);
+                return { data: listing, error: null };
+              }
+              return { data: null, error: null };
+            },
+            order: () => ({
+              limit: () => ({
+                single: async () => {
+                  if (table === 'listings' && filters.seller_id && filters.status === 'incomplete') {
+                    const listing = global.mockDb.findIncompleteListingBySeller(filters.seller_id);
+                    return { data: listing, error: listing ? null : { code: 'PGRST116' } };
+                  }
+                  return { data: null, error: null };
+                },
+                maybeSingle: async () => {
+                  if (table === 'sms_conversations') {
+                    const conv = global.mockDb.findConversation(filters.phone_number);
+                    return { data: conv, error: null };
+                  }
+                  return { data: null, error: null };
+                }
+              })
             })
-          })
-        }),
+          };
+          return chainable;
+        },
         or: (condition) => ({
           maybeSingle: async () => {
             const emailMatch = condition.match(/email\.ilike\.([^,]+)/);
@@ -228,19 +265,51 @@ vi.mock('@supabase/supabase-js', () => ({
             return cb ? cb({ error: null }) : { error: null };
           }
         })
+      }),
+
+      delete: () => ({
+        eq: (field, value) => ({
+          then: async (cb) => {
+            if (table === 'listings') {
+              global.mockDb.deleteListing(value);
+            }
+            return cb ? cb({ error: null }) : { error: null };
+          }
+        })
       })
     })
   })
 }));
 
+// Helper to extract text content from a message (handles both string and multimodal array format)
+function getTextContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    // Multimodal format: [{type: 'text', text: '...'}, {type: 'image_url', ...}]
+    const textPart = content.find(c => c.type === 'text');
+    return textPart?.text || '';
+  }
+  return '';
+}
+
 // Mock OpenAI fetch for intent detection and sell flow AI
+// Store original fetch before mocking (may be undefined in test environment)
 const originalFetch = global.fetch;
-global.fetch = async (url, options) => {
-  if (url.includes('openai.com')) {
+
+// Create a proxy that only intercepts OpenAI requests
+const openAIFetchMock = async (url, options) => {
+  // Only mock OpenAI API calls
+  if (typeof url === 'string' && url.includes('openai.com')) {
     const body = JSON.parse(options.body);
     const messages = body.messages || [];
-    const userMessage = messages.find(m => m.role === 'user')?.content?.toLowerCase() || '';
-    const lastUserMessage = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+
+    // Extract text content, handling both string and multimodal array formats
+    const userMsg = messages.find(m => m.role === 'user');
+    const userMessage = getTextContent(userMsg?.content)?.toLowerCase() || '';
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+    const lastUserMessage = getTextContent(lastUserMsg?.content) || '';
 
     // Check if this is a sell flow AI request (has system prompt about listing assistant)
     const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
@@ -385,5 +454,13 @@ global.fetch = async (url, options) => {
       })
     };
   }
-  return originalFetch(url, options);
+  // For non-OpenAI requests, pass through to original fetch or throw if none exists
+  if (originalFetch) {
+    return originalFetch(url, options);
+  }
+  // If no original fetch exists (test environment), throw a helpful error
+  throw new Error(`Unmocked fetch call to: ${url}`);
 };
+
+// Apply the mock
+global.fetch = openAIFetchMock;

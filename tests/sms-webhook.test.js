@@ -133,7 +133,7 @@ describe('SMS Webhook', () => {
 
       expect(res.message).toContain('verified');
       // Since pending_intent is 'sell', should go to sell flow
-      expect(res.message).toContain('send anything');
+      expect(res.message).toContain('send me photos');
 
       const conv = global.mockDb.findConversation(TEST_PHONES.EXISTING_SELLER);
       expect(conv.is_authorized).toBe(true);
@@ -194,7 +194,7 @@ describe('SMS Webhook', () => {
 
       const res = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, 'sell');
 
-      expect(res.message).toContain('send anything');
+      expect(res.message).toContain('send me photos');
     });
 
     it('AUTHORIZED - buy intent works', async () => {
@@ -245,7 +245,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         seller_id: 'seller-123'
       });
       const res1 = await sendSms(handler, TEST_PHONES.EXISTING_SELLER, '1');
-      expect(res1.message).toContain('send anything');
+      expect(res1.message).toContain('send me photos');
 
       // Reset state for next test
       global.mockDb.updateConversation(
@@ -492,7 +492,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         const res = await sendSms(handler, SELL_PHONE, 'sell');
 
         expect(res.statusCode).toBe(200);
-        expect(res.message).toContain('send anything');
+        expect(res.message).toContain('send me photos');
         expect(res.message).toContain('photo');
 
         const conv = global.mockDb.findConversation(SELL_PHONE);
@@ -592,7 +592,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         const res = await sendSms(handler, SELL_PHONE, 'Size M');
 
         expect(res.statusCode).toBe(200);
-        expect(res.message).toContain('send anything'); // SELL_START message
+        expect(res.message).toContain('send me photos'); // SELL_START message
 
         const conv = global.mockDb.findConversation(SELL_PHONE);
         expect(conv.state).toBe('sell_started');
@@ -715,7 +715,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
 
         // Step 1: Start sell flow
         let res = await sendSms(handler, SELL_PHONE, 'sell');
-        expect(res.message).toContain('send anything');
+        expect(res.message).toContain('send me photos');
 
         // Step 2: Provide initial item info
         res = await sendSms(handler, SELL_PHONE, 'Sana Safinaz 3 piece suit, size M, like new');
@@ -837,6 +837,298 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         expect(userMessages.length).toBe(2);
       });
     });
+
+    describe('Draft Detection', () => {
+      it('authorized user with existing draft → shows draft found message', async () => {
+        // Create an incomplete listing (draft)
+        global.mockDb.addListing({
+          id: 'draft-listing-1',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Maria B', item_type: 'suit' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'authorized',
+          is_authorized: true,
+          seller_id: 'sell-seller-123'
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'sell');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('draft');
+        expect(res.message).toContain('Maria B');
+        expect(res.message).toContain('CONTINUE');
+        expect(res.message).toContain('NEW');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_draft_check');
+      });
+
+      it('authorized user without draft → goes directly to sell_started', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'authorized',
+          is_authorized: true,
+          seller_id: 'sell-seller-123'
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'sell');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('send me photos');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_started');
+      });
+    });
+
+    describe('Draft Check State', () => {
+      it('CONTINUE resumes the draft listing', async () => {
+        const draft = global.mockDb.addListing({
+          id: 'draft-continue-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Elan' },
+          conversation: [{ role: 'user', content: 'Elan dress' }]
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: draft.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'continue');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message.toLowerCase()).toContain('continue');
+        expect(res.message).toContain('Elan');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_collecting');
+        expect(conv.context.listing_id).toBe(draft.id);
+      });
+
+      it('C shortcut also resumes draft', async () => {
+        const draft = global.mockDb.addListing({
+          id: 'draft-c-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Khaadi' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: draft.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'c');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_collecting');
+      });
+
+      it('1 shortcut also resumes draft', async () => {
+        const draft = global.mockDb.addListing({
+          id: 'draft-1-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: {}
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: draft.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, '1');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_collecting');
+      });
+
+      it('NEW deletes draft and starts fresh', async () => {
+        const draft = global.mockDb.addListing({
+          id: 'draft-delete-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Old Draft' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: draft.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'new');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('start fresh');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_started');
+
+        // Draft should be deleted
+        const deletedListing = global.mockDb.findListing(draft.id);
+        expect(deletedListing).toBeNull();
+      });
+
+      it('N shortcut also deletes draft', async () => {
+        const draft = global.mockDb.addListing({
+          id: 'draft-n-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: {}
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: draft.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'n');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_started');
+
+        const deletedListing = global.mockDb.findListing(draft.id);
+        expect(deletedListing).toBeNull();
+      });
+
+      it('2 shortcut also deletes draft', async () => {
+        const draft = global.mockDb.addListing({
+          id: 'draft-2-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: {}
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: draft.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, '2');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_started');
+      });
+
+      it('unclear response asks again', async () => {
+        global.mockDb.addListing({
+          id: 'draft-unclear-test',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Test' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_draft_check',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: 'draft-unclear-test' }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'maybe');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('draft');
+
+        // Should stay in sell_draft_check
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('sell_draft_check');
+      });
+    });
+
+    describe('EXIT Command', () => {
+      it('EXIT during sell_started saves draft and returns to authorized', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_started',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'exit');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('draft');
+        expect(res.message).toContain('saved');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('authorized');
+      });
+
+      it('EXIT during sell_collecting saves draft and returns to authorized', async () => {
+        const listing = global.mockDb.addListing({
+          id: 'exit-test-listing',
+          seller_id: 'sell-seller-123',
+          status: 'incomplete',
+          listing_data: { designer: 'Maria B' }
+        });
+
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_collecting',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: { listing_id: listing.id }
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'exit');
+
+        expect(res.statusCode).toBe(200);
+        expect(res.message).toContain('draft');
+        expect(res.message).toContain('saved');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('authorized');
+
+        // Listing should still exist (not deleted)
+        const savedListing = global.mockDb.findListing(listing.id);
+        expect(savedListing).not.toBeNull();
+      });
+
+      it('EXIT is case-insensitive', async () => {
+        global.mockDb.addConversation({
+          phone_number: SELL_PHONE,
+          state: 'sell_started',
+          is_authorized: true,
+          seller_id: 'sell-seller-123',
+          context: {}
+        });
+
+        const res = await sendSms(handler, SELL_PHONE, 'EXIT');
+
+        expect(res.message).toContain('draft');
+        expect(res.message).toContain('saved');
+
+        const conv = global.mockDb.findConversation(SELL_PHONE);
+        expect(conv.state).toBe('authorized');
+      });
+    });
   });
 
   describe('Edge Cases', () => {
@@ -904,7 +1196,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
     // Step 2: User provides correct email - should verify AND start sell flow
     res = await sendSms(handler, '+1234567890', 'test@example.com');
     expect(res.message.toLowerCase()).toContain('verified');
-    expect(res.message.toLowerCase()).toContain('send anything');
+    expect(res.message.toLowerCase()).toContain('send me photos');
   });
 
   it('should start buy flow after email verification when user originally said buy', async () => {
