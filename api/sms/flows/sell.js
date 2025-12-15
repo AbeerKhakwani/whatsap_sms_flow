@@ -8,52 +8,57 @@ import { generateAIResponse } from '../ai.js';
 /**
  * Required fields for a complete listing
  */
-const REQUIRED_FIELDS = ['designer', 'item_type', 'size', 'condition', 'asking_price_usd', 'pieces'];
+const REQUIRED_FIELDS = ['designer', 'item_type', 'size', 'condition', 'asking_price_usd', 'pieces_included'];
+
+/**
+ * Minimum photos required
+ */
+const MIN_PHOTOS = 3;
 
 /**
  * Handle all sell flow states
- * @param {string} message - What the user texted
- * @param {object} conversation - The conversation record from DB
- * @param {object} seller - The seller record from DB
- * @param {array} mediaUrls - Any photos they sent (empty for now)
  */
-
 export async function handleSellFlow(message, conversation, seller, mediaUrls = []) {
     const state = conversation.state;
     const context = conversation.context || {};
 
     // SELL_STARTED - first message after user said "sell"
-    // SELL_STARTED - first message after user said "sell"
     if (state === 'sell_started') {
-        // 1. Ask AI to extract data (include photos if sent)
         const ai = await generateAIResponse({
             conversationHistory: [{
                 role: 'user',
                 content: message,
-                photos: mediaUrls  // ← Add this
+                photos: mediaUrls
             }],
             currentData: {},
-            missingFields: REQUIRED_FIELDS
+            missingFields: REQUIRED_FIELDS,
+            photoCount: mediaUrls.length,
+            isReadyForSummary: false
         });
 
-        // 2. Only create listing if AI extracted something
         if (Object.keys(ai.extractedData).length > 0) {
-            const listing = await createListing(seller.id, ai.extractedData);
+            const listingData = {
+                ...ai.extractedData,
+                photos: mediaUrls
+            };
+            
+            const listing = await createListing(seller.id, listingData);
 
             await setState(conversation.id, 'sell_collecting', {
                 listing_id: listing.id,
                 history: [
-                    { role: 'user', content: message, photos: mediaUrls },  // ← Add photos
+                    { role: 'user', content: message, photos: mediaUrls },
                     { role: 'assistant', content: ai.message }
-                ]
+                ],
+                media_urls: mediaUrls
             });
         } else {
-            // No data extracted, stay in sell_started
             await setState(conversation.id, 'sell_started', {
                 history: [
-                    { role: 'user', content: message, photos: mediaUrls },  // ← Add photos
+                    { role: 'user', content: message, photos: mediaUrls },
                     { role: 'assistant', content: ai.message }
-                ]
+                ],
+                media_urls: mediaUrls
             });
         }
 
@@ -64,68 +69,87 @@ export async function handleSellFlow(message, conversation, seller, mediaUrls = 
     if (state === 'sell_collecting') {
         const listingId = context.listing_id;
         const history = context.history || [];
+        const alreadyShowedSummary = context.showed_summary || false;
 
-        // 1. Get current listing data
         const listing = await getListing(listingId);
         if (!listing) {
-            // Lost the listing somehow, restart
             await setState(conversation.id, 'sell_started', {});
             return msg('SELL_START');
         }
 
         const currentData = listing.listing_data || {};
+        
+        // Merge photos
+        const existingPhotos = currentData.photos || [];
+        const allPhotos = [...existingPhotos, ...mediaUrls];
 
-        // 2. Figure out what fields are still missing
+        // Check what's missing BEFORE this message
         const missingFields = REQUIRED_FIELDS.filter(f => !currentData[f]);
+        const photoCount = allPhotos.length;
+        
+        // Is listing complete? Tell AI to show summary
+        const isReadyForSummary = missingFields.length === 0 && photoCount >= MIN_PHOTOS;
 
-        // 3. Add user message to history
-        // 3. Add user message to history (with photos)
+        // If we already showed summary and user is confirming, move to final confirmation
+        if (alreadyShowedSummary && isConfirmation(message)) {
+            await setState(conversation.id, 'sell_confirming', {
+                listing_id: listingId,
+                history: history
+            });
+            return msg('SELL_CONFIRM');
+        }
+
+        // Add user message to history
         history.push({
             role: 'user',
             content: message,
-            photos: mediaUrls  // ← Add this
+            photos: mediaUrls
         });
 
-        // 4. Ask AI (with photos)
+        // Ask AI
         const ai = await generateAIResponse({
             conversationHistory: history,
-            currentData: currentData,
-            missingFields: missingFields
+            currentData: { ...currentData, photos: allPhotos },
+            missingFields: missingFields,
+            photoCount: photoCount,
+            isReadyForSummary: isReadyForSummary
         });
 
-        // 5. Merge new data with existing
-        const updatedData = { ...currentData, ...ai.extractedData };
+        // Merge new data
+        const updatedData = { 
+            ...currentData, 
+            ...ai.extractedData,
+            photos: allPhotos
+        };
 
-        // 6. Add AI response to history
+        // Add AI response to history
         history.push({ role: 'assistant', content: ai.message });
 
-        // 7. Save everything
+        // Save everything
         await updateListingData(listingId, updatedData, history);
+
+        // Check completion AFTER AI response (in case AI extracted new data)
+        const stillMissing = REQUIRED_FIELDS.filter(f => !updatedData[f]);
+        const finalPhotoCount = allPhotos.length;
+        const isNowComplete = stillMissing.length === 0 && finalPhotoCount >= MIN_PHOTOS;
+
+        // Update state - track if we showed summary
         await setState(conversation.id, 'sell_collecting', {
             listing_id: listingId,
-            history: history
+            history: history,
+            media_urls: allPhotos,
+            showed_summary: isNowComplete
         });
-
-        // 8. Check if complete
-        const stillMissing = REQUIRED_FIELDS.filter(f => !updatedData[f]);
-        if (stillMissing.length === 0) {
-            // All done! Move to confirmation
-            await setState(conversation.id, 'sell_confirming', {
-                listing_id: listingId
-            });
-            return ai.message + '\n\n' + msg('SELL_CONFIRM');
-        }
 
         return ai.message;
     }
 
-    // SELL_CONFIRMING - user confirms or wants to edit
+    // SELL_CONFIRMING - final YES/NO to submit
     if (state === 'sell_confirming') {
         const listingId = context.listing_id;
         const msgLower = message.toLowerCase().trim();
 
         if (msgLower === 'yes' || msgLower === 'y' || msgLower === '1') {
-            // User confirms - update listing status to draft
             await supabase
                 .from('listings')
                 .update({ status: 'draft' })
@@ -136,22 +160,38 @@ export async function handleSellFlow(message, conversation, seller, mediaUrls = 
         }
 
         if (msgLower === 'no' || msgLower === 'n' || msgLower === '2') {
-            // User wants to edit - go back to collecting
             await setState(conversation.id, 'sell_collecting', {
                 listing_id: listingId,
-                history: context.history || []
+                history: context.history || [],
+                showed_summary: true
             });
             return msg('SELL_EDIT');
         }
 
-        // Unclear response - ask again
         return msg('SELL_CONFIRM');
     }
 
-    // Default - shouldn't hit this
     return msg('SELL_START');
 }
 
+/**
+ * Check if user message is confirming the summary
+ */
+function isConfirmation(message) {
+    const lower = message.toLowerCase().trim();
+    const confirmPhrases = [
+        'yes', 'yeah', 'yep', 'yup', 'y',
+        'looks good', 'look good', 'looks great', 'look great',
+        'perfect', 'correct', 'right', 'good', 'great',
+        'thats right', "that's right", 'thats correct', "that's correct",
+        'all good', 'all set', 'good to go',
+        'submit', 'done', 'finish', 'list it',
+        'ok', 'okay', 'k', 'sure', 'confirmed', 'confirm',
+        '👍', '✅', 'lgtm'
+    ];
+    
+    return confirmPhrases.some(phrase => lower === phrase || lower.startsWith(phrase + ' ') || lower.endsWith(' ' + phrase));
+}
 
 async function createListing(sellerId, initialData = {}) {
     const { data, error } = await supabase

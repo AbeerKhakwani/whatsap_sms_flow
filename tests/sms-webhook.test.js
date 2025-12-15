@@ -596,8 +596,8 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         expect(conv.state).toBe('sell_started');
       });
 
-      it('SELL_COLLECTING - all fields complete → state becomes sell_confirming', async () => {
-        // Create listing with most fields already filled
+      it('SELL_COLLECTING - all fields complete + showed_summary + confirmation → state becomes sell_confirming', async () => {
+        // Create listing with ALL fields filled (including price)
         const listing = global.mockDb.addListing({
           id: 'test-listing-complete',
           seller_id: 'sell-seller-123',
@@ -607,7 +607,9 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
             item_type: 'suit',
             size: 'M',
             condition: 'like new',
-            pieces: 3
+            pieces_included: '3 pieces',
+            asking_price_usd: 150,
+            photos: ['photo1.jpg', 'photo2.jpg', 'photo3.jpg']
           }
         });
 
@@ -618,12 +620,13 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
           seller_id: 'sell-seller-123',
           context: {
             listing_id: listing.id,
-            history: []
+            history: [],
+            showed_summary: true  // Summary was already shown
           }
         });
 
-        // Provide the last missing field (price)
-        const res = await sendSms(handler, SELL_PHONE, '$150');
+        // User confirms after seeing summary
+        const res = await sendSms(handler, SELL_PHONE, 'yes');
 
         expect(res.statusCode).toBe(200);
         expect(res.message).toContain('YES'); // SELL_CONFIRM message
@@ -631,10 +634,6 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
 
         const conv = global.mockDb.findConversation(SELL_PHONE);
         expect(conv.state).toBe('sell_confirming');
-
-        // Verify price was saved
-        const updatedListing = global.mockDb.findListing(listing.id);
-        expect(updatedListing.listing_data.asking_price_usd).toBe(150);
       });
     });
 
@@ -759,7 +758,7 @@ it('AUTHORIZED - number shortcuts work (1, 2, 3)', async () => {
         expect(listing.listing_data.designer).toBe('Elan');
         expect(listing.listing_data.size).toBe('S');
         expect(listing.listing_data.condition).toBe('like new');
-        expect(listing.listing_data.pieces).toBe(3);
+        expect(listing.listing_data.pieces_included).toBe('3 pieces');
         expect(listing.listing_data.asking_price_usd).toBe(200);
       });
     });

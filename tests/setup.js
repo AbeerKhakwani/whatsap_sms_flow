@@ -8,6 +8,128 @@ process.env.SUPABASE_URL = 'https://test.supabase.co';
 process.env.SUPABASE_SERVICE_KEY = 'test-key';
 process.env.OPENAI_API_KEY = 'test-openai-key';
 
+// Helper to extract listing data from user message (for AI mock)
+function extractDataFromMessage(message) {
+  const msgLower = message.toLowerCase();
+  const extractedData = {};
+
+  // Extract designer
+  const designers = ['sana safinaz', 'elan', 'agha noor', 'maria b', 'khaadi', 'zara shahjahan'];
+  for (const d of designers) {
+    if (msgLower.includes(d)) {
+      extractedData.designer = d.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+  }
+
+  // Extract item type
+  const itemTypes = ['kurta', 'suit', 'lehnga', 'saree', 'choli', 'shirt', 'dress'];
+  for (const t of itemTypes) {
+    if (msgLower.includes(t)) {
+      extractedData.item_type = t;
+    }
+  }
+
+  // Extract size
+  const sizePatterns = [
+    { pattern: /\bsize\s+xs\b/i, value: 'XS' },
+    { pattern: /\bsize\s+s\b/i, value: 'S' },
+    { pattern: /\bsize\s+m\b/i, value: 'M' },
+    { pattern: /\bsize\s+l\b/i, value: 'L' },
+    { pattern: /\bsize\s+xl\b/i, value: 'XL' },
+    { pattern: /\bsmall\b/i, value: 'S' },
+    { pattern: /\bmedium\b/i, value: 'M' },
+    { pattern: /\blarge\b/i, value: 'L' },
+  ];
+  for (const { pattern, value } of sizePatterns) {
+    if (pattern.test(msgLower)) {
+      extractedData.size = value;
+      break;
+    }
+  }
+
+  // Extract condition
+  if (msgLower.includes('new with tags') || msgLower.includes('nwt')) {
+    extractedData.condition = 'new with tags';
+  } else if (msgLower.includes('like new')) {
+    extractedData.condition = 'like new';
+  } else if (msgLower.includes('gently used')) {
+    extractedData.condition = 'gently used';
+  } else if (msgLower.includes('used')) {
+    extractedData.condition = 'used';
+  }
+
+  // Extract price
+  const pricePatterns = [
+    /\$(\d+)/,
+    /(\d+)\s*(?:dollars?|usd)/i,
+    /price[:\s]+(\d+)/i,
+  ];
+  for (const pattern of pricePatterns) {
+    const match = msgLower.match(pattern);
+    if (match) {
+      extractedData.asking_price_usd = parseInt(match[1]);
+      break;
+    }
+  }
+
+  // Extract pieces
+  if (msgLower.includes('3 piece') || msgLower.includes('3-piece') || msgLower.includes('three piece')) {
+    extractedData.pieces_included = '3 pieces';
+  } else if (msgLower.includes('2 piece') || msgLower.includes('2-piece')) {
+    extractedData.pieces_included = '2 pieces';
+  }
+
+  return extractedData;
+}
+
+// Mock OpenAI SDK
+vi.mock('openai', () => {
+  return {
+    default: class OpenAI {
+      constructor() {
+        this.chat = {
+          completions: {
+            create: async ({ messages }) => {
+              // Find the last user message
+              const userMessages = messages.filter(m => m.role === 'user');
+              const lastUserMsg = userMessages[userMessages.length - 1]?.content || '';
+
+              // Extract data from user message
+              const extractedData = extractDataFromMessage(lastUserMsg);
+
+              // Generate response message
+              let responseMessage = '';
+              if (Object.keys(extractedData).length > 0) {
+                responseMessage = 'Got it! ';
+                if (extractedData.designer) responseMessage += `${extractedData.designer} `;
+                if (extractedData.item_type) responseMessage += `${extractedData.item_type}. `;
+                responseMessage += 'What else can you tell me?';
+              } else {
+                responseMessage = 'Tell me about the item you want to list.';
+              }
+
+              return {
+                choices: [{
+                  message: {
+                    content: JSON.stringify({
+                      message: responseMessage,
+                      extractedData: extractedData,
+                      isComplete: false,
+                      missingFields: [],
+                      photoCount: 0,
+                      photosNeeded: []
+                    })
+                  }
+                }]
+              };
+            }
+          }
+        };
+      }
+    }
+  };
+});
+
 // Mock data store (simulates database)
 global.mockDb = {
   sellers: [],
