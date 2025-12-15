@@ -11,7 +11,7 @@ export const supabase = createClient(
 /**
  * Download media from Twilio URL
  * @param {string} twilioUrl - The media URL from Twilio
- * @returns {Promise<Buffer>} - The media buffer
+ * @returns {Promise<{buffer: Buffer, contentType: string}>} - The media buffer and content type
  */
 export async function downloadTwilioMedia(twilioUrl) {
   try {
@@ -26,7 +26,12 @@ export async function downloadTwilioMedia(twilioUrl) {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      contentType
+    };
   } catch (error) {
     console.error('❌ Failed to download Twilio media:', error);
     throw error;
@@ -59,7 +64,9 @@ export async function uploadToSupabase(buffer, filePath, contentType) {
       .getPublicUrl(filePath);
 
     return publicUrl;
-  } catch (error) {
+  } catch (
+
+ error) {
     console.error('❌ Failed to upload to Supabase:', error);
     throw error;
   }
@@ -84,14 +91,12 @@ export async function processMediaUrls(mediaUrls, sellerId, messageSid) {
     try {
       const twilioUrl = mediaUrls[i];
 
-      // Download from Twilio
+      // Download from Twilio (returns buffer and contentType from headers)
       console.log(`📥 Downloading media ${i + 1}/${mediaUrls.length}...`);
-      const buffer = await downloadTwilioMedia(twilioUrl);
+      const { buffer, contentType } = await downloadTwilioMedia(twilioUrl);
 
-      // Determine file extension and content type
-      const urlParts = twilioUrl.split('.');
-      const extension = urlParts[urlParts.length - 1].toLowerCase();
-      const contentType = getContentType(extension);
+      // Get extension from content type
+      const extension = getExtensionFromContentType(contentType);
 
       // Create unique filename
       const fileName = `${messageSid}_${i + 1}.${extension}`;
@@ -112,7 +117,28 @@ export async function processMediaUrls(mediaUrls, sellerId, messageSid) {
 }
 
 /**
- * Get MIME type from file extension
+ * Get file extension from MIME type
+ * @param {string} contentType - MIME type (e.g., 'image/jpeg')
+ * @returns {string} - File extension
+ */
+export function getExtensionFromContentType(contentType) {
+  const map = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/x-msvideo': 'avi',
+    'audio/mpeg': 'mp3',
+    'audio/ogg': 'ogg',
+    'audio/wav': 'wav'
+  };
+  return map[contentType] || 'jpg'; // default to jpg
+}
+
+/**
+ * Get MIME type from file extension (kept for backward compatibility)
  * @param {string} extension - File extension (jpg, png, etc.)
  * @returns {string} - MIME type
  */
