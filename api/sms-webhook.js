@@ -74,7 +74,7 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
   }
 
   // 2. If media URLs are present, treat as sell intent
-  if (supabaseUrls.length > 0 && seller) {
+if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
     if (!conv.is_authorized) {
       await setState(conv.id, 'awaiting_email', { pending_intent: 'sell', media_urls: supabaseUrls });
       return msg('ASK_EMAIL_VERIFY');
