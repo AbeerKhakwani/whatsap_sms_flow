@@ -133,7 +133,7 @@ describe('Submit Listing API', () => {
           email: 'seller@test.com',
           phone: '555-1234',
           description: 'Beautiful Elan kurta, size M, like new',
-          photos: []
+          photoUrls: []
         }
       };
       const res = {
@@ -150,20 +150,17 @@ describe('Submit Listing API', () => {
       });
     });
 
-    it('creates listing with photos', async () => {
-      // Mock base64 image data
-      const mockPhoto = {
-        data: Buffer.from('fake image data').toString('base64'),
-        type: 'image/jpeg'
-      };
-
+    it('creates listing with photo URLs', async () => {
       const req = {
         method: 'POST',
         body: {
           email: 'seller@test.com',
           phone: '555-1234',
           description: 'Sana Safinaz 3-piece',
-          photos: [mockPhoto, mockPhoto]
+          photoUrls: [
+            'https://supabase.co/storage/photo1.jpg',
+            'https://supabase.co/storage/photo2.jpg'
+          ]
         }
       };
       const res = {
@@ -181,18 +178,13 @@ describe('Submit Listing API', () => {
     });
 
     it('creates listing with photos only (no description)', async () => {
-      const mockPhoto = {
-        data: Buffer.from('fake image').toString('base64'),
-        type: 'image/png'
-      };
-
       const req = {
         method: 'POST',
         body: {
           email: '',
           phone: '',
           description: '',
-          photos: [mockPhoto]
+          photoUrls: ['https://supabase.co/storage/photo1.jpg']
         }
       };
       const res = {
@@ -209,11 +201,11 @@ describe('Submit Listing API', () => {
       });
     });
 
-    it('handles multiple photo types', async () => {
-      const photos = [
-        { data: Buffer.from('jpg').toString('base64'), type: 'image/jpeg' },
-        { data: Buffer.from('png').toString('base64'), type: 'image/png' },
-        { data: Buffer.from('webp').toString('base64'), type: 'image/webp' }
+    it('handles multiple photo URLs', async () => {
+      const photoUrls = [
+        'https://supabase.co/storage/photo1.jpg',
+        'https://supabase.co/storage/photo2.png',
+        'https://supabase.co/storage/photo3.webp'
       ];
 
       const req = {
@@ -222,7 +214,7 @@ describe('Submit Listing API', () => {
           email: 'test@example.com',
           phone: '123-456-7890',
           description: 'Multiple photos test',
-          photos
+          photoUrls
         }
       };
       const res = {
@@ -250,14 +242,14 @@ describe('Submit Listing - Edge Cases', () => {
     submitHandler = submitModule.default;
   });
 
-  it('handles empty photos array', async () => {
+  it('handles empty photoUrls array', async () => {
     const req = {
       method: 'POST',
       body: {
         email: 'test@test.com',
         phone: '',
         description: 'Just a description',
-        photos: []
+        photoUrls: []
       }
     };
     const res = {
@@ -275,7 +267,7 @@ describe('Submit Listing - Edge Cases', () => {
       method: 'POST',
       body: {
         description: 'No contact info provided',
-        photos: []
+        photoUrls: []
       }
     };
     const res = {

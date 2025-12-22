@@ -1,5 +1,11 @@
 import { useState, useRef } from 'react';
 import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 export default function SubmitListing() {
   const [step, setStep] = useState(1);
@@ -83,19 +89,37 @@ export default function SubmitListing() {
     }
   }
 
-  // Handle photo selection
-  function handlePhotoSelect(e) {
-    const files = Array.from(e.target.files);
-    if (photos.length + files.length > 10) {
+  // Handle photo selection (from input or drop)
+  function addPhotos(files) {
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (photos.length + imageFiles.length > 10) {
       alert('Maximum 10 photos allowed');
       return;
     }
 
-    const newPhotos = files.map(file => ({
+    const newPhotos = imageFiles.map(file => ({
       file,
       preview: URL.createObjectURL(file)
     }));
     setPhotos([...photos, ...newPhotos]);
+  }
+
+  function handlePhotoSelect(e) {
+    addPhotos(e.target.files);
+  }
+
+  // Drag and drop handlers
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files) {
+      addPhotos(e.dataTransfer.files);
+    }
   }
 
   // Remove a photo
@@ -103,14 +127,29 @@ export default function SubmitListing() {
     setPhotos(photos.filter((_, i) => i !== index));
   }
 
-  // Convert file to base64
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = error => reject(error);
-    });
+  // Upload a single photo to Supabase storage
+  async function uploadPhoto(file, index) {
+    const timestamp = Date.now();
+    const ext = file.name.split('.').pop() || 'jpg';
+    const filePath = `web-submissions/${timestamp}_${index + 1}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from('listing-photos')
+      .upload(filePath, file, {
+        contentType: file.type,
+        upsert: true
+      });
+
+    if (error) {
+      console.error('Upload error:', error);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('listing-photos')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
   }
 
   // Submit the listing
@@ -122,14 +161,14 @@ export default function SubmitListing() {
 
     setIsSubmitting(true);
     try {
-      // Convert photos to base64
-      const photoData = await Promise.all(
-        photos.map(async (photo) => ({
-          data: await fileToBase64(photo.file),
-          type: photo.file.type
-        }))
-      );
+      // Upload photos directly to Supabase storage
+      const photoUrls = [];
+      for (let i = 0; i < photos.length; i++) {
+        const url = await uploadPhoto(photos[i].file, i);
+        if (url) photoUrls.push(url);
+      }
 
+      // Send just the URLs to the API
       const response = await fetch('/api/submit-listing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -137,7 +176,7 @@ export default function SubmitListing() {
           email,
           phone,
           description,
-          photos: photoData
+          photoUrls  // Send URLs instead of base64
         })
       });
 
@@ -342,32 +381,51 @@ export default function SubmitListing() {
               <h2 className="text-xl font-semibold text-gray-800">Add Photos</h2>
               <p className="text-gray-600 text-sm">Upload up to 10 photos of your item</p>
 
-              {/* Photo grid */}
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                {photos.map((photo, idx) => (
-                  <div key={idx} className="relative aspect-square">
-                    <img
-                      src={photo.preview}
-                      alt={`Photo ${idx + 1}`}
-                      className="w-full h-full object-cover rounded-xl"
-                    />
-                    <button
-                      onClick={() => removePhoto(idx)}
-                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow-lg"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-
-                {photos.length < 10 && (
-                  <button
+              {/* Drop zone */}
+              <div
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-primary-500 transition"
+              >
+                {photos.length === 0 ? (
+                  // Empty state - big drop zone
+                  <div
                     onClick={() => fileInputRef.current?.click()}
-                    className="aspect-square border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-primary-500 hover:text-primary-500 transition"
+                    className="py-12 text-center cursor-pointer"
                   >
-                    <Camera className="w-8 h-8 mb-1" />
-                    <span className="text-xs">Add</span>
-                  </button>
+                    <Camera className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                    <p className="text-gray-600 font-medium">Drop photos here</p>
+                    <p className="text-gray-400 text-sm mt-1">or click to browse</p>
+                  </div>
+                ) : (
+                  // Photo grid
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                    {photos.map((photo, idx) => (
+                      <div key={idx} className="relative aspect-square">
+                        <img
+                          src={photo.preview}
+                          alt={`Photo ${idx + 1}`}
+                          className="w-full h-full object-cover rounded-xl"
+                        />
+                        <button
+                          onClick={() => removePhoto(idx)}
+                          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow-lg"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {photos.length < 10 && (
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="aspect-square border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 hover:border-primary-500 hover:text-primary-500 transition bg-white"
+                      >
+                        <Camera className="w-8 h-8 mb-1" />
+                        <span className="text-xs">Add</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -381,7 +439,7 @@ export default function SubmitListing() {
               />
 
               <p className="text-center text-sm text-gray-500">
-                {photos.length}/10 photos
+                {photos.length}/10 photos • Drag & drop or click to add
               </p>
 
               <div className="flex gap-3">

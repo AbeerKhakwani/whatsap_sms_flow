@@ -45,10 +45,10 @@ The system handles completion, NOT you.
 When isReadyForSummary is true, show a summary and ask for confirmation:
 
 "Here's what I have:
- [Designer] [item_type]
- Includes: [pieces]
- Size: [size]
- Condition: [condition]
+💰 [Designer] [item_type]
+💰 Includes: [pieces]
+💰 Size: [size]
+💰 Condition: [condition]
 💰 Asking: $[price]
 📸 [X] photos
 
