@@ -133,6 +133,8 @@ export default function SubmitListing() {
     const ext = file.name.split('.').pop() || 'jpg';
     const filePath = `web-submissions/${timestamp}_${index + 1}.${ext}`;
 
+    console.log('Uploading to Supabase:', filePath);
+
     const { error } = await supabase.storage
       .from('listing-photos')
       .upload(filePath, file, {
@@ -141,14 +143,15 @@ export default function SubmitListing() {
       });
 
     if (error) {
-      console.error('Upload error:', error);
-      return null;
+      console.error('Supabase upload error:', error);
+      throw new Error(`Upload failed: ${error.message}`);
     }
 
     const { data: { publicUrl } } = supabase.storage
       .from('listing-photos')
       .getPublicUrl(filePath);
 
+    console.log('Upload success:', publicUrl);
     return publicUrl;
   }
 
@@ -162,22 +165,22 @@ export default function SubmitListing() {
     setIsSubmitting(true);
     try {
       // Upload photos directly to Supabase storage
+      console.log('Starting photo uploads...', photos.length, 'photos');
       const photoUrls = [];
       for (let i = 0; i < photos.length; i++) {
         const url = await uploadPhoto(photos[i].file, i);
-        if (url) photoUrls.push(url);
+        photoUrls.push(url);
       }
+      console.log('All photos uploaded:', photoUrls);
 
-      // Send just the URLs to the API
+      // Send just the URLs to the API (should be small payload)
+      const payload = { email, phone, description, photoUrls };
+      console.log('Sending to API:', JSON.stringify(payload).length, 'bytes');
+
       const response = await fetch('/api/submit-listing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          phone,
-          description,
-          photoUrls  // Send URLs instead of base64
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
