@@ -1,27 +1,8 @@
 // tests/submit-listing.test.js
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock Supabase
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({
-    storage: {
-      from: () => ({
-        upload: vi.fn().mockResolvedValue({ data: { path: 'test/path.jpg' }, error: null }),
-        getPublicUrl: () => ({ data: { publicUrl: 'https://test.supabase.co/storage/test/path.jpg' } })
-      })
-    },
-    from: () => ({
-      insert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({
-        data: { id: 'listing-123', status: 'pending_approval' },
-        error: null
-      })
-    })
-  })
-}));
+// Mock fetch for Shopify API calls
+global.fetch = vi.fn();
 
 // Mock OpenAI
 vi.mock('openai', () => ({
@@ -39,15 +20,23 @@ vi.mock('openai', () => ({
 describe('Submit Listing API', () => {
   let submitHandler;
   let transcribeHandler;
+  let addImageHandler;
 
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    // Import handlers fresh each test
+    // Mock successful Shopify responses
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ product: { id: 'shopify-123' } })
+    });
+
     const submitModule = await import('../api/submit-listing.js');
     const transcribeModule = await import('../api/transcribe.js');
+    const addImageModule = await import('../api/add-product-image.js');
     submitHandler = submitModule.default;
     transcribeHandler = transcribeModule.default;
+    addImageHandler = addImageModule.default;
   });
 
   describe('POST /api/transcribe', () => {
@@ -78,7 +67,6 @@ describe('Submit Listing API', () => {
     });
 
     it('transcribes audio successfully', async () => {
-      // Base64 encoded audio (mock data)
       const mockAudio = Buffer.from('fake audio data').toString('base64');
 
       const req = { method: 'POST', body: { audio: mockAudio } };
@@ -110,7 +98,7 @@ describe('Submit Listing API', () => {
       expect(res.json).toHaveBeenCalledWith({ error: 'Method not allowed' });
     });
 
-    it('returns 400 when no description or photos provided', async () => {
+    it('returns 400 when no description provided', async () => {
       const req = {
         method: 'POST',
         body: { email: 'test@test.com', phone: '555-1234' }
@@ -123,17 +111,16 @@ describe('Submit Listing API', () => {
       await submitHandler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Please provide a description or photos' });
+      expect(res.json).toHaveBeenCalledWith({ error: 'Please provide a description' });
     });
 
-    it('creates listing with description only', async () => {
+    it('creates Shopify draft with description', async () => {
       const req = {
         method: 'POST',
         body: {
           email: 'seller@test.com',
           phone: '555-1234',
-          description: 'Beautiful Elan kurta, size M, like new',
-          photoUrls: []
+          description: 'Beautiful Elan kurta, size M, like new'
         }
       };
       const res = {
@@ -144,77 +131,19 @@ describe('Submit Listing API', () => {
       await submitHandler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
         success: true,
-        listingId: 'listing-123'
-      });
+        productId: 'shopify-123'
+      }));
     });
 
-    it('creates listing with photo URLs', async () => {
-      const req = {
-        method: 'POST',
-        body: {
-          email: 'seller@test.com',
-          phone: '555-1234',
-          description: 'Sana Safinaz 3-piece',
-          photoUrls: [
-            'https://supabase.co/storage/photo1.jpg',
-            'https://supabase.co/storage/photo2.jpg'
-          ]
-        }
-      };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
-
-      await submitHandler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({
-        success: true,
-        listingId: 'listing-123'
-      });
-    });
-
-    it('creates listing with photos only (no description)', async () => {
-      const req = {
-        method: 'POST',
-        body: {
-          email: '',
-          phone: '',
-          description: '',
-          photoUrls: ['https://supabase.co/storage/photo1.jpg']
-        }
-      };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
-
-      await submitHandler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({
-        success: true,
-        listingId: 'listing-123'
-      });
-    });
-
-    it('handles multiple photo URLs', async () => {
-      const photoUrls = [
-        'https://supabase.co/storage/photo1.jpg',
-        'https://supabase.co/storage/photo2.png',
-        'https://supabase.co/storage/photo3.webp'
-      ];
-
+    it('calls Shopify API with correct product data', async () => {
       const req = {
         method: 'POST',
         body: {
           email: 'test@example.com',
           phone: '123-456-7890',
-          description: 'Multiple photos test',
-          photoUrls
+          description: 'Test description'
         }
       };
       const res = {
@@ -224,59 +153,87 @@ describe('Submit Listing API', () => {
 
       await submitHandler(req, res);
 
+      expect(global.fetch).toHaveBeenCalled();
+      const fetchCall = global.fetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.product.status).toBe('draft');
+      expect(body.product.body_html).toContain('Test description');
+      expect(body.product.body_html).toContain('test@example.com');
+    });
+  });
+
+  describe('POST /api/add-product-image', () => {
+    it('returns 405 for non-POST requests', async () => {
+      const req = { method: 'GET' };
+      const res = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn()
+      };
+
+      await addImageHandler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(405);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Method not allowed' });
+    });
+
+    it('returns 400 when missing productId', async () => {
+      const req = {
+        method: 'POST',
+        body: { base64: 'abc123' }
+      };
+      const res = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn()
+      };
+
+      await addImageHandler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Missing productId or image data' });
+    });
+
+    it('returns 400 when missing base64', async () => {
+      const req = {
+        method: 'POST',
+        body: { productId: '123' }
+      };
+      const res = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn()
+      };
+
+      await addImageHandler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Missing productId or image data' });
+    });
+
+    it('uploads image to Shopify successfully', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ image: { id: 'img-456' } })
+      });
+
+      const req = {
+        method: 'POST',
+        body: {
+          productId: 'shopify-123',
+          base64: 'fakeBase64Data',
+          filename: 'photo1.jpg'
+        }
+      };
+      const res = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn()
+      };
+
+      await addImageHandler(req, res);
+
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith({
         success: true,
-        listingId: 'listing-123'
+        imageId: 'img-456'
       });
     });
-  });
-});
-
-describe('Submit Listing - Edge Cases', () => {
-  let submitHandler;
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    const submitModule = await import('../api/submit-listing.js');
-    submitHandler = submitModule.default;
-  });
-
-  it('handles empty photoUrls array', async () => {
-    const req = {
-      method: 'POST',
-      body: {
-        email: 'test@test.com',
-        phone: '',
-        description: 'Just a description',
-        photoUrls: []
-      }
-    };
-    const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn()
-    };
-
-    await submitHandler(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(200);
-  });
-
-  it('handles missing email and phone', async () => {
-    const req = {
-      method: 'POST',
-      body: {
-        description: 'No contact info provided',
-        photoUrls: []
-      }
-    };
-    const res = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn()
-    };
-
-    await submitHandler(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(200);
   });
 });

@@ -1,11 +1,5 @@
 import { useState, useRef } from 'react';
 import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
 
 export default function SubmitListing() {
   const [step, setStep] = useState(1);
@@ -17,7 +11,7 @@ export default function SubmitListing() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [inputMode, setInputMode] = useState('text'); // 'text' or 'voice'
+  const [inputMode, setInputMode] = useState('text');
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -48,7 +42,6 @@ export default function SubmitListing() {
     }
   }
 
-  // Stop recording
   function stopRecording() {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
@@ -56,11 +49,9 @@ export default function SubmitListing() {
     }
   }
 
-  // Send audio to Whisper API
   async function transcribeAudio(audioBlob) {
     setIsTranscribing(true);
     try {
-      // Convert blob to base64
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
 
@@ -89,7 +80,7 @@ export default function SubmitListing() {
     }
   }
 
-  // Handle photo selection (from input or drop)
+  // Photo handling
   function addPhotos(files) {
     const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
     if (photos.length + imageFiles.length > 10) {
@@ -108,7 +99,6 @@ export default function SubmitListing() {
     addPhotos(e.target.files);
   }
 
-  // Drag and drop handlers
   function handleDragOver(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -122,40 +112,21 @@ export default function SubmitListing() {
     }
   }
 
-  // Remove a photo
   function removePhoto(index) {
     setPhotos(photos.filter((_, i) => i !== index));
   }
 
-  // Upload a single photo to Supabase storage
-  async function uploadPhoto(file, index) {
-    const timestamp = Date.now();
-    const ext = file.name.split('.').pop() || 'jpg';
-    const filePath = `web-submissions/${timestamp}_${index + 1}.${ext}`;
-
-    console.log('Uploading to Supabase:', filePath);
-
-    const { error } = await supabase.storage
-      .from('listing-photos')
-      .upload(filePath, file, {
-        contentType: file.type,
-        upsert: true
-      });
-
-    if (error) {
-      console.error('Supabase upload error:', error);
-      throw new Error(`Upload failed: ${error.message}`);
-    }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('listing-photos')
-      .getPublicUrl(filePath);
-
-    console.log('Upload success:', publicUrl);
-    return publicUrl;
+  // Convert file to base64
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+    });
   }
 
-  // Submit the listing
+  // Submit to Shopify
   async function handleSubmit() {
     if (!description && photos.length === 0) {
       alert('Please add a description or photos');
@@ -164,32 +135,38 @@ export default function SubmitListing() {
 
     setIsSubmitting(true);
     try {
-      // Upload photos directly to Supabase storage
-      console.log('Starting photo uploads...', photos.length, 'photos');
-      const photoUrls = [];
-      for (let i = 0; i < photos.length; i++) {
-        const url = await uploadPhoto(photos[i].file, i);
-        photoUrls.push(url);
-      }
-      console.log('All photos uploaded:', photoUrls);
-
-      // Send just the URLs to the API (should be small payload)
-      const payload = { email, phone, description, photoUrls };
-      console.log('Sending to API:', JSON.stringify(payload).length, 'bytes');
-
+      // Step 1: Create the product (without images)
       const response = await fetch('/api/submit-listing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ email, phone, description: description || 'Photos only submission' })
       });
 
       const data = await response.json();
 
-      if (data.success) {
-        setSubmitted(true);
-      } else {
-        alert('Failed to submit. Please try again.');
+      if (!data.success) {
+        alert(data.error || 'Failed to create draft.');
+        return;
       }
+
+      const productId = data.productId;
+
+      // Step 2: Upload photos one by one
+      for (let i = 0; i < photos.length; i++) {
+        const base64 = await fileToBase64(photos[i].file);
+
+        await fetch('/api/add-product-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId,
+            base64,
+            filename: photos[i].file.name
+          })
+        });
+      }
+
+      setSubmitted(true);
     } catch (error) {
       console.error('Submit error:', error);
       alert('Something went wrong. Please try again.');
@@ -206,9 +183,9 @@ export default function SubmitListing() {
           <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-100 flex items-center justify-center">
             <CheckCircle className="w-10 h-10 text-green-600" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Listing Submitted!</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Draft Created!</h1>
           <p className="text-gray-600 mb-6">
-            We'll review your item and get back to you within 24-72 hours.
+            Your listing has been saved as a draft in Shopify.
           </p>
           <button
             onClick={() => {
@@ -231,13 +208,11 @@ export default function SubmitListing() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-tan-50 to-gold-50 p-6">
       <div className="max-w-2xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Submit a Listing</h1>
           <p className="text-gray-600">Share your designer piece with us</p>
         </div>
 
-        {/* Progress */}
         <div className="flex items-center justify-center gap-2 mb-8">
           {[1, 2, 3].map((s) => (
             <div
@@ -291,7 +266,6 @@ export default function SubmitListing() {
             <div className="space-y-6">
               <h2 className="text-xl font-semibold text-gray-800">Describe Your Item</h2>
 
-              {/* Input mode toggle */}
               <div className="flex gap-2">
                 <button
                   onClick={() => setInputMode('text')}
@@ -384,14 +358,12 @@ export default function SubmitListing() {
               <h2 className="text-xl font-semibold text-gray-800">Add Photos</h2>
               <p className="text-gray-600 text-sm">Upload up to 10 photos of your item</p>
 
-              {/* Drop zone */}
               <div
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-primary-500 transition"
               >
                 {photos.length === 0 ? (
-                  // Empty state - big drop zone
                   <div
                     onClick={() => fileInputRef.current?.click()}
                     className="py-12 text-center cursor-pointer"
@@ -401,7 +373,6 @@ export default function SubmitListing() {
                     <p className="text-gray-400 text-sm mt-1">or click to browse</p>
                   </div>
                 ) : (
-                  // Photo grid
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                     {photos.map((photo, idx) => (
                       <div key={idx} className="relative aspect-square">
@@ -442,7 +413,7 @@ export default function SubmitListing() {
               />
 
               <p className="text-center text-sm text-gray-500">
-                {photos.length}/10 photos • Drag & drop or click to add
+                {photos.length}/10 photos
               </p>
 
               <div className="flex gap-3">
@@ -460,12 +431,12 @@ export default function SubmitListing() {
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      Submitting...
+                      Creating...
                     </>
                   ) : (
                     <>
                       <Send className="w-5 h-5" />
-                      Submit
+                      Create Draft
                     </>
                   )}
                 </button>
