@@ -1,6 +1,6 @@
 // api/submit-listing.js
-// Create a draft listing in Shopify with full product details
-// Also creates/updates seller in Supabase
+// Create a draft listing in Shopify from description
+// Fills all fields like approve-listing.js does
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -15,30 +15,15 @@ export default async function handler(req, res) {
     }
 
     try {
-        const {
-            email,
-            phone,
-            designer,
-            productName,
-            size,
-            condition,
-            color,
-            material,
-            description,
-            originalPrice,
-            askingPrice
-        } = req.body;
+        const { email, phone, description } = req.body;
 
-        if (!designer || !productName) {
-            return res.status(400).json({ error: 'Please provide designer and product name' });
+        if (!description) {
+            return res.status(400).json({ error: 'Please provide a description' });
         }
 
         // Find or create seller in Supabase
         let seller = null;
         if (email || phone) {
-            // Try to find existing seller by email or phone
-            let query = supabase.from('sellers').select('*');
-
             if (email) {
                 const { data: emailSeller } = await supabase
                     .from('sellers')
@@ -57,7 +42,6 @@ export default async function handler(req, res) {
                 if (phoneSeller) seller = phoneSeller;
             }
 
-            // Create new seller if not found
             if (!seller) {
                 const { data: newSeller, error: sellerError } = await supabase
                     .from('sellers')
@@ -70,43 +54,32 @@ export default async function handler(req, res) {
                     .select()
                     .single();
 
-                if (sellerError) {
-                    console.error('Error creating seller:', sellerError);
-                } else {
-                    seller = newSeller;
-                }
+                if (!sellerError) seller = newSeller;
             }
         }
 
         // Create draft product in Shopify (matching approve-listing.js structure)
         const shopifyProduct = {
             product: {
-                title: `${designer} - ${productName}`,
-                body_html: `<p>${description || ''}</p>
-                    <p><strong>Designer:</strong> ${designer}</p>
-                    <p><strong>Size:</strong> ${size || 'Not specified'}</p>
-                    <p><strong>Condition:</strong> ${condition || 'Not specified'}</p>
-                    <p><strong>Color:</strong> ${color || 'Not specified'}</p>
-                    <p><strong>Material:</strong> ${material || 'Premium fabric'}</p>
-                    <p><strong>Original Price:</strong> $${originalPrice || 0}</p>
+                title: 'Web Submission - ' + new Date().toLocaleDateString(),
+                body_html: `<p>${description}</p>
                     <hr>
                     <p><strong>Contact Email:</strong> ${email || 'Not provided'}</p>
                     <p><strong>Contact Phone:</strong> ${phone || 'Not provided'}</p>
                     <p><em>Submitted via web form on ${new Date().toISOString()}</em></p>`,
-                vendor: designer,
+                vendor: 'Web Submission',
                 product_type: 'Pakistani Designer Wear',
-                tags: [designer, size, condition, color, 'preloved', 'web-submission', 'needs-review'].filter(Boolean).join(', '),
+                tags: ['preloved', 'web-submission', 'needs-review'].join(', '),
                 options: [
-                    { name: 'Size', values: [size || 'One Size'] },
-                    { name: 'Brand', values: [designer] },
-                    { name: 'Condition', values: [condition || 'Not specified'] }
+                    { name: 'Size', values: ['One Size'] },
+                    { name: 'Brand', values: ['TBD'] },
+                    { name: 'Condition', values: ['TBD'] }
                 ],
                 variants: [{
-                    option1: size || 'One Size',
-                    option2: designer,
-                    option3: condition || 'Not specified',
-                    price: (askingPrice || 0).toString(),
-                    compare_at_price: originalPrice ? originalPrice.toString() : null,
+                    option1: 'One Size',
+                    option2: 'TBD',
+                    option3: 'TBD',
+                    price: '0',
                     inventory_management: 'shopify',
                     inventory_quantity: 1
                 }],
@@ -136,20 +109,12 @@ export default async function handler(req, res) {
 
         // Create listing record in Supabase
         if (seller) {
-            const { error: listingError } = await supabase
+            await supabase
                 .from('listings')
                 .insert({
                     seller_id: seller.id,
                     shopify_product_id: product.id.toString(),
-                    designer: designer,
-                    product_name: productName,
-                    size: size || null,
-                    condition: condition || null,
-                    color: color || null,
-                    material: material || null,
-                    description: description || null,
-                    original_price_usd: originalPrice || 0,
-                    asking_price_usd: askingPrice || 0,
+                    description: description,
                     status: 'draft',
                     listing_data: {
                         contact_email: email,
@@ -159,10 +124,6 @@ export default async function handler(req, res) {
                     },
                     created_at: new Date().toISOString()
                 });
-
-            if (listingError) {
-                console.error('Error creating listing in Supabase:', listingError);
-            }
         }
 
         return res.status(200).json({

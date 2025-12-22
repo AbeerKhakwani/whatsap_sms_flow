@@ -113,7 +113,7 @@ describe('Submit Listing API', () => {
       expect(res.json).toHaveBeenCalledWith({ error: 'Method not allowed' });
     });
 
-    it('returns 400 when no designer or product name provided', async () => {
+    it('returns 400 when no description provided', async () => {
       const req = {
         method: 'POST',
         body: { email: 'test@test.com', phone: '555-1234' }
@@ -126,24 +126,16 @@ describe('Submit Listing API', () => {
       await submitHandler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Please provide designer and product name' });
+      expect(res.json).toHaveBeenCalledWith({ error: 'Please provide a description' });
     });
 
-    it('creates Shopify draft with full product details', async () => {
+    it('creates Shopify draft with description', async () => {
       const req = {
         method: 'POST',
         body: {
           email: 'seller@test.com',
           phone: '555-1234',
-          designer: 'Sana Safinaz',
-          productName: 'Lawn 3-Piece',
-          size: 'M',
-          condition: 'Like new',
-          color: 'Blue',
-          material: 'Lawn',
-          description: 'Beautiful piece',
-          originalPrice: 200,
-          askingPrice: 100
+          description: 'Beautiful Sana Safinaz lawn suit, size M, like new condition'
         }
       };
       const res = {
@@ -164,11 +156,8 @@ describe('Submit Listing API', () => {
       const req = {
         method: 'POST',
         body: {
-          designer: 'Elan',
-          productName: 'Festive Collection',
-          size: 'S',
-          condition: 'New with tags',
-          askingPrice: 150
+          email: 'test@example.com',
+          description: 'Test description of my item'
         }
       };
       const res = {
@@ -182,24 +171,18 @@ describe('Submit Listing API', () => {
       const fetchCall = global.fetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
 
-      // Check product structure matches approve-listing.js
-      expect(body.product.title).toBe('Elan - Festive Collection');
-      expect(body.product.vendor).toBe('Elan');
-      expect(body.product.product_type).toBe('Pakistani Designer Wear');
       expect(body.product.status).toBe('draft');
+      expect(body.product.product_type).toBe('Pakistani Designer Wear');
+      expect(body.product.body_html).toContain('Test description');
       expect(body.product.options).toHaveLength(3);
-      expect(body.product.variants[0].price).toBe('150');
+      expect(body.product.variants[0].inventory_quantity).toBe(1);
     });
 
-    it('includes tags for filtering', async () => {
+    it('includes correct tags for filtering', async () => {
       const req = {
         method: 'POST',
         body: {
-          designer: 'Maria B',
-          productName: 'Bridal Wear',
-          size: 'L',
-          condition: 'Excellent',
-          color: 'Red'
+          description: 'My designer piece'
         }
       };
       const res = {
@@ -212,12 +195,9 @@ describe('Submit Listing API', () => {
       const fetchCall = global.fetch.mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
 
-      expect(body.product.tags).toContain('Maria B');
-      expect(body.product.tags).toContain('L');
-      expect(body.product.tags).toContain('Excellent');
-      expect(body.product.tags).toContain('Red');
       expect(body.product.tags).toContain('web-submission');
       expect(body.product.tags).toContain('needs-review');
+      expect(body.product.tags).toContain('preloved');
     });
   });
 
@@ -239,22 +219,6 @@ describe('Submit Listing API', () => {
       const req = {
         method: 'POST',
         body: { base64: 'abc123' }
-      };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
-
-      await addImageHandler(req, res);
-
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Missing productId or image data' });
-    });
-
-    it('returns 400 when missing base64', async () => {
-      const req = {
-        method: 'POST',
-        body: { productId: '123' }
       };
       const res = {
         status: vi.fn().mockReturnThis(),

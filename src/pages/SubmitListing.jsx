@@ -1,40 +1,12 @@
 import { useState, useRef } from 'react';
 import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2 } from 'lucide-react';
 
-const DESIGNERS = [
-  'Sana Safinaz', 'Elan', 'Maria B', 'Khaadi', 'Gul Ahmed', 'Alkaram',
-  'Sapphire', 'Zara Shahjahan', 'Asim Jofa', 'Mushq', 'Faraz Manan',
-  'HSY', 'Suffuse', 'Misha Lakhani', 'Nida Azwer', 'Other'
-];
-
-const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free Size'];
-const CONDITIONS = ['New with tags', 'Like new', 'Excellent', 'Good', 'Fair'];
-const COLORS = ['Black', 'White', 'Red', 'Blue', 'Green', 'Pink', 'Purple', 'Yellow', 'Orange', 'Brown', 'Grey', 'Beige', 'Multi', 'Other'];
-
 export default function SubmitListing() {
   const [step, setStep] = useState(1);
-
-  // Contact
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-
-  // Product details
-  const [designer, setDesigner] = useState('');
-  const [productName, setProductName] = useState('');
-  const [size, setSize] = useState('');
-  const [condition, setCondition] = useState('');
-  const [color, setColor] = useState('');
-  const [material, setMaterial] = useState('');
   const [description, setDescription] = useState('');
-
-  // Pricing
-  const [originalPrice, setOriginalPrice] = useState('');
-  const [askingPrice, setAskingPrice] = useState('');
-
-  // Photos
   const [photos, setPhotos] = useState([]);
-
-  // UI state
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,7 +17,7 @@ export default function SubmitListing() {
   const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
 
-  // Audio recording
+  // Start recording audio
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -155,30 +127,18 @@ export default function SubmitListing() {
 
   // Submit to Shopify
   async function handleSubmit() {
-    if (!designer || !productName) {
-      alert('Please fill in designer and product name');
+    if (!description && photos.length === 0) {
+      alert('Please add a description or photos');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // Step 1: Create the product
+      // Step 1: Create the Shopify draft
       const response = await fetch('/api/submit-listing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          phone,
-          designer,
-          productName,
-          size,
-          condition,
-          color,
-          material,
-          description,
-          originalPrice: parseFloat(originalPrice) || 0,
-          askingPrice: parseFloat(askingPrice) || 0
-        })
+        body: JSON.stringify({ email, phone, description })
       });
 
       const data = await response.json();
@@ -232,15 +192,7 @@ export default function SubmitListing() {
               setStep(1);
               setEmail('');
               setPhone('');
-              setDesigner('');
-              setProductName('');
-              setSize('');
-              setCondition('');
-              setColor('');
-              setMaterial('');
               setDescription('');
-              setOriginalPrice('');
-              setAskingPrice('');
               setPhotos([]);
             }}
             className="bg-primary-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-primary-700 transition"
@@ -261,7 +213,7 @@ export default function SubmitListing() {
         </div>
 
         <div className="flex items-center justify-center gap-2 mb-8">
-          {[1, 2, 3, 4].map((s) => (
+          {[1, 2, 3].map((s) => (
             <div
               key={s}
               className={`w-3 h-3 rounded-full transition-colors ${
@@ -308,131 +260,10 @@ export default function SubmitListing() {
             </div>
           )}
 
-          {/* Step 2: Product Details */}
+          {/* Step 2: Description */}
           {step === 2 && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-semibold text-gray-800">Product Details</h2>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Designer *</label>
-                <select
-                  value={designer}
-                  onChange={(e) => setDesigner(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                >
-                  <option value="">Select designer</option>
-                  {DESIGNERS.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Product Name *</label>
-                <input
-                  type="text"
-                  value={productName}
-                  onChange={(e) => setProductName(e.target.value)}
-                  placeholder="e.g., Lawn 3-Piece Suit"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Size</label>
-                  <select
-                    value={size}
-                    onChange={(e) => setSize(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  >
-                    <option value="">Select size</option>
-                    {SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Condition</label>
-                  <select
-                    value={condition}
-                    onChange={(e) => setCondition(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  >
-                    <option value="">Select condition</option>
-                    {CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Color</label>
-                  <select
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  >
-                    <option value="">Select color</option>
-                    {COLORS.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Material</label>
-                  <input
-                    type="text"
-                    value={material}
-                    onChange={(e) => setMaterial(e.target.value)}
-                    placeholder="e.g., Lawn, Chiffon"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Original Price ($)</label>
-                  <input
-                    type="number"
-                    value={originalPrice}
-                    onChange={(e) => setOriginalPrice(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Asking Price ($)</label>
-                  <input
-                    type="number"
-                    value={askingPrice}
-                    onChange={(e) => setAskingPrice(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setStep(1)}
-                  className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={() => setStep(3)}
-                  disabled={!designer || !productName}
-                  className="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition disabled:opacity-50"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Description */}
-          {step === 3 && (
             <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-800">Description</h2>
+              <h2 className="text-xl font-semibold text-gray-800">Describe Your Item</h2>
 
               <div className="flex gap-2">
                 <button
@@ -461,8 +292,8 @@ export default function SubmitListing() {
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Add any additional details about your item..."
-                  rows={5}
+                  placeholder="Tell us about your item... Designer, size, condition, what you'd like to get for it, etc."
+                  rows={6}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none resize-none"
                 />
               ) : (
@@ -505,13 +336,13 @@ export default function SubmitListing() {
 
               <div className="flex gap-3">
                 <button
-                  onClick={() => setStep(2)}
+                  onClick={() => setStep(1)}
                   className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition"
                 >
                   Back
                 </button>
                 <button
-                  onClick={() => setStep(4)}
+                  onClick={() => setStep(3)}
                   className="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition"
                 >
                   Next
@@ -520,8 +351,8 @@ export default function SubmitListing() {
             </div>
           )}
 
-          {/* Step 4: Photos */}
-          {step === 4 && (
+          {/* Step 3: Photos */}
+          {step === 3 && (
             <div className="space-y-6">
               <h2 className="text-xl font-semibold text-gray-800">Add Photos</h2>
               <p className="text-gray-600 text-sm">Upload up to 10 photos of your item</p>
@@ -586,14 +417,14 @@ export default function SubmitListing() {
 
               <div className="flex gap-3">
                 <button
-                  onClick={() => setStep(3)}
+                  onClick={() => setStep(2)}
                   className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition"
                 >
                   Back
                 </button>
                 <button
                   onClick={handleSubmit}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || (!description && photos.length === 0)}
                   className="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
