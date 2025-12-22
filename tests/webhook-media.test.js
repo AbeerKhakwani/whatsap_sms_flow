@@ -4,7 +4,7 @@ import handler from '../api/sms-webhook.js';
 import { sendSms } from './test-utils.js';
 
 // Mock the media processing module
-vi.mock('../api/sms/media.js', () => ({
+vi.mock('../lib/sms/media.js', () => ({
   processMediaUrls: vi.fn(),
   getContentType: vi.fn()
 }));
@@ -32,7 +32,7 @@ describe('Webhook Media Integration', () => {
 
   describe('Media Processing in Webhook', () => {
     it('processes single photo in sell flow', async () => {
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
 
       // Mock successful media processing
       processMediaUrls.mockResolvedValue(['https://supabase.co/storage/listing-photos/test.jpg']);
@@ -55,7 +55,7 @@ describe('Webhook Media Integration', () => {
     });
 
     it('handles media processing failure gracefully', async () => {
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
 
       // Mock media processing failure
       processMediaUrls.mockRejectedValue(new Error('Media processing failed'));
@@ -72,7 +72,7 @@ describe('Webhook Media Integration', () => {
     });
 
     it('processes multiple photos', async () => {
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
 
       // Mock successful media processing for multiple photos
       processMediaUrls.mockResolvedValue([
@@ -104,12 +104,12 @@ describe('Webhook Media Integration', () => {
       expect(res.message).toContain('Welcome');
 
       // Verify processMediaUrls was not called (no media processing for non-sellers)
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
       expect(processMediaUrls).not.toHaveBeenCalled();
     });
 
     it('continues sell flow after media processing', async () => {
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
 
       // Mock successful media processing
       processMediaUrls.mockResolvedValue(['https://supabase.co/storage/listing-photos/test.jpg']);

@@ -30,7 +30,7 @@ describe('Media Processing', () => {
 
   describe('getContentType', () => {
     it('returns correct MIME types for common extensions', async () => {
-      const { getContentType } = await import('../api/sms/media.js');
+      const { getContentType } = await import('../lib/sms/media.js');
 
       expect(getContentType('jpg')).toBe('image/jpeg');
       expect(getContentType('jpeg')).toBe('image/jpeg');
@@ -45,7 +45,7 @@ describe('Media Processing', () => {
     });
 
     it('returns default MIME type for unknown extensions', async () => {
-      const { getContentType } = await import('../api/sms/media.js');
+      const { getContentType } = await import('../lib/sms/media.js');
 
       expect(getContentType('xyz')).toBe('application/octet-stream');
       expect(getContentType('')).toBe('application/octet-stream');
@@ -54,7 +54,7 @@ describe('Media Processing', () => {
 
   describe('getExtensionFromContentType', () => {
     it('returns correct extensions for common MIME types', async () => {
-      const { getExtensionFromContentType } = await import('../api/sms/media.js');
+      const { getExtensionFromContentType } = await import('../lib/sms/media.js');
 
       expect(getExtensionFromContentType('image/jpeg')).toBe('jpg');
       expect(getExtensionFromContentType('image/png')).toBe('png');
@@ -68,7 +68,7 @@ describe('Media Processing', () => {
     });
 
     it('returns jpg as default for unknown MIME types', async () => {
-      const { getExtensionFromContentType } = await import('../api/sms/media.js');
+      const { getExtensionFromContentType } = await import('../lib/sms/media.js');
 
       expect(getExtensionFromContentType('application/octet-stream')).toBe('jpg');
       expect(getExtensionFromContentType('unknown/type')).toBe('jpg');
@@ -89,7 +89,7 @@ describe('Media Processing', () => {
 
       global.fetch.mockResolvedValue(mockResponse);
 
-      const { downloadTwilioMedia } = await import('../api/sms/media.js');
+      const { downloadTwilioMedia } = await import('../lib/sms/media.js');
 
       const result = await downloadTwilioMedia('https://api.twilio.com/test.jpg');
 
@@ -110,7 +110,7 @@ describe('Media Processing', () => {
 
       global.fetch.mockResolvedValue(mockResponse);
 
-      const { downloadTwilioMedia } = await import('../api/sms/media.js');
+      const { downloadTwilioMedia } = await import('../lib/sms/media.js');
 
       await expect(downloadTwilioMedia('https://api.twilio.com/test.jpg'))
         .rejects.toThrow('Failed to download media: 404');
@@ -119,7 +119,7 @@ describe('Media Processing', () => {
     it('throws error on network failure', async () => {
       global.fetch.mockRejectedValue(new Error('Network error'));
 
-      const { downloadTwilioMedia } = await import('../api/sms/media.js');
+      const { downloadTwilioMedia } = await import('../lib/sms/media.js');
 
       await expect(downloadTwilioMedia('https://api.twilio.com/test.jpg'))
         .rejects.toThrow('Network error');
@@ -128,7 +128,7 @@ describe('Media Processing', () => {
 
   describe('uploadToSupabase', () => {
     it('uploads buffer and returns public URL', async () => {
-      const { uploadToSupabase } = await import('../api/sms/media.js');
+      const { uploadToSupabase } = await import('../lib/sms/media.js');
 
       const mockBuffer = Buffer.from('fake image data');
       const result = await uploadToSupabase(mockBuffer, 'listings/seller123/test.jpg', 'image/jpeg');
@@ -137,7 +137,7 @@ describe('Media Processing', () => {
     });
 
     it('throws error on upload failure', async () => {
-      const { uploadToSupabase, supabase } = await import('../api/sms/media.js');
+      const { uploadToSupabase, supabase } = await import('../lib/sms/media.js');
 
       // Override the mock for this specific test
       supabase.storage.from.mockReturnValueOnce({
@@ -164,7 +164,7 @@ describe('Media Processing', () => {
         }
       });
 
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
 
       const urls = await processMediaUrls(
         ['https://api.twilio.com/test.jpg'],
@@ -178,7 +178,7 @@ describe('Media Processing', () => {
     });
 
     it('handles empty media URLs array', async () => {
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
       const urls = await processMediaUrls([], 'seller123', 'msg123');
       expect(urls).toEqual([]);
     });
@@ -199,7 +199,7 @@ describe('Media Processing', () => {
         }
       });
 
-      const { processMediaUrls } = await import('../api/sms/media.js');
+      const { processMediaUrls } = await import('../lib/sms/media.js');
 
       const urls = await processMediaUrls(
         ['https://fail.com/test.jpg', 'https://success.com/test.png'],
@@ -222,7 +222,7 @@ describe('Media Processing', () => {
       });
 
       let capturedFilePath;
-      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+      const { processMediaUrls, supabase } = await import('../lib/sms/media.js');
 
       supabase.storage.from.mockReturnValue({
         upload: vi.fn().mockImplementation((path) => {
@@ -255,7 +255,7 @@ describe('Media Processing', () => {
       });
 
       let capturedContentType;
-      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+      const { processMediaUrls, supabase } = await import('../lib/sms/media.js');
 
       supabase.storage.from.mockReturnValue({
         upload: vi.fn().mockImplementation((path, buffer, options) => {
@@ -292,7 +292,7 @@ describe('Media Processing', () => {
       });
 
       let capturedFilePath;
-      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+      const { processMediaUrls, supabase } = await import('../lib/sms/media.js');
 
       supabase.storage.from.mockReturnValue({
         upload: vi.fn().mockImplementation((path) => {
@@ -332,7 +332,7 @@ describe('Media Processing', () => {
 
       let capturedFilePath;
       let capturedContentType;
-      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+      const { processMediaUrls, supabase } = await import('../lib/sms/media.js');
 
       supabase.storage.from.mockReturnValue({
         upload: vi.fn().mockImplementation((path, buffer, options) => {
@@ -368,7 +368,7 @@ describe('Media Processing', () => {
 
       let capturedFilePath;
       let capturedContentType;
-      const { processMediaUrls, supabase } = await import('../api/sms/media.js');
+      const { processMediaUrls, supabase } = await import('../lib/sms/media.js');
 
       supabase.storage.from.mockReturnValue({
         upload: vi.fn().mockImplementation((path, buffer, options) => {

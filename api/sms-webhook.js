@@ -2,13 +2,13 @@
  * SMS Webhook - Clean Router
  */
 
-import { msg } from './sms/messages.js';
-import { normalizePhone, sendResponse, getGlobalCommand, logState } from './sms/helpers.js';
-import { findSellerByPhone, findConversation, createConversation, updateConversation, setState, getIncompleteListing, deleteListing } from './sms/db.js';
-import { detectIntent } from './sms/intent.js';
-import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from './sms/flows/auth.js';
-import { handleSellFlow } from './sms/flows/sell.js';
-import { processMediaUrls } from './sms/media.js';
+import { msg } from '../lib/sms/messages.js';
+import { normalizePhone, sendResponse, getGlobalCommand, logState } from '../lib/sms/helpers.js';
+import { findSellerByPhone, findConversation, createConversation, updateConversation, setState, getIncompleteListing, deleteListing } from '../lib/sms/db.js';
+import { detectIntent } from '../lib/sms/intent.js';
+import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from '../lib/sms/flows/auth.js';
+import { handleSellFlow } from '../lib/sms/flows/sell.js';
+import { processMediaUrls } from '../lib/sms/media.js';
 
 
 export default async function handler(req, res) {
