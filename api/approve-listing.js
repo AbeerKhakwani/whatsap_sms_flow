@@ -1,4 +1,46 @@
 import { createClient } from '@supabase/supabase-js';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Extract product details from description using AI
+async function extractProductDetails(description) {
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You extract product details from descriptions of Pakistani designer clothing.
+Return a JSON object with these fields (use null if not mentioned):
+- designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan")
+- product_name: type of item (e.g., "Lawn Suit", "Kurta", "Formal Dress")
+- size: size mentioned (e.g., "S", "M", "L", "XL", or specific like "Small")
+- condition: item condition (e.g., "New", "Like New", "Good", "Fair")
+- color: main color(s)
+- material: fabric type if mentioned (e.g., "Lawn", "Silk", "Chiffon")
+- original_price: original price if mentioned (number only)
+- asking_price: asking/selling price if mentioned (number only)
+
+Only return valid JSON, no other text.`
+        },
+        {
+          role: 'user',
+          content: description
+        }
+      ],
+      temperature: 0.1
+    });
+
+    const content = response.choices[0].message.content.trim();
+    // Remove markdown code blocks if present
+    const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error('AI extraction error:', error);
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
   // CORS headers
@@ -44,6 +86,18 @@ export default async function handler(req, res) {
 
 // Handle web form submission - create Shopify draft
 async function handleWebSubmission(req, res, supabase, { description, email, phone }) {
+  // Extract product details from description using AI
+  const details = await extractProductDetails(description) || {};
+
+  const designer = details.designer || 'Unknown Designer';
+  const productName = details.product_name || 'Designer Item';
+  const size = details.size || 'One Size';
+  const condition = details.condition || 'Good';
+  const color = details.color || 'Not specified';
+  const material = details.material || 'Premium fabric';
+  const originalPrice = details.original_price || 0;
+  const askingPrice = details.asking_price || 0;
+
   // Find or create seller
   let seller = null;
   if (email || phone) {
@@ -81,34 +135,34 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
     }
   }
 
-  // Create Shopify draft with TBD placeholders
+  // Create Shopify draft with extracted details
   const shopifyProduct = {
     product: {
-      title: 'Web Submission - ' + new Date().toLocaleDateString(),
+      title: `${designer} - ${productName}`,
       body_html: `<p>${description}</p>
-        <p><strong>Designer:</strong> TBD</p>
-        <p><strong>Size:</strong> TBD</p>
-        <p><strong>Condition:</strong> TBD</p>
-        <p><strong>Color:</strong> TBD</p>
-        <p><strong>Material:</strong> Premium fabric</p>
-        <p><strong>Original Price:</strong> $0</p>
+        <p><strong>Designer:</strong> ${designer}</p>
+        <p><strong>Size:</strong> ${size}</p>
+        <p><strong>Condition:</strong> ${condition}</p>
+        <p><strong>Color:</strong> ${color}</p>
+        <p><strong>Material:</strong> ${material}</p>
+        <p><strong>Original Price:</strong> $${originalPrice}</p>
         <hr>
         <p><strong>Contact Email:</strong> ${email || 'Not provided'}</p>
         <p><strong>Contact Phone:</strong> ${phone || 'Not provided'}</p>
         <p><em>Submitted via web form on ${new Date().toISOString()}</em></p>`,
-      vendor: 'Web Submission',
+      vendor: designer,
       product_type: 'Pakistani Designer Wear',
-      tags: ['preloved', 'web-submission', 'needs-review'].filter(Boolean).join(', '),
+      tags: [designer, size, condition, color, 'preloved', 'web-submission'].filter(Boolean).join(', '),
       options: [
-        { name: 'Size', values: ['TBD'] },
-        { name: 'Brand', values: ['TBD'] },
-        { name: 'Condition', values: ['TBD'] }
+        { name: 'Size', values: [size] },
+        { name: 'Brand', values: [designer] },
+        { name: 'Condition', values: [condition] }
       ],
       variants: [{
-        option1: 'TBD',
-        option2: 'TBD',
-        option3: 'TBD',
-        price: '0',
+        option1: size,
+        option2: designer,
+        option3: condition,
+        price: askingPrice.toString(),
         inventory_management: 'shopify',
         inventory_quantity: 1
       }],

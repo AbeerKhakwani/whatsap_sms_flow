@@ -28,6 +28,26 @@ vi.mock('openai', () => ({
           create: vi.fn().mockResolvedValue({ text: 'This is a beautiful Sana Safinaz kurta' })
         }
       };
+      this.chat = {
+        completions: {
+          create: vi.fn().mockResolvedValue({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  designer: 'Sana Safinaz',
+                  product_name: 'Lawn Suit',
+                  size: 'M',
+                  condition: 'Like New',
+                  color: 'Blue',
+                  material: 'Lawn',
+                  original_price: 150,
+                  asking_price: 75
+                })
+              }
+            }]
+          })
+        }
+      };
     }
   }
 }));
@@ -189,7 +209,6 @@ describe('Submit Listing API', () => {
       const body = JSON.parse(fetchCall[1].body);
 
       expect(body.product.tags).toContain('web-submission');
-      expect(body.product.tags).toContain('needs-review');
       expect(body.product.tags).toContain('preloved');
     });
   });
