@@ -16,11 +16,13 @@ Return a JSON object with these fields (use null if not mentioned):
 - designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan")
 - product_name: type of item (e.g., "Lawn Suit", "Kurta", "Formal Dress")
 - size: size mentioned (e.g., "S", "M", "L", "XL", or specific like "Small")
-- condition: item condition (e.g., "New", "Like New", "Good", "Fair")
+- condition: item condition (e.g., "New with Tags", "Like New", "Good", "Fair")
 - color: main color(s)
-- material: fabric type if mentioned (e.g., "Lawn", "Silk", "Chiffon")
-- original_price: original price if mentioned (number only)
-- asking_price: asking/selling price if mentioned (number only)
+- material: fabric type if mentioned (e.g., "Lawn", "Silk", "Chiffon", "Cotton")
+- original_price: original/retail price if mentioned (number only, USD)
+- asking_price: asking/selling price if mentioned (number only, USD)
+- measurements: any measurements mentioned (e.g., "chest 38in, length 42in")
+- includes: what's included (e.g., "shirt, pants, dupatta" or "3 piece set")
 
 Only return valid JSON, no other text.`
         },
@@ -149,6 +151,12 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
   const material = details.material || 'Premium fabric';
   const originalPrice = details.original_price || 0;
   const askingPrice = details.asking_price || 0;
+  const measurements = details.measurements || '';
+  const includes = details.includes || '';
+
+  // Calculate savings
+  const savings = originalPrice > askingPrice ? originalPrice - askingPrice : 0;
+  const savingsPercent = originalPrice > 0 ? Math.round((savings / originalPrice) * 100) : 0;
 
   // Find or create seller
   let seller = null;
@@ -198,6 +206,58 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
     'web-submission'             // Source tag
   ].filter(Boolean);
 
+  // Build metafields
+  const metafields = [
+    {
+      namespace: 'custom',
+      key: 'your_savings',
+      value: savingsPercent > 0 ? `${savingsPercent}% off ($${savings} savings)` : '',
+      type: 'single_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'estimated_retail_price',
+      value: originalPrice > 0 ? `$${originalPrice}` : '',
+      type: 'single_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'seller_description',
+      value: description,
+      type: 'multi_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'returns',
+      value: 'All sales final. Items are inspected and verified before shipping.',
+      type: 'single_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'shipping',
+      value: 'Ships within 2-3 business days. Free shipping on orders over $100.',
+      type: 'single_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'measurements',
+      value: measurements || 'Contact for measurements',
+      type: 'single_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'material',
+      value: material,
+      type: 'single_line_text_field'
+    },
+    {
+      namespace: 'custom',
+      key: 'condition',
+      value: condition,
+      type: 'single_line_text_field'
+    }
+  ].filter(m => m.value); // Only include metafields with values
+
   // Create Shopify draft with extracted details
   const shopifyProduct = {
     product: {
@@ -209,6 +269,8 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
         <p><strong>Color:</strong> ${color}</p>
         <p><strong>Material:</strong> ${material}</p>
         <p><strong>Original Price:</strong> $${originalPrice}</p>
+        ${measurements ? `<p><strong>Measurements:</strong> ${measurements}</p>` : ''}
+        ${includes ? `<p><strong>Includes:</strong> ${includes}</p>` : ''}
         <hr>
         <p><strong>Contact Email:</strong> ${email || 'Not provided'}</p>
         <p><strong>Contact Phone:</strong> ${phone || 'Not provided'}</p>
@@ -229,6 +291,7 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
         inventory_management: 'shopify',
         inventory_quantity: 1
       }],
+      metafields: metafields,
       status: 'draft'
     }
   };
