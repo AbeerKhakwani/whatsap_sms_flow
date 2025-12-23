@@ -135,7 +135,7 @@ export default function SubmitListing() {
     setIsSubmitting(true);
     try {
       // Step 1: Create the Shopify draft
-      const response = await fetch('/api/submit-listing', {
+      const response = await fetch('/api/approve-listing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, phone, description })

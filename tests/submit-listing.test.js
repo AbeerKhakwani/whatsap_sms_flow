@@ -46,7 +46,7 @@ describe('Submit Listing API', () => {
       json: () => Promise.resolve({ product: { id: 'shopify-123' } })
     });
 
-    const submitModule = await import('../api/submit-listing.js');
+    const submitModule = await import('../api/approve-listing.js');
     const transcribeModule = await import('../api/transcribe.js');
     const addImageModule = await import('../api/add-product-image.js');
     submitHandler = submitModule.default;
@@ -99,13 +99,18 @@ describe('Submit Listing API', () => {
     });
   });
 
-  describe('POST /api/submit-listing', () => {
+  // Helper to create mock response with CORS headers support
+  const createMockRes = () => ({
+    setHeader: vi.fn(),
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn(),
+    end: vi.fn()
+  });
+
+  describe('POST /api/approve-listing (web submission)', () => {
     it('returns 405 for non-POST requests', async () => {
       const req = { method: 'GET' };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
+      const res = createMockRes();
 
       await submitHandler(req, res);
 
@@ -113,20 +118,17 @@ describe('Submit Listing API', () => {
       expect(res.json).toHaveBeenCalledWith({ error: 'Method not allowed' });
     });
 
-    it('returns 400 when no description provided', async () => {
+    it('returns 400 when no description or listingId provided', async () => {
       const req = {
         method: 'POST',
         body: { email: 'test@test.com', phone: '555-1234' }
       };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
+      const res = createMockRes();
 
       await submitHandler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Please provide a description' });
+      expect(res.json).toHaveBeenCalledWith({ error: 'Please provide listingId or description' });
     });
 
     it('creates Shopify draft with description', async () => {
@@ -138,10 +140,7 @@ describe('Submit Listing API', () => {
           description: 'Beautiful Sana Safinaz lawn suit, size M, like new condition'
         }
       };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
+      const res = createMockRes();
 
       await submitHandler(req, res);
 
@@ -160,10 +159,7 @@ describe('Submit Listing API', () => {
           description: 'Test description of my item'
         }
       };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
+      const res = createMockRes();
 
       await submitHandler(req, res);
 
@@ -185,10 +181,7 @@ describe('Submit Listing API', () => {
           description: 'My designer piece'
         }
       };
-      const res = {
-        status: vi.fn().mockReturnThis(),
-        json: vi.fn()
-      };
+      const res = createMockRes();
 
       await submitHandler(req, res);
 
