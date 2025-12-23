@@ -42,6 +42,58 @@ Only return valid JSON, no other text.`
   }
 }
 
+// Add product to Shopify collections by name
+async function addToCollections(productId, collectionNames) {
+  const shopifyUrl = process.env.VITE_SHOPIFY_STORE_URL;
+  const token = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+
+  for (const name of collectionNames) {
+    if (!name || name === 'Unknown Designer' || name === 'One Size') continue;
+
+    try {
+      // Search for collection by title
+      const searchRes = await fetch(
+        `https://${shopifyUrl}/admin/api/2024-10/custom_collections.json?title=${encodeURIComponent(name)}`,
+        {
+          headers: { 'X-Shopify-Access-Token': token }
+        }
+      );
+
+      if (!searchRes.ok) continue;
+
+      const { custom_collections } = await searchRes.json();
+
+      // Find exact match
+      const collection = custom_collections.find(
+        c => c.title.toLowerCase() === name.toLowerCase()
+      );
+
+      if (collection) {
+        // Add product to collection via Collect API
+        await fetch(
+          `https://${shopifyUrl}/admin/api/2024-10/collects.json`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Shopify-Access-Token': token
+            },
+            body: JSON.stringify({
+              collect: {
+                product_id: productId,
+                collection_id: collection.id
+              }
+            })
+          }
+        );
+        console.log(`Added to collection: ${name}`);
+      }
+    } catch (e) {
+      console.log(`Could not add to collection ${name}:`, e.message);
+    }
+  }
+}
+
 export default async function handler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -135,6 +187,17 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
     }
   }
 
+  // Build tags array
+  const tags = [
+    designer,                    // Designer name for collection
+    size,                        // Size for collection
+    condition,                   // Condition tag
+    color,                       // Color tag
+    'womens',                    // Women's clothing
+    'preloved',                  // Preloved tag
+    'web-submission'             // Source tag
+  ].filter(Boolean);
+
   // Create Shopify draft with extracted details
   const shopifyProduct = {
     product: {
@@ -152,7 +215,7 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
         <p><em>Submitted via web form on ${new Date().toISOString()}</em></p>`,
       vendor: designer,
       product_type: 'Pakistani Designer Wear',
-      tags: [designer, size, condition, color, 'preloved', 'web-submission'].filter(Boolean).join(', '),
+      tags: tags.join(', '),
       options: [
         { name: 'Size', values: [size] },
         { name: 'Brand', values: [designer] },
@@ -189,6 +252,9 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
   }
 
   const { product } = await shopifyResponse.json();
+
+  // Add product to collections (designer + size)
+  await addToCollections(product.id, [designer, size]);
 
   // Create listing record in Supabase
   if (seller) {
