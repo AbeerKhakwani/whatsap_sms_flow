@@ -1,11 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, DollarSign, Settings, Send } from 'lucide-react';
+import { LayoutDashboard, Package, Users, DollarSign, Settings, Send, PlusCircle } from 'lucide-react';
 
 export default function Layout({ children }) {
   const location = useLocation();
 
   const navigation = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { name: 'Submit', path: '/submit', icon: PlusCircle },
     { name: 'Listings', path: '/listings', icon: Package },
     { name: 'Sellers', path: '/sellers', icon: Users },
     { name: 'Transactions', path: '/transactions', icon: DollarSign },

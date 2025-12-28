@@ -38,7 +38,13 @@ export default function Dashboard() {
     if (error) {
       console.error('Error fetching listings:', error);
     } else {
-      setListings(data || []);
+      // Flatten listing_data into top-level for easier access
+      const flattened = (data || []).map(listing => ({
+        ...listing,
+        ...listing.listing_data,
+        images: listing.listing_data?.photos || [],
+      }));
+      setListings(flattened);
     }
     setLoading(false);
   }
@@ -52,7 +58,7 @@ export default function Dashboard() {
     const { data: approved } = await supabase
       .from('listings')
       .select('id', { count: 'exact' })
-      .eq('status', 'approved');
+      .eq('status', 'live');
     
     const { data: sold } = await supabase
       .from('listings')

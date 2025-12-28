@@ -13,14 +13,11 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        {/* Public page - no sidebar */}
-        <Route path="/submit" element={<SubmitListing />} />
-
-        {/* Admin pages with sidebar */}
         <Route path="/*" element={
           <Layout>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/submit" element={<SubmitListing />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/sellers" element={<Sellers />} />
               <Route path="/sellers/:id" element={<SellerDetail />} />

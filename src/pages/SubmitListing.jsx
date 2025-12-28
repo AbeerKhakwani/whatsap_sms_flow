@@ -125,7 +125,7 @@ export default function SubmitListing() {
     });
   }
 
-  // Submit to Shopify
+  // Submit for approval (uploads to Supabase, then admin approves to Shopify)
   async function handleSubmit() {
     if (!description && photos.length === 0) {
       alert('Please add a description or photos');
@@ -134,37 +134,36 @@ export default function SubmitListing() {
 
     setIsSubmitting(true);
     try {
-      // Step 1: Create the Shopify draft
-      const response = await fetch('/api/approve-listing', {
+      // Convert all photos to base64
+      const imageData = [];
+      for (const photo of photos) {
+        const base64 = await fileToBase64(photo.file);
+        imageData.push({
+          base64,
+          filename: photo.file.name
+        });
+      }
+
+      // Submit listing for approval (uploads to Supabase)
+      const response = await fetch('/api/submit-for-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, phone, description })
+        body: JSON.stringify({
+          email,
+          phone,
+          description,
+          images: imageData
+        })
       });
 
       const data = await response.json();
 
       if (!data.success) {
-        alert(data.error || 'Failed to create draft.');
+        alert(data.error || 'Failed to submit listing.');
         return;
       }
 
-      const productId = data.productId;
-
-      // Step 2: Upload photos one by one
-      for (let i = 0; i < photos.length; i++) {
-        const base64 = await fileToBase64(photos[i].file);
-
-        await fetch('/api/add-product-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productId,
-            base64,
-            filename: photos[i].file.name
-          })
-        });
-      }
-
+      console.log(`Listing submitted! ID: ${data.listingId}, Photos: ${data.photosUploaded}`);
       setSubmitted(true);
     } catch (error) {
       console.error('Submit error:', error);
@@ -182,9 +181,9 @@ export default function SubmitListing() {
           <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-100 flex items-center justify-center">
             <CheckCircle className="w-10 h-10 text-green-600" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">Draft Created!</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Submitted!</h1>
           <p className="text-gray-600 mb-6">
-            Your listing has been saved as a draft in Shopify.
+            Your listing has been submitted for review. We'll notify you once it's live!
           </p>
           <button
             onClick={() => {
