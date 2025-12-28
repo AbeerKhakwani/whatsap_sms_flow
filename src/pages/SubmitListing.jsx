@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
 import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 export default function SubmitListing() {
   const [step, setStep] = useState(1);
@@ -134,17 +135,40 @@ export default function SubmitListing() {
 
     setIsSubmitting(true);
     try {
-      // Convert all photos to base64
-      const imageData = [];
-      for (const photo of photos) {
-        const base64 = await fileToBase64(photo.file);
-        imageData.push({
-          base64,
-          filename: photo.file.name
-        });
+      // Generate unique folder for this submission
+      const folderId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const uploadedUrls = [];
+
+      // Upload photos directly to Supabase from frontend
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i];
+        const ext = photo.file.name.split('.').pop() || 'jpg';
+        const filePath = `${folderId}/photo_${i + 1}.${ext}`;
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('listing-photos')
+          .upload(filePath, photo.file, {
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          continue;
+        }
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from('listing-photos')
+          .getPublicUrl(filePath);
+
+        if (urlData?.publicUrl) {
+          uploadedUrls.push(urlData.publicUrl);
+          console.log(`Uploaded: ${filePath}`);
+        }
       }
 
-      // Submit listing for approval (uploads to Supabase)
+      // Submit listing with just the URLs (small payload)
       const response = await fetch('/api/submit-for-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -152,7 +176,7 @@ export default function SubmitListing() {
           email,
           phone,
           description,
-          images: imageData
+          imageUrls: uploadedUrls  // Just URLs, not base64
         })
       });
 
@@ -163,7 +187,7 @@ export default function SubmitListing() {
         return;
       }
 
-      console.log(`Listing submitted! ID: ${data.listingId}, Photos: ${data.photosUploaded}`);
+      console.log(`Listing submitted! ID: ${data.listingId}, Photos: ${uploadedUrls.length}`);
       setSubmitted(true);
     } catch (error) {
       console.error('Submit error:', error);

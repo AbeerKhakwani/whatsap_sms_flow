@@ -66,10 +66,10 @@ export default async function handler(req, res) {
   );
 
   try {
-    const { email, phone, description, images } = req.body;
-    // images is array of { base64, filename }
+    const { email, phone, description, imageUrls } = req.body;
+    // imageUrls is array of Supabase public URLs (uploaded from frontend)
 
-    if (!description && (!images || images.length === 0)) {
+    if (!description && (!imageUrls || imageUrls.length === 0)) {
       return res.status(400).json({ error: 'Please provide description or images' });
     }
 
@@ -113,46 +113,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Create a unique folder for this listing
-    const listingId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const photoUrls = [];
-
-    // Upload images to Supabase bucket
-    if (images && images.length > 0) {
-      for (let i = 0; i < images.length; i++) {
-        const { base64, filename } = images[i];
-
-        // Convert base64 to buffer
-        const buffer = Buffer.from(base64, 'base64');
-
-        // Determine file extension
-        const ext = filename?.split('.').pop() || 'jpg';
-        const filePath = `${listingId}/photo_${i + 1}.${ext}`;
-
-        // Upload to Supabase storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('listing-photos')
-          .upload(filePath, buffer, {
-            contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
-            upsert: true
-          });
-
-        if (uploadError) {
-          console.error('Upload error:', uploadError);
-          continue;
-        }
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from('listing-photos')
-          .getPublicUrl(filePath);
-
-        if (urlData?.publicUrl) {
-          photoUrls.push(urlData.publicUrl);
-          console.log(`Uploaded: ${filePath}`);
-        }
-      }
-    }
+    // Images already uploaded to Supabase from frontend
+    const photoUrls = imageUrls || [];
 
     // Create listing with pending_approval status
     const listingData = {
