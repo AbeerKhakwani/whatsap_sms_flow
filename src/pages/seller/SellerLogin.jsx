@@ -19,12 +19,13 @@ export default function SellerLogin() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/send-code', {
+      const response = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          mode === 'email' ? { email: identifier } : { phone: identifier }
-        )
+        body: JSON.stringify({
+          action: 'send-code',
+          ...(mode === 'email' ? { email: identifier } : { phone: identifier })
+        })
       });
 
       const data = await response.json();
@@ -51,10 +52,11 @@ export default function SellerLogin() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/verify-code', {
+      const response = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'verify-code',
           ...(mode === 'email' ? { email: identifier } : { phone: identifier }),
           code
         })
@@ -81,10 +83,10 @@ export default function SellerLogin() {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/google', {
+      const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential })
+        body: JSON.stringify({ action: 'google', credential: response.credential })
       });
 
       const data = await res.json();

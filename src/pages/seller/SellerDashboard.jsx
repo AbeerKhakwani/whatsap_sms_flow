@@ -30,7 +30,7 @@ export default function SellerDashboard() {
 
   async function fetchListings(token) {
     try {
-      const response = await fetch('/api/seller/listings', {
+      const response = await fetch('/api/seller?action=listings', {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -68,7 +68,7 @@ export default function SellerDashboard() {
 
     try {
       const token = localStorage.getItem('seller_token');
-      const response = await fetch('/api/seller/update-listing', {
+      const response = await fetch('/api/seller?action=update', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
