@@ -97,14 +97,21 @@ export default function Dashboard() {
   }
 
   async function rejectListing(listing) {
-    if (!confirm('Are you sure you want to reject this listing?')) return;
-    
+    if (!confirm('Are you sure you want to reject this listing? This will delete the Shopify draft.')) return;
+
     setApproving(listing.id);
     try {
-      await supabase
-        .from('listings')
-        .update({ status: 'rejected' })
-        .eq('id', listing.id);
+      const response = await fetch('/api/reject-listing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listingId: listing.id })
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to reject listing');
+      }
 
       setListings(prev => prev.filter(l => l.id !== listing.id));
       setStats(prev => ({ ...prev, pending: prev.pending - 1 }));

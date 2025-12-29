@@ -148,6 +148,23 @@ export default async function handler(req, res) {
         created_at: new Date().toISOString()
       });
 
+    // Add Shopify product ID to seller's array (track all their listings)
+    if (sellerId) {
+      const { data: sellerData } = await supabase
+        .from('sellers')
+        .select('shopify_product_ids')
+        .eq('id', sellerId)
+        .single();
+
+      const currentIds = sellerData?.shopify_product_ids || [];
+      const updatedIds = [...currentIds, product.id.toString()];
+
+      await supabase
+        .from('sellers')
+        .update({ shopify_product_ids: updatedIds })
+        .eq('id', sellerId);
+    }
+
     return res.status(200).json({
       success: true,
       productId: product.id,
