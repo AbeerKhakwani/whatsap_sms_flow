@@ -14,6 +14,13 @@ export default function SubmitListing() {
   const [submitted, setSubmitted] = useState(false);
   const [inputMode, setInputMode] = useState('text');
 
+  // AI validation state
+  const [isValidating, setIsValidating] = useState(false);
+  const [extractedFields, setExtractedFields] = useState({});
+  const [missingFields, setMissingFields] = useState([]);
+  const [aiMessage, setAiMessage] = useState('');
+  const [isComplete, setIsComplete] = useState(false);
+
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const fileInputRef = useRef(null);
@@ -115,6 +122,46 @@ export default function SubmitListing() {
 
   function removePhoto(index) {
     setPhotos(photos.filter((_, i) => i !== index));
+  }
+
+  // AI validation - check if description has all required fields
+  async function validateDescription() {
+    if (!description.trim()) {
+      setAiMessage("Please describe your item first!");
+      return false;
+    }
+
+    setIsValidating(true);
+    try {
+      const response = await fetch('/api/validate-listing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description })
+      });
+
+      const data = await response.json();
+
+      setExtractedFields(data.extracted || {});
+      setMissingFields(data.missing || []);
+      setAiMessage(data.message || '');
+      setIsComplete(data.isComplete || false);
+
+      return data.isComplete;
+    } catch (error) {
+      console.error('Validation error:', error);
+      setAiMessage("Couldn't validate. Please try again.");
+      return false;
+    } finally {
+      setIsValidating(false);
+    }
+  }
+
+  // Handle next from step 2 - validate first
+  async function handleDescriptionNext() {
+    const complete = await validateDescription();
+    if (complete) {
+      setStep(3);
+    }
   }
 
   function fileToBase64(file) {
@@ -287,6 +334,7 @@ export default function SubmitListing() {
           {step === 2 && (
             <div className="space-y-6">
               <h2 className="text-xl font-semibold text-gray-800">Describe Your Item</h2>
+              <p className="text-gray-500 text-sm">Include: designer/brand, size, condition, and asking price</p>
 
               <div className="flex gap-2">
                 <button
@@ -314,8 +362,12 @@ export default function SubmitListing() {
               {inputMode === 'text' ? (
                 <textarea
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Tell us about your item... Designer, size, condition, what you'd like to get for it, etc."
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    setAiMessage(''); // Clear message when typing
+                    setIsComplete(false);
+                  }}
+                  placeholder="Example: Sana Safinaz lawn suit, size medium, like new condition, asking $85"
                   rows={6}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none resize-none"
                 />
@@ -357,6 +409,35 @@ export default function SubmitListing() {
                 </div>
               )}
 
+              {/* AI Feedback */}
+              {aiMessage && (
+                <div className={`p-4 rounded-xl ${isComplete ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                  <p className={`${isComplete ? 'text-green-800' : 'text-amber-800'}`}>{aiMessage}</p>
+
+                  {/* Show extracted fields */}
+                  {Object.keys(extractedFields).length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {Object.entries(extractedFields).map(([key, value]) => (
+                        value && (
+                          <span key={key} className="px-2 py-1 bg-white rounded-lg text-xs text-gray-600">
+                            <span className="font-medium">{key}:</span> {value}
+                          </span>
+                        )
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Show missing fields */}
+                  {missingFields.length > 0 && !isComplete && (
+                    <div className="mt-3">
+                      <p className="text-xs text-amber-600">
+                        Still need: {missingFields.join(', ')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep(1)}
@@ -365,10 +446,18 @@ export default function SubmitListing() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep(3)}
-                  className="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition"
+                  onClick={handleDescriptionNext}
+                  disabled={isValidating || !description.trim()}
+                  className="flex-1 bg-primary-600 text-white py-3 rounded-xl font-semibold hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  Next
+                  {isValidating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    'Next'
+                  )}
                 </button>
               </div>
             </div>
