@@ -1,6 +1,5 @@
 import { useState, useRef } from 'react';
 import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 
 export default function SubmitListing() {
   const [step, setStep] = useState(1);
@@ -173,7 +172,7 @@ export default function SubmitListing() {
     });
   }
 
-  // Submit for approval (uploads to Supabase, then admin approves to Shopify)
+  // Submit - creates Shopify draft, then uploads images one-by-one
   async function handleSubmit() {
     if (!description && photos.length === 0) {
       alert('Please add a description or photos');
@@ -182,59 +181,51 @@ export default function SubmitListing() {
 
     setIsSubmitting(true);
     try {
-      // Generate unique folder for this submission
-      const folderId = `web_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const uploadedUrls = [];
-
-      // Upload photos directly to Supabase from frontend
-      for (let i = 0; i < photos.length; i++) {
-        const photo = photos[i];
-        const ext = photo.file.name.split('.').pop() || 'jpg';
-        const filePath = `${folderId}/photo_${i + 1}.${ext}`;
-
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('listing-photos')
-          .upload(filePath, photo.file, {
-            cacheControl: '3600',
-            upsert: true
-          });
-
-        if (uploadError) {
-          console.error('Upload error:', uploadError);
-          continue;
-        }
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from('listing-photos')
-          .getPublicUrl(filePath);
-
-        if (urlData?.publicUrl) {
-          uploadedUrls.push(urlData.publicUrl);
-          console.log(`Uploaded: ${filePath}`);
-        }
-      }
-
-      // Submit listing with just the URLs (small payload)
-      const response = await fetch('/api/submit-for-approval', {
+      // Step 1: Create Shopify draft product
+      const draftResponse = await fetch('/api/create-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
           phone,
           description,
-          imageUrls: uploadedUrls  // Just URLs, not base64
+          extracted: extractedFields  // From AI validation
         })
       });
 
-      const data = await response.json();
+      const draftData = await draftResponse.json();
 
-      if (!data.success) {
-        alert(data.error || 'Failed to submit listing.');
+      if (!draftData.success) {
+        alert(draftData.error || 'Failed to create draft.');
         return;
       }
 
-      console.log(`Listing submitted! ID: ${data.listingId}, Photos: ${uploadedUrls.length}`);
+      const productId = draftData.productId;
+      console.log(`Draft created: ${productId}`);
+
+      // Step 2: Upload photos one-by-one to Shopify (avoids 413 error)
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i];
+        const base64 = await fileToBase64(photo.file);
+
+        const imageResponse = await fetch('/api/add-product-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId,
+            base64,
+            filename: photo.file.name
+          })
+        });
+
+        const imageData = await imageResponse.json();
+        if (imageData.success) {
+          console.log(`Uploaded photo ${i + 1}/${photos.length}`);
+        } else {
+          console.error(`Failed to upload photo ${i + 1}`);
+        }
+      }
+
       setSubmitted(true);
     } catch (error) {
       console.error('Submit error:', error);

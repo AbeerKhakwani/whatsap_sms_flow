@@ -346,7 +346,7 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
   });
 }
 
-// Handle approving an existing listing from Supabase
+// Handle approving an existing listing - just change Shopify status from draft to active
 async function handleApproveListing(req, res, supabase, listingId) {
   // Get listing
   const { data: listing, error: fetchError } = await supabase
@@ -358,60 +358,28 @@ async function handleApproveListing(req, res, supabase, listingId) {
   if (fetchError) throw fetchError;
   if (!listing) throw new Error('Listing not found');
 
-  // Extract data from listing_data JSON
-  const data = listing.listing_data || {};
-  const designer = data.designer || 'Unknown Designer';
-  const productName = data.item_type || data.product_name || 'Designer Item';
-  const size = data.size || 'One Size';
-  const condition = data.condition || 'Good';
-  const color = data.color || '';
-  const material = data.material || 'Premium fabric';
-  const originalPrice = data.original_price_usd || 0;
-  const askingPrice = data.asking_price_usd || 0;
-  const photos = data.photos || [];
-  const description = listing.description || data.description || '';
+  const shopifyProductId = listing.shopify_product_id;
 
-  // Create in Shopify
-  const shopifyProduct = {
-    product: {
-      title: `${designer} - ${productName}`,
-      body_html: `<p>${description}</p>
-        <p><strong>Designer:</strong> ${designer}</p>
-        <p><strong>Size:</strong> ${size}</p>
-        <p><strong>Condition:</strong> ${condition}</p>
-        ${color ? `<p><strong>Color:</strong> ${color}</p>` : ''}
-        <p><strong>Material:</strong> ${material}</p>
-        ${originalPrice ? `<p><strong>Original Price:</strong> $${originalPrice}</p>` : ''}`,
-      vendor: designer,
-      product_type: 'Pakistani Designer Wear',
-      tags: [designer, size, condition, color, 'preloved'].filter(Boolean).join(', '),
-      images: photos.map(url => ({ src: url })),
-      options: [
-        { name: 'Size', values: [size] },
-        { name: 'Brand', values: [designer] },
-        { name: 'Condition', values: [condition] }
-      ],
-      variants: [{
-        option1: size,
-        option2: designer,
-        option3: condition,
-        price: askingPrice.toString(),
-        inventory_management: 'shopify',
-        inventory_quantity: 1
-      }],
-      status: 'active'
-    }
-  };
+  if (!shopifyProductId) {
+    throw new Error('No Shopify product ID found for this listing');
+  }
 
+  // Update Shopify product status from "draft" to "active"
   const shopifyResponse = await fetch(
-    `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products.json`,
+    `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${shopifyProductId}.json`,
     {
-      method: 'POST',
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
       },
-      body: JSON.stringify(shopifyProduct)
+      body: JSON.stringify({
+        product: {
+          id: shopifyProductId,
+          status: 'active',
+          tags: (listing.listing_data?.designer || '') + ', preloved'  // Remove pending-approval tag
+        }
+      })
     }
   );
 
@@ -422,45 +390,12 @@ async function handleApproveListing(req, res, supabase, listingId) {
 
   const { product } = await shopifyResponse.json();
 
-  // Get Shopify image URLs to store in listing_data
-  const shopifyImageUrls = (product.images || []).map(img => img.src);
-  const shopifyImageCount = shopifyImageUrls.length;
-  const supabaseImageCount = photos.length;
-
-  console.log(`Shopify has ${shopifyImageCount} images, Supabase had ${supabaseImageCount}`);
-
-  // Only delete from Supabase if Shopify has the images
-  if (shopifyImageCount >= supabaseImageCount && photos.length > 0) {
-    console.log('Images transferred successfully, cleaning up Supabase bucket...');
-    for (const url of photos) {
-      try {
-        // Extract path from Supabase URL (bucket is listing-photos)
-        const match = url.match(/listing-photos\/(.+)$/);
-        if (match) {
-          await supabase.storage.from('listing-photos').remove([match[1]]);
-          console.log(`Deleted from bucket: ${match[1]}`);
-        }
-      } catch (e) {
-        console.log('Could not delete image:', e.message);
-      }
-    }
-  } else if (photos.length > 0) {
-    console.log('Warning: Not all images transferred to Shopify, keeping Supabase copies');
-  }
-
-  // Update listing_data with Shopify image URLs (replacing Supabase URLs)
-  const updatedListingData = {
-    ...data,
-    photos: shopifyImageUrls,  // Now points to Shopify CDN
-    supabase_photos_cleaned: true
-  };
+  // Update listing status in Supabase
   await supabase
     .from('listings')
     .update({
-      shopify_product_id: product.id.toString(),
       status: 'live',
-      approved_at: new Date().toISOString(),
-      listing_data: updatedListingData
+      approved_at: new Date().toISOString()
     })
     .eq('id', listingId);
 
@@ -473,18 +408,18 @@ async function handleApproveListing(req, res, supabase, listingId) {
       .single();
 
     const currentIds = seller?.shopify_product_ids || [];
-    const updatedIds = [...currentIds, product.id.toString()];
-
-    await supabase
-      .from('sellers')
-      .update({ shopify_product_ids: updatedIds })
-      .eq('id', listing.seller_id);
+    if (!currentIds.includes(shopifyProductId)) {
+      const updatedIds = [...currentIds, shopifyProductId];
+      await supabase
+        .from('sellers')
+        .update({ shopify_product_ids: updatedIds })
+        .eq('id', listing.seller_id);
+    }
   }
 
   return res.status(200).json({
     success: true,
     productId: product.id,
-    imagesTransferred: shopifyImageCount,
     shopifyUrl: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`
   });
 }
