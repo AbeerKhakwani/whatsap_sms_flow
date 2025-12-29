@@ -327,7 +327,7 @@ async function handleWebSubmission(req, res, supabase, { description, email, pho
         seller_id: seller.id,
         shopify_product_id: product.id.toString(),
         description: description,
-        status: 'draft',
+        status: 'pending_approval',
         listing_data: {
           contact_email: email,
           contact_phone: phone,
