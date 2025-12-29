@@ -9,10 +9,19 @@ import Settings from './pages/Settings';
 import TestSMS from './pages/TestSMS';
 import SubmitListing from './pages/SubmitListing';
 
+// Seller Portal
+import SellerLogin from './pages/seller/SellerLogin';
+import SellerDashboard from './pages/seller/SellerDashboard';
+
 export default function App() {
   return (
     <Router>
       <Routes>
+        {/* Seller Portal Routes (separate from admin) */}
+        <Route path="/seller/login" element={<SellerLogin />} />
+        <Route path="/seller" element={<SellerDashboard />} />
+
+        {/* Admin Dashboard Routes */}
         <Route path="/*" element={
           <Layout>
             <Routes>
