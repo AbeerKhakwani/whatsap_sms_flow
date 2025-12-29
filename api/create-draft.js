@@ -1,10 +1,9 @@
 // api/create-draft.js
-// Creates a Shopify DRAFT product (for approval workflow)
+// Creates a Shopify DRAFT product with pending-approval tag
 
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -19,7 +18,6 @@ export default async function handler(req, res) {
 
   try {
     const { email, phone, description, extracted } = req.body;
-    // extracted = { designer, item_type, size, condition, asking_price, color, material, etc }
 
     if (!description && !extracted) {
       return res.status(400).json({ error: 'Please provide description or extracted fields' });
@@ -34,7 +32,7 @@ export default async function handler(req, res) {
     const color = fields.color || '';
     const material = fields.material || '';
 
-    // Create Shopify DRAFT product
+    // Create Shopify DRAFT product with pending-approval tag
     const shopifyProduct = {
       product: {
         title: `${designer} - ${itemType}`,
@@ -60,7 +58,7 @@ export default async function handler(req, res) {
           inventory_management: 'shopify',
           inventory_quantity: 1
         }],
-        status: 'draft'  // DRAFT - not visible to customers
+        status: 'draft'
       }
     };
 
@@ -83,86 +81,61 @@ export default async function handler(req, res) {
     }
 
     const { product } = await shopifyResponse.json();
+    console.log(`Created Shopify draft: ${product.id}`);
 
-    // Also save to Supabase listings table for tracking
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
-    );
-
-    // Find or create seller
-    let sellerId = null;
+    // Track seller and their Shopify product IDs (optional - only if email/phone provided)
     if (email || phone) {
-      let seller = null;
+      try {
+        const supabase = createClient(
+          process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
+          process.env.SUPABASE_SERVICE_KEY
+        );
 
-      if (email) {
-        const { data } = await supabase
-          .from('sellers')
-          .select('id')
-          .eq('email', email)
-          .single();
-        if (data) seller = data;
+        // Find or create seller
+        let seller = null;
+
+        if (email) {
+          const { data } = await supabase
+            .from('sellers')
+            .select('id, shopify_product_ids')
+            .eq('email', email)
+            .single();
+          if (data) seller = data;
+        }
+
+        if (!seller && phone) {
+          const { data } = await supabase
+            .from('sellers')
+            .select('id, shopify_product_ids')
+            .eq('phone', phone)
+            .single();
+          if (data) seller = data;
+        }
+
+        if (!seller) {
+          const { data: newSeller } = await supabase
+            .from('sellers')
+            .insert({
+              email: email || null,
+              phone: phone || null,
+              name: email ? email.split('@')[0] : 'Web Seller',
+              shopify_product_ids: [product.id.toString()],
+              created_at: new Date().toISOString()
+            })
+            .select('id')
+            .single();
+          seller = newSeller;
+        } else {
+          // Add to existing seller's product IDs
+          const currentIds = seller.shopify_product_ids || [];
+          await supabase
+            .from('sellers')
+            .update({ shopify_product_ids: [...currentIds, product.id.toString()] })
+            .eq('id', seller.id);
+        }
+      } catch (err) {
+        console.error('Seller tracking error (non-fatal):', err);
       }
-
-      if (!seller && phone) {
-        const { data } = await supabase
-          .from('sellers')
-          .select('id')
-          .eq('phone', phone)
-          .single();
-        if (data) seller = data;
-      }
-
-      if (!seller) {
-        const { data: newSeller } = await supabase
-          .from('sellers')
-          .insert({
-            email: email || null,
-            phone: phone || null,
-            name: email ? email.split('@')[0] : 'Web Seller',
-            created_at: new Date().toISOString()
-          })
-          .select('id')
-          .single();
-        if (newSeller) seller = newSeller;
-      }
-
-      sellerId = seller?.id;
-    }
-
-    // Create listing record
-    await supabase
-      .from('listings')
-      .insert({
-        seller_id: sellerId,
-        shopify_product_id: product.id.toString(),
-        status: 'pending_approval',
-        description: description,
-        listing_data: {
-          ...fields,
-          contact_email: email,
-          contact_phone: phone,
-          submitted_via: 'web_form',
-          submitted_at: new Date().toISOString()
-        },
-        created_at: new Date().toISOString()
-      });
-
-    // Add Shopify product ID to seller's array (track all their listings)
-    if (sellerId) {
-      const { data: sellerData } = await supabase
-        .from('sellers')
-        .select('shopify_product_ids')
-        .eq('id', sellerId)
-        .single();
-
-      const currentIds = sellerData?.shopify_product_ids || [];
-      const updatedIds = [...currentIds, product.id.toString()];
-
-      await supabase
-        .from('sellers')
-        .update({ shopify_product_ids: updatedIds })
-        .eq('id', sellerId);
     }
 
     return res.status(200).json({
