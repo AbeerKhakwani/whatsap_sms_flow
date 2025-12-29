@@ -1,425 +1,84 @@
-import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// Extract product details from description using AI
-async function extractProductDetails(description) {
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: `You extract product details from descriptions of Pakistani designer clothing.
-Return a JSON object with these fields (use null if not mentioned):
-- designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan")
-- product_name: type of item (e.g., "Lawn Suit", "Kurta", "Formal Dress")
-- size: size mentioned (e.g., "S", "M", "L", "XL", or specific like "Small")
-- condition: item condition (e.g., "New with Tags", "Like New", "Good", "Fair")
-- color: main color(s)
-- material: fabric type if mentioned (e.g., "Lawn", "Silk", "Chiffon", "Cotton")
-- original_price: original/retail price if mentioned (number only, USD)
-- asking_price: asking/selling price if mentioned (number only, USD)
-- measurements: any measurements mentioned (e.g., "chest 38in, length 42in")
-- includes: what's included (e.g., "shirt, pants, dupatta" or "3 piece set")
-
-Only return valid JSON, no other text.`
-        },
-        {
-          role: 'user',
-          content: description
-        }
-      ],
-      temperature: 0.1
-    });
-
-    const content = response.choices[0].message.content.trim();
-    // Remove markdown code blocks if present
-    const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
-    return JSON.parse(jsonStr);
-  } catch (error) {
-    console.error('AI extraction error:', error);
-    return null;
-  }
-}
-
-// Add product to Shopify collections by name
-async function addToCollections(productId, collectionNames) {
-  const shopifyUrl = process.env.VITE_SHOPIFY_STORE_URL;
-  const token = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
-
-  for (const name of collectionNames) {
-    if (!name || name === 'Unknown Designer' || name === 'One Size') continue;
-
-    try {
-      // Search for collection by title
-      const searchRes = await fetch(
-        `https://${shopifyUrl}/admin/api/2024-10/custom_collections.json?title=${encodeURIComponent(name)}`,
-        {
-          headers: { 'X-Shopify-Access-Token': token }
-        }
-      );
-
-      if (!searchRes.ok) continue;
-
-      const { custom_collections } = await searchRes.json();
-
-      // Find exact match
-      const collection = custom_collections.find(
-        c => c.title.toLowerCase() === name.toLowerCase()
-      );
-
-      if (collection) {
-        // Add product to collection via Collect API
-        await fetch(
-          `https://${shopifyUrl}/admin/api/2024-10/collects.json`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Shopify-Access-Token': token
-            },
-            body: JSON.stringify({
-              collect: {
-                product_id: productId,
-                collection_id: collection.id
-              }
-            })
-          }
-        );
-        console.log(`Added to collection: ${name}`);
-      }
-    } catch (e) {
-      console.log(`Could not add to collection ${name}:`, e.message);
-    }
-  }
-}
+// api/approve-listing.js
+// Approve a listing - change Shopify status from draft to active, remove pending-approval tag
 
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const supabase = createClient(
-    process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
-  );
-
   try {
-    const { listingId, description, email, phone } = req.body;
+    const { shopifyProductId } = req.body;
 
-    // Mode 1: Web submission (create draft directly)
-    if (description) {
-      return await handleWebSubmission(req, res, supabase, { description, email, phone });
+    if (!shopifyProductId) {
+      return res.status(400).json({ error: 'Please provide shopifyProductId' });
     }
 
-    // Mode 2: Approve existing listing
-    if (listingId) {
-      return await handleApproveListing(req, res, supabase, listingId);
+    const shopifyUrl = process.env.VITE_SHOPIFY_STORE_URL;
+    const token = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+
+    // First get current product to read existing tags
+    const getResponse = await fetch(
+      `https://${shopifyUrl}/admin/api/2024-10/products/${shopifyProductId}.json`,
+      {
+        headers: { 'X-Shopify-Access-Token': token }
+      }
+    );
+
+    if (!getResponse.ok) {
+      throw new Error('Product not found in Shopify');
     }
 
-    return res.status(400).json({ error: 'Please provide listingId or description' });
+    const { product: currentProduct } = await getResponse.json();
+
+    // Remove pending-approval tag, keep others
+    const currentTags = currentProduct.tags?.split(', ') || [];
+    const newTags = currentTags
+      .filter(tag => tag.toLowerCase() !== 'pending-approval')
+      .join(', ');
+
+    // Update Shopify product: status to active, remove pending-approval tag
+    const updateResponse = await fetch(
+      `https://${shopifyUrl}/admin/api/2024-10/products/${shopifyProductId}.json`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': token
+        },
+        body: JSON.stringify({
+          product: {
+            id: shopifyProductId,
+            status: 'active',
+            tags: newTags
+          }
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      const error = await updateResponse.text();
+      throw new Error(`Shopify error: ${error}`);
+    }
+
+    const { product } = await updateResponse.json();
+
+    return res.status(200).json({
+      success: true,
+      productId: product.id,
+      shopifyUrl: `https://${shopifyUrl}/admin/products/${product.id}`
+    });
 
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Approve error:', error);
+    return res.status(500).json({ error: error.message });
   }
-}
-
-// Handle web form submission - create Shopify draft
-async function handleWebSubmission(req, res, supabase, { description, email, phone }) {
-  // Extract product details from description using AI
-  const details = await extractProductDetails(description) || {};
-
-  const designer = details.designer || 'Unknown Designer';
-  const productName = details.product_name || 'Designer Item';
-  const size = details.size || 'One Size';
-  const condition = details.condition || 'Good';
-  const color = details.color || 'Not specified';
-  const material = details.material || 'Premium fabric';
-  const originalPrice = details.original_price || 0;
-  const askingPrice = details.asking_price || 0;
-  const measurements = details.measurements || '';
-  const includes = details.includes || '';
-
-  // Calculate savings
-  const savings = originalPrice > askingPrice ? originalPrice - askingPrice : 0;
-  const savingsPercent = originalPrice > 0 ? Math.round((savings / originalPrice) * 100) : 0;
-
-  // Find or create seller
-  let seller = null;
-  if (email || phone) {
-    if (email) {
-      const { data: emailSeller } = await supabase
-        .from('sellers')
-        .select('*')
-        .eq('email', email)
-        .single();
-      if (emailSeller) seller = emailSeller;
-    }
-
-    if (!seller && phone) {
-      const { data: phoneSeller } = await supabase
-        .from('sellers')
-        .select('*')
-        .eq('phone', phone)
-        .single();
-      if (phoneSeller) seller = phoneSeller;
-    }
-
-    if (!seller) {
-      const { data: newSeller, error: sellerError } = await supabase
-        .from('sellers')
-        .insert({
-          email: email || null,
-          phone: phone || null,
-          name: email ? email.split('@')[0] : 'Web Seller',
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (!sellerError) seller = newSeller;
-    }
-  }
-
-  // Build tags array
-  const tags = [
-    designer,                    // Designer name for collection
-    size,                        // Size for collection
-    condition,                   // Condition tag
-    color,                       // Color tag
-    'womens',                    // Women's clothing
-    'preloved',                  // Preloved tag
-    'web-submission'             // Source tag
-  ].filter(Boolean);
-
-  // Build metafields
-  const metafields = [
-    {
-      namespace: 'custom',
-      key: 'your_savings',
-      value: savingsPercent > 0 ? `${savingsPercent}% off ($${savings} savings)` : '',
-      type: 'single_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'estimated_retail_price',
-      value: originalPrice > 0 ? `$${originalPrice}` : '',
-      type: 'single_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'seller_description',
-      value: description,
-      type: 'multi_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'returns',
-      value: 'All sales final. Items are inspected and verified before shipping.',
-      type: 'single_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'shipping',
-      value: 'Ships within 2-3 business days. Free shipping on orders over $100.',
-      type: 'single_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'measurements',
-      value: measurements || 'Contact for measurements',
-      type: 'single_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'material',
-      value: material,
-      type: 'single_line_text_field'
-    },
-    {
-      namespace: 'custom',
-      key: 'condition',
-      value: condition,
-      type: 'single_line_text_field'
-    }
-  ].filter(m => m.value); // Only include metafields with values
-
-  // Create Shopify draft with extracted details
-  const shopifyProduct = {
-    product: {
-      title: `${designer} - ${productName}`,
-      body_html: `<p>${description}</p>
-        <p><strong>Designer:</strong> ${designer}</p>
-        <p><strong>Size:</strong> ${size}</p>
-        <p><strong>Condition:</strong> ${condition}</p>
-        <p><strong>Color:</strong> ${color}</p>
-        <p><strong>Material:</strong> ${material}</p>
-        <p><strong>Original Price:</strong> $${originalPrice}</p>
-        ${measurements ? `<p><strong>Measurements:</strong> ${measurements}</p>` : ''}
-        ${includes ? `<p><strong>Includes:</strong> ${includes}</p>` : ''}
-        <hr>
-        <p><strong>Contact Email:</strong> ${email || 'Not provided'}</p>
-        <p><strong>Contact Phone:</strong> ${phone || 'Not provided'}</p>
-        <p><em>Submitted via web form on ${new Date().toISOString()}</em></p>`,
-      vendor: designer,
-      product_type: 'Pakistani Designer Wear',
-      tags: tags.join(', '),
-      options: [
-        { name: 'Size', values: [size] },
-        { name: 'Brand', values: [designer] },
-        { name: 'Condition', values: [condition] }
-      ],
-      variants: [{
-        option1: size,
-        option2: designer,
-        option3: condition,
-        price: askingPrice.toString(),
-        inventory_management: 'shopify',
-        inventory_quantity: 1
-      }],
-      metafields: metafields,
-      status: 'draft'
-    }
-  };
-
-  const shopifyResponse = await fetch(
-    `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products.json`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
-      },
-      body: JSON.stringify(shopifyProduct)
-    }
-  );
-
-  if (!shopifyResponse.ok) {
-    const error = await shopifyResponse.text();
-    console.error('Shopify create error:', error);
-    throw new Error('Failed to create Shopify draft');
-  }
-
-  const { product } = await shopifyResponse.json();
-
-  // Add product to collections (designer + size)
-  await addToCollections(product.id, [designer, size]);
-
-  // Create listing record in Supabase
-  if (seller) {
-    await supabase
-      .from('listings')
-      .insert({
-        seller_id: seller.id,
-        shopify_product_id: product.id.toString(),
-        description: description,
-        status: 'pending_approval',
-        listing_data: {
-          contact_email: email,
-          contact_phone: phone,
-          submitted_via: 'web_form',
-          submitted_at: new Date().toISOString()
-        },
-        created_at: new Date().toISOString()
-      });
-  }
-
-  return res.status(200).json({
-    success: true,
-    productId: product.id,
-    sellerId: seller?.id,
-    shopifyUrl: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`
-  });
-}
-
-// Handle approving an existing listing - just change Shopify status from draft to active
-async function handleApproveListing(req, res, supabase, listingId) {
-  // Get listing
-  const { data: listing, error: fetchError } = await supabase
-    .from('listings')
-    .select('*, sellers(*)')
-    .eq('id', listingId)
-    .single();
-
-  if (fetchError) throw fetchError;
-  if (!listing) throw new Error('Listing not found');
-
-  const shopifyProductId = listing.shopify_product_id;
-
-  if (!shopifyProductId) {
-    throw new Error('No Shopify product ID found for this listing');
-  }
-
-  // Update Shopify product status from "draft" to "active"
-  const shopifyResponse = await fetch(
-    `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${shopifyProductId}.json`,
-    {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
-      },
-      body: JSON.stringify({
-        product: {
-          id: shopifyProductId,
-          status: 'active',
-          tags: (listing.listing_data?.designer || '') + ', preloved'  // Remove pending-approval tag
-        }
-      })
-    }
-  );
-
-  if (!shopifyResponse.ok) {
-    const error = await shopifyResponse.text();
-    throw new Error(`Shopify error: ${error}`);
-  }
-
-  const { product } = await shopifyResponse.json();
-
-  // Update listing status in Supabase
-  await supabase
-    .from('listings')
-    .update({
-      status: 'live',
-      approved_at: new Date().toISOString()
-    })
-    .eq('id', listingId);
-
-  // Update seller's shopify_product_ids array
-  if (listing.seller_id) {
-    const { data: seller } = await supabase
-      .from('sellers')
-      .select('shopify_product_ids')
-      .eq('id', listing.seller_id)
-      .single();
-
-    const currentIds = seller?.shopify_product_ids || [];
-    if (!currentIds.includes(shopifyProductId)) {
-      const updatedIds = [...currentIds, shopifyProductId];
-      await supabase
-        .from('sellers')
-        .update({ shopify_product_ids: updatedIds })
-        .eq('id', listing.seller_id);
-    }
-  }
-
-  return res.status(200).json({
-    success: true,
-    productId: product.id,
-    shopifyUrl: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`
-  });
 }
