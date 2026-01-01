@@ -2,6 +2,7 @@
 // AI validates listing description and returns extracted fields + what's missing
 
 import OpenAI from 'openai';
+import { sanitizeText, basicValidation } from '../lib/security.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { description } = req.body;
+  let { description } = req.body;
 
   if (!description || description.trim().length < 5) {
     return res.status(200).json({
@@ -29,6 +30,20 @@ export default async function handler(req, res) {
       missing: REQUIRED_FIELDS,
       isComplete: false,
       message: "Please describe your item - what designer/brand is it, what size, condition, and what price you're asking?"
+    });
+  }
+
+  // Sanitize input first
+  description = sanitizeText(description);
+
+  // Check for obvious security issues
+  const securityIssues = basicValidation({ description });
+  if (securityIssues.length > 0) {
+    return res.status(400).json({
+      extracted: {},
+      missing: REQUIRED_FIELDS,
+      isComplete: false,
+      message: "Your description contains invalid content. Please try again with a simple description of your item."
     });
   }
 

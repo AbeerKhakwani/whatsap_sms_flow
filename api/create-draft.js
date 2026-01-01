@@ -3,6 +3,7 @@
 
 import { createDraft } from '../lib/shopify.js';
 import { findOrCreateSeller, addProductToSeller } from '../lib/sellers.js';
+import { validateAndSanitize } from '../lib/security.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,16 +27,39 @@ export default async function handler(req, res) {
 
     const fields = extracted || {};
 
-    // Create Shopify draft
-    const product = await createDraft({
+    // AI Security Validation
+    const validation = await validateAndSanitize({
+      description,
       designer: fields.designer,
-      itemType: fields.item_type,
-      size: fields.size,
-      condition: fields.condition,
-      askingPrice: fields.asking_price,
+      item_type: fields.item_type,
       color: fields.color,
       material: fields.material,
-      description
+      condition: fields.condition,
+      additional_details: fields.additional_details,
+      asking_price: fields.asking_price,
+      original_price: fields.original_price
+    });
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: validation.message,
+        issues: validation.issues
+      });
+    }
+
+    // Use sanitized data
+    const safeFields = validation.data;
+
+    // Create Shopify draft with sanitized data
+    const product = await createDraft({
+      designer: safeFields.designer,
+      itemType: safeFields.item_type,
+      size: fields.size, // size is a select, not free text
+      condition: safeFields.condition,
+      askingPrice: safeFields.asking_price,
+      color: safeFields.color,
+      material: safeFields.material,
+      description: safeFields.description
     });
 
     // Track seller (optional - only if email/phone provided)

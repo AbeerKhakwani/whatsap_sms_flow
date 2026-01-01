@@ -1,5 +1,6 @@
 /**
- * SMS Webhook - Clean Router
+ * SMS/WhatsApp Webhook - Clean Router
+ * Handles both Twilio SMS and WhatsApp messages
  */
 
 import { msg } from '../lib/sms/messages.js';
@@ -19,11 +20,19 @@ export default async function handler(req, res) {
   try {
     const { From, Body = '', NumMedia, MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4, MessageSid } = req.body;
 
+    // Detect if this is WhatsApp (From = "whatsapp:+1234567890")
+    const isWhatsApp = From?.startsWith('whatsapp:');
+    const rawPhone = isWhatsApp ? From.replace('whatsapp:', '') : From;
+
     // Collect media URLs
     const mediaUrls = [MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4].filter(Boolean);
 
-    const phone = normalizePhone(From);
+    const phone = normalizePhone(rawPhone);
     const message = Body.trim();
+
+    if (isWhatsApp) {
+      console.log('📱 WhatsApp message from:', phone);
+    }
 
     // Load data
     const seller = await findSellerByPhone(phone);

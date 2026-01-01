@@ -1,18 +1,34 @@
-import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, DollarSign, Settings, Send, PlusCircle } from 'lucide-react';
+import { useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Package, Users, DollarSign, Settings, Send, LogOut, Upload } from 'lucide-react';
 
 export default function Layout({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Simple auth check
+  useEffect(() => {
+    const token = localStorage.getItem('admin_token');
+    if (!token) {
+      navigate('/login');
+    }
+  }, [navigate]);
 
   const navigation = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Submit', path: '/submit', icon: PlusCircle },
     { name: 'Listings', path: '/listings', icon: Package },
     { name: 'Sellers', path: '/sellers', icon: Users },
     { name: 'Transactions', path: '/transactions', icon: DollarSign },
+    { name: 'Import', path: '/import', icon: Upload },
     { name: 'Test SMS', path: '/test-sms', icon: Send },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];
+
+  function handleLogout() {
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_email');
+    navigate('/login');
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -32,8 +48,8 @@ export default function Layout({ children }) {
                 to={item.path}
                 className={`
                   flex items-center gap-3 px-4 py-3 rounded-lg transition-all
-                  ${isActive 
-                    ? 'bg-primary-50 text-primary-700 border-l-4 border-primary-700' 
+                  ${isActive
+                    ? 'bg-primary-50 text-primary-700 border-l-4 border-primary-700'
                     : 'text-white hover:bg-primary-400/50'
                   }
                 `}
@@ -45,8 +61,14 @@ export default function Layout({ children }) {
           })}
         </nav>
 
-        <div className="p-4 border-t border-primary-400 text-xs text-primary-100">
-          <p>Version 1.0.0</p>
+        <div className="p-4 border-t border-primary-400">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 px-4 py-2 w-full text-left text-primary-100 hover:text-white transition"
+          >
+            <LogOut className="w-5 h-5" />
+            <span className="font-medium">Sign Out</span>
+          </button>
         </div>
       </div>
 

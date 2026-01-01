@@ -40,33 +40,13 @@ export default function Sellers() {
     setLoadingProducts(prev => ({ ...prev, [sellerId]: true }));
 
     try {
-      // Fetch from Shopify API
-      const shopifyUrl = import.meta.env.VITE_SHOPIFY_STORE_URL;
-      const accessToken = import.meta.env.VITE_SHOPIFY_ACCESS_TOKEN;
+      // Fetch via our API (avoids CORS issues)
+      const response = await fetch(`/api/seller?action=products&ids=${productIds.join(',')}`);
+      const data = await response.json();
 
-      const products = [];
-      for (const productId of productIds.slice(0, 10)) { // Limit to 10
-        try {
-          const response = await fetch(
-            `https://${shopifyUrl}/admin/api/2024-10/products/${productId}.json`,
-            {
-              headers: {
-                'X-Shopify-Access-Token': accessToken,
-                'Content-Type': 'application/json'
-              }
-            }
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            products.push(data.product);
-          }
-        } catch (e) {
-          console.log('Error fetching product:', productId);
-        }
+      if (data.success) {
+        setShopifyProducts(prev => ({ ...prev, [sellerId]: data.products }));
       }
-
-      setShopifyProducts(prev => ({ ...prev, [sellerId]: products }));
     } catch (error) {
       console.error('Error fetching Shopify products:', error);
     }
@@ -180,98 +160,97 @@ export default function Sellers() {
                   {isExpanded && (
                     <div className="px-4 pb-4 bg-gray-50 border-t border-gray-100">
                       {/* Seller Details */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 py-4">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 py-4">
                         <div className="bg-white p-3 rounded-lg shadow-sm">
-                          <div className="text-gray-500 text-xs mb-1">Full Email</div>
-                          <p className="font-medium text-gray-900 text-sm truncate">{seller.email || seller.paypal_email || 'N/A'}</p>
+                          <div className="text-gray-500 text-xs mb-1">Email</div>
+                          <p className="font-medium text-gray-900 text-sm truncate">{seller.email || 'N/A'}</p>
                         </div>
                         <div className="bg-white p-3 rounded-lg shadow-sm">
                           <div className="text-gray-500 text-xs mb-1">Phone</div>
                           <p className="font-medium text-gray-900 text-sm">{seller.phone || 'N/A'}</p>
                         </div>
                         <div className="bg-white p-3 rounded-lg shadow-sm">
-                          <div className="text-gray-500 text-xs mb-1">Total Sales</div>
-                          <p className="font-medium text-green-600 text-sm">${seller.total_sales || 0}</p>
+                          <div className="text-gray-500 text-xs mb-1">Commission</div>
+                          <p className="font-medium text-primary-600 text-sm">{seller.commission_rate || 50}%</p>
                         </div>
                         <div className="bg-white p-3 rounded-lg shadow-sm">
-                          <div className="text-gray-500 text-xs mb-1">Rating</div>
-                          <p className="font-medium text-gray-900 text-sm">{seller.rating || 'N/A'}</p>
+                          <div className="text-gray-500 text-xs mb-1">Total Earned</div>
+                          <p className="font-medium text-green-600 text-sm">${(seller.total_earnings || 0).toFixed(0)}</p>
+                        </div>
+                        <div className="bg-white p-3 rounded-lg shadow-sm">
+                          <div className="text-gray-500 text-xs mb-1">Pending Payout</div>
+                          <p className="font-medium text-amber-600 text-sm">${(seller.pending_payout || 0).toFixed(0)}</p>
                         </div>
                       </div>
 
-                      {/* Shopify Listings */}
+                      {/* Products List - Compact */}
                       <div className="mt-2">
-                        <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-1">
+                        <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
                           <ShoppingBag className="w-4 h-4" />
-                          Live Shopify Listings
+                          Products ({seller.products?.length || productCount})
                         </h4>
 
-                        {isLoadingProducts ? (
-                          <div className="flex items-center justify-center py-8">
-                            <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-                            <span className="ml-2 text-gray-500">Loading products...</span>
-                          </div>
-                        ) : productCount === 0 ? (
-                          <div className="text-center py-8 text-gray-500">
-                            <Package className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                            <p>No live listings yet</p>
-                          </div>
-                        ) : products.length === 0 ? (
-                          <div className="text-center py-8 text-gray-500">
-                            <p className="text-sm">
-                              {productCount} product IDs stored, but could not fetch details.
-                            </p>
-                            <p className="text-xs mt-1">Product IDs: {seller.shopify_product_ids?.slice(0, 3).join(', ')}...</p>
-                          </div>
+                        {(seller.products?.length || 0) === 0 && productCount === 0 ? (
+                          <p className="text-sm text-gray-500 py-2">No products</p>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {products.map((product) => (
-                              <div 
-                                key={product.id}
-                                className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow"
-                              >
-                                {/* Product Image */}
-                                <div className="aspect-square bg-gray-100">
-                                  {product.images?.[0]?.src ? (
-                                    <img 
-                                      src={product.images[0].src}
-                                      alt={product.title}
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-300">
-                                      <Package className="w-8 h-8" />
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Product Info */}
-                                <div className="p-3">
-                                  <h5 className="font-medium text-gray-900 text-sm truncate">{product.title}</h5>
-                                  <div className="flex items-center justify-between mt-2">
-                                    <span className="text-green-600 font-semibold">
-                                      ${product.variants?.[0]?.price || '0'}
-                                    </span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                      product.status === 'active' 
-                                        ? 'bg-green-100 text-green-700'
-                                        : 'bg-yellow-100 text-yellow-700'
-                                    }`}>
-                                      {product.status}
-                                    </span>
-                                  </div>
-                                  <a 
-                                    href={`https://${import.meta.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-2 text-xs text-primary-600 hover:underline flex items-center gap-1"
-                                  >
-                                    View in Shopify
-                                    <ExternalLink className="w-3 h-3" />
-                                  </a>
-                                </div>
+                          <div className="bg-white rounded-lg overflow-hidden border border-gray-200">
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                                <tr>
+                                  <th className="px-3 py-2 text-left">Product</th>
+                                  <th className="px-3 py-2 text-left">Status</th>
+                                  <th className="px-3 py-2 text-right">Price</th>
+                                  <th className="px-3 py-2 text-right">Split</th>
+                                  <th className="px-3 py-2 text-right">Earnings</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {(seller.products || []).slice(0, 10).map((product, idx) => (
+                                  <tr key={idx} className="hover:bg-gray-50">
+                                    <td className="px-3 py-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium text-gray-900 truncate max-w-[200px]">{product.title}</span>
+                                        {product.shopifyId && (
+                                          <a
+                                            href={`https://${import.meta.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.shopifyId}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-gray-400 hover:text-primary-600"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <ExternalLink className="w-3 h-3" />
+                                          </a>
+                                        )}
+                                      </div>
+                                      {product.brand && <div className="text-xs text-gray-400">{product.brand}</div>}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                        product.status === 'IN_STOCK'
+                                          ? 'bg-green-100 text-green-700'
+                                          : product.status?.includes('SOLD')
+                                          ? 'bg-blue-100 text-blue-700'
+                                          : product.status === 'RETURNED'
+                                          ? 'bg-red-100 text-red-700'
+                                          : 'bg-gray-100 text-gray-600'
+                                      }`}>
+                                        {product.status?.replace(/_/g, ' ') || 'Unknown'}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-gray-900">${product.retailPrice || 0}</td>
+                                    <td className="px-3 py-2 text-right text-gray-500">{product.splitPercent}%</td>
+                                    <td className="px-3 py-2 text-right font-medium text-green-600">
+                                      ${(product.sellerEarnings || 0).toFixed(0)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {(seller.products?.length || 0) > 10 && (
+                              <div className="px-3 py-2 bg-gray-50 text-xs text-gray-500 text-center">
+                                +{seller.products.length - 10} more products
                               </div>
-                            ))}
+                            )}
                           </div>
                         )}
                       </div>

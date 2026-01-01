@@ -1,58 +1,69 @@
 // api/seller.js
-// Consolidated seller endpoints: me, listings, update-listing
+// Seller endpoints - no auth for now, just email-based lookup
 
-import { getSellerFromToken } from '../lib/auth.js';
+import { createClient } from '@supabase/supabase-js';
 import { getProduct, updateProduct } from '../lib/shopify.js';
+import { validateUpdate } from '../lib/security.js';
+
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Auth check
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  const { seller, error: authError } = await getSellerFromToken(token);
-
-  if (authError || !seller) {
-    return res.status(401).json({ error: authError || 'Invalid token' });
-  }
-
   const { action } = req.query;
 
   try {
-    // GET SELLER INFO
-    if (action === 'me' && req.method === 'GET') {
-      return res.status(200).json({
-        success: true,
-        seller: {
-          id: seller.id,
-          name: seller.name,
-          email: seller.email,
-          phone: seller.phone,
-          shopify_product_ids: seller.shopify_product_ids || [],
-          created_at: seller.created_at
-        }
-      });
-    }
-
-    // GET LISTINGS
+    // GET LISTINGS by email
     if (action === 'listings' && req.method === 'GET') {
-      const productIds = seller.shopify_product_ids || [];
+      const email = req.query.email?.toLowerCase();
 
-      if (productIds.length === 0) {
+      if (!email) {
+        return res.status(400).json({ error: 'Email required' });
+      }
+
+      // Find seller by email
+      const { data: seller } = await supabase
+        .from('sellers')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (!seller) {
         return res.status(200).json({
           success: true,
           listings: [],
-          stats: { total: 0, draft: 0, active: 0, sold: 0 }
+          stats: { total: 0, draft: 0, active: 0, sold: 0 },
+          seller: null
+        });
+      }
+
+      // Get historical products from seller record
+      const historicalProducts = seller.products || [];
+      const soldProducts = historicalProducts.filter(p => p.status?.includes('SOLD'));
+
+      const productIds = seller.shopify_product_ids || [];
+
+      if (productIds.length === 0 && historicalProducts.length === 0) {
+        return res.status(200).json({
+          success: true,
+          listings: [],
+          stats: { total: 0, draft: 0, active: 0, sold: 0 },
+          seller: {
+            name: seller.name,
+            email: seller.email,
+            commissionRate: seller.commission_rate || 50,
+            totalEarnings: 0,
+            pendingPayout: 0
+          }
         });
       }
 
@@ -73,7 +84,7 @@ export default async function handler(req, res) {
             size: variant.option1 || 'One Size',
             condition: variant.option3 || 'Good',
             image: product.images?.[0]?.src || null,
-            images: product.images?.map(img => img.src) || [],
+            images: product.images?.map(img => ({ id: img.id, src: img.src })) || [],
             description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
             tags: product.tags?.split(', ') || [],
             created_at: product.created_at,
@@ -92,15 +103,73 @@ export default async function handler(req, res) {
 
       listings.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-      return res.status(200).json({ success: true, listings, stats });
+      // Calculate earnings from historical sold products
+      const totalEarnings = soldProducts.reduce((sum, p) => sum + (p.sellerEarnings || 0), 0);
+      const pendingPayout = historicalProducts
+        .filter(p => p.status === 'SOLD_WITHOUT_PAYOUT')
+        .reduce((sum, p) => sum + (p.sellerEarnings || 0), 0);
+
+      return res.status(200).json({
+        success: true,
+        listings,
+        stats: {
+          ...stats,
+          sold: soldProducts.length,
+          inStock: historicalProducts.filter(p => p.status === 'IN_STOCK').length
+        },
+        seller: {
+          name: seller.name,
+          email: seller.email,
+          commissionRate: seller.commission_rate || 50,
+          totalEarnings: seller.total_earnings || totalEarnings,
+          pendingPayout: seller.pending_payout || pendingPayout
+        },
+        soldProducts: soldProducts.map(p => ({
+          title: p.title,
+          retailPrice: p.retailPrice,
+          splitPercent: p.splitPercent,
+          earnings: p.sellerEarnings,
+          dateSold: p.dateSold,
+          status: p.status,
+          brand: p.brand
+        }))
+      });
     }
 
     // UPDATE LISTING
     if (action === 'update' && (req.method === 'PUT' || req.method === 'POST')) {
-      const { productId, title, price, description } = req.body;
+      const { email, productId, title, price, description, condition } = req.body;
 
-      if (!productId) {
-        return res.status(400).json({ error: 'Product ID required' });
+      if (!email || !productId) {
+        return res.status(400).json({ error: 'Email and product ID required' });
+      }
+
+      // AI Security Validation
+      const validation = await validateUpdate({
+        title,
+        description,
+        condition,
+        price
+      });
+
+      if (!validation.valid) {
+        return res.status(400).json({
+          error: validation.message,
+          issues: validation.issues
+        });
+      }
+
+      const safeData = validation.data;
+
+      // Verify seller owns this product
+      const { data: seller } = await supabase
+        .from('sellers')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .single();
+
+      if (!seller) {
+        return res.status(404).json({ error: 'Seller not found' });
       }
 
       const productIds = seller.shopify_product_ids || [];
@@ -109,45 +178,83 @@ export default async function handler(req, res) {
       }
 
       const updates = {};
-      if (title) updates.title = title;
-      if (description) updates.body_html = description;
+      if (safeData.title) updates.title = safeData.title;
+      if (safeData.description !== undefined) updates.body_html = safeData.description;
 
-      if (price !== undefined) {
-        const product = await getProduct(productId);
-        const variantId = product.variants?.[0]?.id;
-        if (variantId) {
+      // Get current product to update variant
+      const product = await getProduct(productId);
+      const variant = product.variants?.[0];
+
+      if (variant) {
+        const variantUpdates = { id: variant.id };
+        if (safeData.price !== undefined) variantUpdates.price = safeData.price.toString();
+        if (safeData.condition) variantUpdates.option3 = safeData.condition;
+
+        if (Object.keys(variantUpdates).length > 1) {
           await fetch(
-            `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/variants/${variantId}.json`,
+            `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/variants/${variant.id}.json`,
             {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
                 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
               },
-              body: JSON.stringify({
-                variant: { id: variantId, price: price.toString() }
-              })
+              body: JSON.stringify({ variant: variantUpdates })
             }
           );
         }
       }
 
-      let product;
+      let updatedProduct;
       if (Object.keys(updates).length > 0) {
-        product = await updateProduct(productId, updates);
+        updatedProduct = await updateProduct(productId, updates);
       } else {
-        product = await getProduct(productId);
+        updatedProduct = await getProduct(productId);
       }
 
       return res.status(200).json({
         success: true,
         listing: {
-          id: product.id,
-          title: product.title,
-          price: product.variants?.[0]?.price,
-          status: product.status
+          id: updatedProduct.id,
+          title: updatedProduct.title,
+          price: updatedProduct.variants?.[0]?.price,
+          condition: updatedProduct.variants?.[0]?.option3,
+          description: updatedProduct.body_html,
+          status: updatedProduct.status
         }
       });
+    }
+
+    // GET PRODUCTS BY IDS (for admin dashboard)
+    if (action === 'products' && req.method === 'GET') {
+      const ids = req.query.ids?.split(',').filter(Boolean);
+
+      if (!ids || ids.length === 0) {
+        return res.status(400).json({ error: 'Product IDs required' });
+      }
+
+      const products = [];
+      for (const productId of ids.slice(0, 20)) { // Limit to 20
+        try {
+          const product = await getProduct(productId);
+          const variant = product.variants?.[0] || {};
+
+          products.push({
+            id: product.id,
+            title: product.title,
+            status: product.status,
+            price: parseFloat(variant.price) || 0,
+            size: variant.option1 || 'One Size',
+            condition: variant.option3 || 'Good',
+            image: product.images?.[0]?.src || null,
+            created_at: product.created_at
+          });
+        } catch (err) {
+          console.log(`Product ${productId} not found:`, err.message);
+        }
+      }
+
+      return res.status(200).json({ success: true, products });
     }
 
     return res.status(400).json({ error: 'Invalid action' });
