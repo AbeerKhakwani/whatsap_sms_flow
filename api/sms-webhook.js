@@ -1,6 +1,6 @@
 /**
  * SMS/WhatsApp Webhook - Clean Router
- * Handles both Twilio SMS and WhatsApp messages
+ * Handles Twilio SMS, Twilio WhatsApp, and WhatsApp Cloud API (Meta)
  */
 
 import { msg } from '../lib/sms/messages.js';
@@ -9,29 +9,56 @@ import { findSellerByPhone, findConversation, createConversation, updateConversa
 import { detectIntent } from '../lib/sms/intent.js';
 import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from '../lib/sms/flows/auth.js';
 import { handleSellFlow } from '../lib/sms/flows/sell.js';
-import { processMediaUrls } from '../lib/sms/media.js';
+import { processMediaUrls, processWhatsAppMedia } from '../lib/sms/media.js';
 
+// WhatsApp Cloud API config
+const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const WEBHOOK_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'phirstory_verify_token';
 
 export default async function handler(req, res) {
+  // WhatsApp Cloud API webhook verification (GET request)
+  if (req.method === 'GET') {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
+      console.log('✅ WhatsApp webhook verified');
+      return res.status(200).send(challenge);
+    }
+    return res.status(403).json({ error: 'Verification failed' });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { From, Body = '', NumMedia, MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4, MessageSid } = req.body;
+    // Detect which platform the message is from
+    const platform = detectPlatform(req.body);
+    console.log('📨 Message from:', platform);
 
-    // Detect if this is WhatsApp (From = "whatsapp:+1234567890")
-    const isWhatsApp = From?.startsWith('whatsapp:');
-    const rawPhone = isWhatsApp ? From.replace('whatsapp:', '') : From;
+    let phone, message, mediaUrls, messageId;
 
-    // Collect media URLs
-    const mediaUrls = [MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4].filter(Boolean);
+    if (platform === 'whatsapp_cloud') {
+      // Parse WhatsApp Cloud API format
+      const parsed = parseWhatsAppCloudMessage(req.body);
+      if (!parsed) {
+        // Could be a status update, not a message - acknowledge it
+        return res.status(200).json({ status: 'ok' });
+      }
+      ({ phone, message, mediaUrls, messageId } = parsed);
+    } else {
+      // Twilio format (SMS or WhatsApp via Twilio)
+      const { From, Body = '', MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4, MessageSid } = req.body;
+      const isWhatsApp = From?.startsWith('whatsapp:');
+      const rawPhone = isWhatsApp ? From.replace('whatsapp:', '') : From;
 
-    const phone = normalizePhone(rawPhone);
-    const message = Body.trim();
-
-    if (isWhatsApp) {
-      console.log('📱 WhatsApp message from:', phone);
+      phone = normalizePhone(rawPhone);
+      message = Body.trim();
+      mediaUrls = [MediaUrl0, MediaUrl1, MediaUrl2, MediaUrl3, MediaUrl4].filter(Boolean);
+      messageId = MessageSid;
     }
 
     // Load data
@@ -39,23 +66,144 @@ export default async function handler(req, res) {
     let conv = await findConversation(phone);
     if (!conv) conv = await createConversation(phone, seller?.id);
 
+    // Store the platform for responses
+    conv.platform = platform;
+
     logState(phone, seller, conv);
 
-    // Process media URLs (download from Twilio, upload to Supabase)
+    // Process media
     let supabaseUrls = [];
     if (mediaUrls.length > 0 && seller) {
-      console.log('📸 Processing media URLs...');
-      supabaseUrls = await processMediaUrls(mediaUrls, seller.id, MessageSid);
+      console.log('📸 Processing media...');
+      if (platform === 'whatsapp_cloud') {
+        supabaseUrls = await processWhatsAppMedia(mediaUrls, seller.id, messageId);
+      } else {
+        supabaseUrls = await processMediaUrls(mediaUrls, seller.id, messageId);
+      }
       console.log('✅ Media processed:', supabaseUrls.length, 'URLs');
     }
 
     // Route message
     const response = await route(message, conv, seller, phone, supabaseUrls);
-    return sendResponse(res, response);
+
+    // Send response based on platform
+    if (platform === 'whatsapp_cloud') {
+      await sendWhatsAppResponse(phone, response);
+      return res.status(200).json({ status: 'ok' });
+    } else {
+      return sendResponse(res, response);
+    }
 
   } catch (error) {
     console.error('❌ Error:', error);
+    // For WhatsApp Cloud API, still return 200 to prevent retries
+    if (req.body?.entry) {
+      return res.status(200).json({ status: 'error', message: error.message });
+    }
     return sendResponse(res, msg('ERROR'));
+  }
+}
+
+/**
+ * Detect which platform the message is from
+ */
+function detectPlatform(body) {
+  if (body.entry && body.object === 'whatsapp_business_account') {
+    return 'whatsapp_cloud';
+  }
+  if (body.From?.startsWith('whatsapp:')) {
+    return 'twilio_whatsapp';
+  }
+  return 'twilio_sms';
+}
+
+/**
+ * Parse WhatsApp Cloud API message format
+ */
+function parseWhatsAppCloudMessage(body) {
+  try {
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const messages = value?.messages;
+
+    if (!messages || messages.length === 0) {
+      return null; // Status update, not a message
+    }
+
+    const msg = messages[0];
+    const phone = normalizePhone(msg.from);
+    const messageId = msg.id;
+
+    let message = '';
+    let mediaUrls = [];
+
+    // Handle different message types
+    if (msg.type === 'text') {
+      message = msg.text?.body || '';
+    } else if (msg.type === 'image') {
+      mediaUrls.push({ type: 'image', id: msg.image.id, mime: msg.image.mime_type });
+      message = msg.image.caption || '';
+    } else if (msg.type === 'video') {
+      mediaUrls.push({ type: 'video', id: msg.video.id, mime: msg.video.mime_type });
+      message = msg.video.caption || '';
+    } else if (msg.type === 'document') {
+      mediaUrls.push({ type: 'document', id: msg.document.id, mime: msg.document.mime_type });
+      message = msg.document.caption || '';
+    } else if (msg.type === 'interactive') {
+      // Button replies
+      if (msg.interactive.type === 'button_reply') {
+        message = msg.interactive.button_reply.id;
+      } else if (msg.interactive.type === 'list_reply') {
+        message = msg.interactive.list_reply.id;
+      }
+    }
+
+    return { phone, message: message.trim(), mediaUrls, messageId };
+  } catch (error) {
+    console.error('Error parsing WhatsApp message:', error);
+    return null;
+  }
+}
+
+/**
+ * Send response via WhatsApp Cloud API
+ */
+async function sendWhatsAppResponse(phone, text) {
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
+    console.error('❌ WhatsApp credentials not configured');
+    return;
+  }
+
+  // Remove + from phone number for WhatsApp API
+  const to = phone.replace('+', '');
+
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to,
+          type: 'text',
+          text: { body: text }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('❌ WhatsApp API error:', error);
+    } else {
+      console.log('📤 WhatsApp response sent to:', phone);
+    }
+  } catch (error) {
+    console.error('❌ Error sending WhatsApp message:', error);
   }
 }
 
@@ -94,7 +242,6 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
     if (draft) {
       const designer = draft.listing_data?.designer || '';
       const itemType = draft.listing_data?.item_type || '';
-      // Store the new photos in context so we don't lose them
       await setState(conv.id, 'sell_draft_check', {
         listing_id: draft.id,
         pending_media_urls: supabaseUrls
@@ -122,10 +269,8 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
     const pendingPhotos = conv.context?.pending_media_urls || [];
 
     if (lower === 'continue' || lower === 'c' || lower === '1') {
-      // Resume the draft
       const listing = await getIncompleteListing(seller.id);
       if (listing) {
-        // Merge any pending photos from the new message
         const existingPhotos = listing.listing_data?.photos || [];
         const allPhotos = [...existingPhotos, ...pendingPhotos];
 
@@ -140,13 +285,11 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
     }
 
     if (lower === 'new' || lower === 'n' || lower === '2') {
-      // Delete old draft, start fresh with pending photos
       if (listingId) await deleteListing(listingId);
       await setState(conv.id, 'sell_started', { media_urls: pendingPhotos });
       return msg('SELL_DRAFT_DELETED');
     }
 
-    // Unclear response - ask again
     return msg('SELL_DRAFT_FOUND', '', '');
   }
 
@@ -154,21 +297,19 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
   if (state.startsWith('sell_')) {
     const lower = message.toLowerCase().trim();
 
-    // Handle exit commands - save draft and leave
     const exitCommands = [
-      'exit', 'cancel', 'quit', 'stop', 'menu',     // formal
-      'nvm', 'nevermind', 'never mind',              // changed mind
-      'back', 'done', 'later',                       // stepping away
-      'wait', 'hold on', 'one sec', 'brb',           // pausing
-      'not now', 'not rn', 'gtg', 'busy'             // life happened
+      'exit', 'cancel', 'quit', 'stop', 'menu',
+      'nvm', 'nevermind', 'never mind',
+      'back', 'done', 'later',
+      'wait', 'hold on', 'one sec', 'brb',
+      'not now', 'not rn', 'gtg', 'busy'
     ];
-    
+
     if (exitCommands.includes(lower)) {
       await setState(conv.id, 'authorized', {});
       return msg('SELL_DRAFT_SAVED');
     }
 
-    // Merge stored media URLs with any new ones
     const storedUrls = conv.context?.media_urls || [];
     const allUrls = [...storedUrls, ...supabaseUrls];
     return handleSellFlow(message, conv, seller, allUrls);
@@ -187,14 +328,13 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
   // 8. Ready for action - detect intent
   if (state === 'awaiting_action' || state === 'authorized') {
     const intent = await detectIntent(message);
-    
+
     if (intent === 'sell') {
       if (!conv.is_authorized && seller) {
         await setState(conv.id, 'awaiting_email', { pending_intent: 'sell' });
         return msg('ASK_EMAIL_VERIFY');
       }
-      
-      // Check for existing draft
+
       const draft = await getIncompleteListing(seller.id);
       if (draft) {
         const designer = draft.listing_data?.designer || '';
@@ -202,11 +342,11 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
         await setState(conv.id, 'sell_draft_check', { listing_id: draft.id });
         return msg('SELL_DRAFT_FOUND', designer, itemType);
       }
-      
+
       await setState(conv.id, 'sell_started', {});
       return msg('SELL_START');
     }
-    
+
     if (intent === 'buy') {
       if (!conv.is_authorized && seller) {
         await setState(conv.id, 'awaiting_email', { pending_intent: 'buy' });
@@ -214,7 +354,7 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
       }
       return msg('BUY_START');
     }
-    
+
     if (intent === 'listings') {
       if (!conv.is_authorized && seller) {
         await setState(conv.id, 'awaiting_email', { pending_intent: 'listings' });
@@ -222,7 +362,7 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
       }
       return msg('LISTINGS_START');
     }
-    
+
     return msg('MENU');
   }
 
