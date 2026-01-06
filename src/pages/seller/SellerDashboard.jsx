@@ -190,7 +190,14 @@ export default function SellerDashboard() {
     }
   }
 
-  function getStatusBadge(status) {
+  function getStatusBadge(listing) {
+    if (listing.isSold) {
+      return (
+        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+          Sold
+        </span>
+      );
+    }
     const styles = {
       draft: 'bg-yellow-100 text-yellow-800',
       active: 'bg-green-100 text-green-800',
@@ -199,11 +206,11 @@ export default function SellerDashboard() {
     const labels = {
       draft: 'Pending Review',
       active: 'Live',
-      archived: 'Sold'
+      archived: 'Archived'
     };
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[status] || styles.draft}`}>
-        {labels[status] || status}
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[listing.status] || styles.draft}`}>
+        {labels[listing.status] || listing.status}
       </span>
     );
   }
@@ -246,22 +253,21 @@ export default function SellerDashboard() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Commission Banner */}
+        {/* Earnings Banner */}
         {seller && (
           <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4 mb-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-green-700">Your Commission Rate</p>
-                <p className="text-2xl font-bold text-green-800">{seller.commissionRate}%</p>
-                <p className="text-xs text-green-600 mt-1">You keep {seller.commissionRate}% of each sale</p>
-              </div>
-              <div className="text-right">
                 <p className="text-sm text-green-700">Total Earned</p>
                 <p className="text-2xl font-bold text-green-800">${seller.totalEarnings?.toFixed(0) || 0}</p>
-                {seller.pendingPayout > 0 && (
-                  <p className="text-xs text-amber-600 mt-1">${seller.pendingPayout?.toFixed(0)} pending payout</p>
-                )}
+                <p className="text-xs text-green-600 mt-1">Each listing shows your payout amount</p>
               </div>
+              {seller.pendingPayout > 0 && (
+                <div className="text-right">
+                  <p className="text-sm text-amber-700">Pending Payout</p>
+                  <p className="text-2xl font-bold text-amber-600">${seller.pendingPayout?.toFixed(0)}</p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -338,7 +344,7 @@ export default function SellerDashboard() {
           ) : (
             <div className="divide-y divide-gray-100">
               {listings.map((listing) => (
-                <div key={listing.id} className="p-4 flex items-center gap-4 hover:bg-gray-50">
+                <div key={listing.id} className="p-4 flex items-start gap-4 hover:bg-gray-50">
                   {/* Image */}
                   <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
                     {listing.image ? (
@@ -358,13 +364,39 @@ export default function SellerDashboard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="font-medium text-gray-900 truncate">{listing.title}</h3>
-                      {getStatusBadge(listing.status)}
+                      {getStatusBadge(listing)}
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span>${listing.price}</span>
                       <span>{listing.size}</span>
                       <span>{listing.condition}</span>
                     </div>
+                    {/* Pricing breakdown */}
+                    {listing.isSold ? (
+                      <div className="mt-2 flex items-center gap-4 text-xs">
+                        <span className="text-gray-500">
+                          Sold for: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span>
+                        </span>
+                        <span className="text-green-600 font-medium">
+                          You earned: ${listing.sellerPayout?.toFixed(2)}
+                        </span>
+                        <span className="text-gray-400">
+                          ({100 - (listing.commissionRate || 18)}% of ${listing.sellerAskingPrice?.toFixed(0)})
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex items-center gap-4 text-xs">
+                        <span className="text-gray-500">
+                          Listed: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span>
+                        </span>
+                        <span className="text-gray-500">
+                          You asked: <span className="text-gray-700">${listing.sellerAskingPrice?.toFixed(2)}</span>
+                        </span>
+                        <span className="text-gray-500">
+                          You'll get: <span className="font-medium text-green-600">${listing.sellerPayout?.toFixed(2)}</span>
+                          <span className="text-gray-400 ml-1">({100 - (listing.commissionRate || 18)}%)</span>
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -418,7 +450,7 @@ export default function SellerDashboard() {
                     }`}>
                       {item.status === 'SOLD_WITH_PAYOUT' ? 'Paid' : 'Pending'}
                     </span>
-                    <p className="text-xs text-gray-400 mt-1">{item.splitPercent}% commission</p>
+                    <p className="text-xs text-gray-400 mt-1">Your share: {item.splitPercent}%</p>
                   </div>
                 </div>
               ))}

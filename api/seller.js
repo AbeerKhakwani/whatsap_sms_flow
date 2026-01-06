@@ -75,12 +75,52 @@ export default async function handler(req, res) {
           const product = await getProduct(productId);
           const variant = product.variants?.[0] || {};
 
+          // Fetch metafields for pricing info
+          let commissionRate = 18;
+          let sellerAskingPrice = null;
+          let sellerPayout = null;
+
+          try {
+            const metafieldsRes = await fetch(
+              `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${productId}/metafields.json`,
+              { headers: { 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN } }
+            );
+            const { metafields } = await metafieldsRes.json();
+
+            for (const mf of metafields || []) {
+              if (mf.namespace === 'pricing' && mf.key === 'commission_rate') {
+                commissionRate = parseFloat(mf.value) || 18;
+              }
+              if (mf.namespace === 'pricing' && mf.key === 'seller_asking_price') {
+                sellerAskingPrice = parseFloat(mf.value) || null;
+              }
+              if (mf.namespace === 'pricing' && mf.key === 'seller_payout') {
+                sellerPayout = parseFloat(mf.value) || null;
+              }
+            }
+          } catch (e) {
+            console.log('Could not fetch metafields:', e.message);
+          }
+
+          // Fallback calculation if metafields not set
+          const price = parseFloat(variant.price) || 0;
+          if (sellerAskingPrice === null) {
+            sellerAskingPrice = Math.max(0, price - 10);
+          }
+          if (sellerPayout === null) {
+            sellerPayout = sellerAskingPrice * ((100 - commissionRate) / 100);
+          }
+
+          // Check if sold (0 inventory or archived)
+          const inventory = variant.inventory_quantity ?? 0;
+          const isSold = inventory === 0 || product.status === 'archived';
+
           listings.push({
             id: product.id,
             title: product.title,
             designer: product.vendor || 'Unknown',
             status: product.status,
-            price: parseFloat(variant.price) || 0,
+            price,
             size: variant.option1 || 'One Size',
             condition: variant.option3 || 'Good',
             image: product.images?.[0]?.src || null,
@@ -89,13 +129,18 @@ export default async function handler(req, res) {
             tags: product.tags?.split(', ') || [],
             created_at: product.created_at,
             updated_at: product.updated_at,
-            shopify_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`
+            shopify_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
+            commissionRate,
+            sellerAskingPrice,
+            sellerPayout,
+            inventory,
+            isSold
           });
           stats.total++;
 
-          if (product.status === 'draft') stats.draft++;
+          if (isSold) stats.sold++;
+          else if (product.status === 'draft') stats.draft++;
           else if (product.status === 'active') stats.active++;
-          else if (product.status === 'archived') stats.sold++;
         } catch (err) {
           console.log(`Product ${productId} not found:`, err.message);
         }
@@ -225,6 +270,53 @@ export default async function handler(req, res) {
       });
     }
 
+    // RESET AUTH (for testing - makes it like they never texted before)
+    if (action === 'reset-auth' && req.method === 'POST') {
+      const { sellerId } = req.body;
+
+      if (!sellerId) {
+        return res.status(400).json({ error: 'Seller ID required' });
+      }
+
+      const errors = [];
+
+      // Delete all conversations for this seller
+      const { error: convError } = await supabase
+        .from('sms_conversations')
+        .delete()
+        .eq('seller_id', sellerId);
+
+      if (convError) {
+        console.error('Delete conversations error:', convError);
+        errors.push(`conversations: ${convError.message}`);
+      }
+
+      // Clear phone from seller so findSellerByPhone won't find them
+      // Use empty string if null doesn't work
+      const { error: sellerError } = await supabase
+        .from('sellers')
+        .update({ phone: '' })
+        .eq('id', sellerId);
+
+      if (sellerError) {
+        console.error('Clear phone error:', sellerError);
+        errors.push(`seller phone: ${sellerError.message}`);
+      }
+
+      if (errors.length > 0) {
+        return res.status(200).json({
+          success: true,
+          warning: `Partial reset: ${errors.join(', ')}`,
+          message: 'Reset attempted with some issues'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Full reset - seller will experience first-time flow'
+      });
+    }
+
     // GET PRODUCTS BY IDS (for admin dashboard)
     if (action === 'products' && req.method === 'GET') {
       const ids = req.query.ids?.split(',').filter(Boolean);
@@ -239,15 +331,59 @@ export default async function handler(req, res) {
           const product = await getProduct(productId);
           const variant = product.variants?.[0] || {};
 
+          const inventory = variant.inventory_quantity ?? 0;
+          const isSold = inventory === 0 && product.status === 'active';
+
+          // Fetch metafields for pricing info
+          let commissionRate = 18;
+          let sellerAskingPrice = null;
+          let sellerPayout = null;
+
+          try {
+            const metafieldsRes = await fetch(
+              `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${productId}/metafields.json`,
+              { headers: { 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN } }
+            );
+            const { metafields } = await metafieldsRes.json();
+
+            for (const mf of metafields || []) {
+              if (mf.namespace === 'pricing' && mf.key === 'commission_rate') {
+                commissionRate = parseFloat(mf.value) || 18;
+              }
+              if (mf.namespace === 'pricing' && mf.key === 'seller_asking_price') {
+                sellerAskingPrice = parseFloat(mf.value) || null;
+              }
+              if (mf.namespace === 'pricing' && mf.key === 'seller_payout') {
+                sellerPayout = parseFloat(mf.value) || null;
+              }
+            }
+          } catch (e) {
+            console.log('Could not fetch metafields:', e.message);
+          }
+
+          // Fallback calculation if metafields not set
+          const price = parseFloat(variant.price) || 0;
+          if (sellerAskingPrice === null) {
+            sellerAskingPrice = Math.max(0, price - 10); // Remove $10 fee
+          }
+          if (sellerPayout === null) {
+            sellerPayout = sellerAskingPrice * ((100 - commissionRate) / 100);
+          }
+
           products.push({
             id: product.id,
             title: product.title,
             status: product.status,
-            price: parseFloat(variant.price) || 0,
+            price,
             size: variant.option1 || 'One Size',
             condition: variant.option3 || 'Good',
             image: product.images?.[0]?.src || null,
-            created_at: product.created_at
+            created_at: product.created_at,
+            inventory,
+            isSold,
+            commissionRate,
+            sellerAskingPrice,
+            sellerPayout
           });
         } catch (err) {
           console.log(`Product ${productId} not found:`, err.message);

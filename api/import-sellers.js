@@ -9,6 +9,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+const LISTING_FEE = 10;
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -20,6 +22,13 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { action } = req.query;
+
+  // SYNC METAFIELDS - Update Shopify products with pricing metafields from CSV
+  if (action === 'sync-metafields') {
+    return handleSyncMetafields(req, res);
   }
 
   try {
@@ -193,6 +202,157 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Import error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * Sync Shopify product metafields from CSV data
+ * Updates: seller.id, pricing.commission_rate, pricing.seller_asking_price, pricing.seller_payout
+ */
+async function handleSyncMetafields(req, res) {
+  try {
+    const { productsCsv } = req.body;
+
+    if (!productsCsv) {
+      return res.status(400).json({ error: 'productsCsv is required' });
+    }
+
+    const products = parse(productsCsv, {
+      columns: true,
+      skip_empty_lines: true,
+      relax_quotes: true,
+      relax_column_count: true
+    });
+
+    console.log(`Syncing metafields for ${products.length} products`);
+
+    const shopifyUrl = process.env.VITE_SHOPIFY_STORE_URL;
+    const shopifyToken = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+
+    let synced = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const product of products) {
+      const shopifyId = product.shopifyId;
+
+      // Skip if no Shopify ID
+      if (!shopifyId || shopifyId === '' || isNaN(parseInt(shopifyId))) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        const retailPrice = parseFloat(product.retailPrice) || 0;
+        const splitForCustomer = parseFloat(product.splitForCustomer) || 50;
+        const clientId = product.client || '';
+
+        // Calculate pricing
+        // splitForCustomer = seller's percentage (e.g., 50 means seller gets 50%)
+        // Our commission = 100 - splitForCustomer
+        const ourCommission = 100 - splitForCustomer;
+        const sellerAskingPrice = Math.max(0, retailPrice - LISTING_FEE);
+        const sellerPayout = sellerAskingPrice * (splitForCustomer / 100);
+
+        // Build metafields array
+        const metafields = [
+          {
+            namespace: 'seller',
+            key: 'id',
+            value: clientId.toString(),
+            type: 'single_line_text_field'
+          },
+          {
+            namespace: 'pricing',
+            key: 'commission_rate',
+            value: ourCommission.toString(),
+            type: 'number_integer'
+          },
+          {
+            namespace: 'pricing',
+            key: 'seller_asking_price',
+            value: sellerAskingPrice.toFixed(2),
+            type: 'number_decimal'
+          },
+          {
+            namespace: 'pricing',
+            key: 'seller_payout',
+            value: sellerPayout.toFixed(2),
+            type: 'number_decimal'
+          }
+        ];
+
+        // Update product metafields
+        const updateRes = await fetch(
+          `https://${shopifyUrl}/admin/api/2024-10/products/${shopifyId}.json`,
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Shopify-Access-Token': shopifyToken
+            },
+            body: JSON.stringify({
+              product: {
+                id: shopifyId,
+                metafields
+              }
+            })
+          }
+        );
+
+        if (!updateRes.ok) {
+          const errText = await updateRes.text();
+          errors.push(`${shopifyId}: ${errText.slice(0, 100)}`);
+          continue;
+        }
+
+        // Get the product to find inventory item ID for cost update
+        const productData = await updateRes.json();
+        const variant = productData.product?.variants?.[0];
+
+        if (variant?.inventory_item_id) {
+          // Update inventory item cost (seller payout)
+          const costRes = await fetch(
+            `https://${shopifyUrl}/admin/api/2024-10/inventory_items/${variant.inventory_item_id}.json`,
+            {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Shopify-Access-Token': shopifyToken
+              },
+              body: JSON.stringify({
+                inventory_item: {
+                  id: variant.inventory_item_id,
+                  cost: sellerPayout.toFixed(2)
+                }
+              })
+            }
+          );
+
+          if (!costRes.ok) {
+            console.log(`Warning: Could not set cost for ${shopifyId}`);
+          }
+        }
+
+        synced++;
+        console.log(`Synced ${shopifyId}: commission=${ourCommission}%, asking=$${sellerAskingPrice}, payout=$${sellerPayout}`);
+
+      } catch (err) {
+        errors.push(`${shopifyId}: ${err.message}`);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      synced,
+      skipped,
+      total: products.length,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    console.error('Sync metafields error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

@@ -49,13 +49,14 @@ async function setupStorage() {
     console.log('✅ Storage setup complete!');
     console.log('');
     console.log('📋 Next steps:');
-    console.log('1. In Supabase dashboard → Storage → listing-media');
+    console.log('1. In Supabase dashboard → Storage → listing-photos');
     console.log('2. Make sure bucket is set to "Public"');
     console.log('3. Add these environment variables to your deployment:');
     console.log('   - SUPABASE_URL');
     console.log('   - SUPABASE_SERVICE_KEY');
-    console.log('   - TWILIO_ACCOUNT_SID');
-    console.log('   - TWILIO_AUTH_TOKEN');
+    console.log('   - WHATSAPP_ACCESS_TOKEN');
+    console.log('   - WHATSAPP_PHONE_NUMBER_ID');
+    console.log('   - WHATSAPP_VERIFY_TOKEN');
     console.log('   - OPENAI_API_KEY');
 
   } catch (error) {

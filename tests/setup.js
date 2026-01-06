@@ -193,13 +193,25 @@ global.mockDb = {
   
   addConversation(conv) {
     const id = conv.id || `conv-${Date.now()}`;
-    const newConv = { 
-      id, 
+    const newConv = {
+      id,
       created_at: new Date().toISOString(),
-      ...conv 
+      authorized_at: conv.is_authorized ? new Date().toISOString() : null,
+      auth_attempts: 0,
+      last_auth_attempt: null,
+      ...conv
     };
     this.conversations.push(newConv);
     return newConv;
+  },
+
+  revokeOtherSessions(sellerId, currentConvId) {
+    this.conversations.forEach(conv => {
+      if (conv.seller_id === sellerId && conv.id !== currentConvId && conv.is_authorized) {
+        conv.is_authorized = false;
+        conv.authorized_at = null;
+      }
+    });
   },
   
   findSellerByPhone(phone) {
@@ -235,6 +247,39 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     from: (table) => ({
       select: (columns) => ({
+        in: (field, values) => ({
+          // Support .in() for multi-format phone lookup
+          maybeSingle: async () => {
+            if (table === 'sellers' && field === 'phone') {
+              // Try each phone format
+              for (const phone of values) {
+                const seller = global.mockDb.findSellerByPhone(phone);
+                if (seller) return { data: seller, error: null };
+              }
+              return { data: null, error: null };
+            }
+            return { data: null, error: null };
+          }
+        }),
+        ilike: (field, value) => ({
+          // Support .ilike() for case-insensitive email lookup
+          maybeSingle: async () => {
+            if (table === 'sellers') {
+              const searchValue = value.toLowerCase();
+              const seller = global.mockDb.sellers.find(s =>
+                s[field]?.toLowerCase() === searchValue
+              );
+              return { data: seller || null, error: null };
+            }
+            if (table === 'sms_conversations') {
+              const conv = global.mockDb.conversations.find(c =>
+                c[field]?.toLowerCase() === value.toLowerCase()
+              );
+              return { data: conv || null, error: null };
+            }
+            return { data: null, error: null };
+          }
+        }),
         eq: (field, value) => {
           // Store filter context for chained calls
           const filters = { [field]: value };
@@ -246,11 +291,15 @@ vi.mock('@supabase/supabase-js', () => ({
             },
             single: async () => {
               if (table === 'sellers') {
-                const seller = global.mockDb.findSellerByPhone(filters.phone);
+                const seller = filters.id
+                  ? global.mockDb.sellers.find(s => s.id === filters.id)
+                  : global.mockDb.findSellerByPhone(filters.phone);
                 return { data: seller, error: null };
               }
               if (table === 'sms_conversations') {
-                const conv = global.mockDb.findConversation(filters.phone_number);
+                const conv = filters.id
+                  ? global.mockDb.conversations.find(c => c.id === filters.id)
+                  : global.mockDb.findConversation(filters.phone_number);
                 return { data: conv, error: null };
               }
               if (table === 'listings') {
@@ -342,51 +391,71 @@ vi.mock('@supabase/supabase-js', () => ({
       }),
 
       update: (updates) => ({
-        eq: (field, value) => ({
-          // Support .select().single() chain after update
-          select: () => ({
-            single: async () => {
-              if (table === 'sellers') {
-                const seller = global.mockDb.sellers.find(s => s.id === value);
-                if (seller) {
-                  Object.assign(seller, updates);
-                  return { data: seller, error: null };
+        eq: (field, value) => {
+          const filters = { [field]: value };
+
+          const createChain = () => ({
+            // Support .neq() for "not equal" filtering (used in revokeOtherSessions)
+            neq: (field2, value2) => {
+              filters._neq = { field: field2, value: value2 };
+              return createChain();
+            },
+            eq: (field2, value2) => {
+              filters[field2] = value2;
+              return createChain();
+            },
+            // Support .select().single() chain after update
+            select: () => ({
+              single: async () => {
+                if (table === 'sellers') {
+                  const seller = global.mockDb.sellers.find(s => s.id === filters.id);
+                  if (seller) {
+                    Object.assign(seller, updates);
+                    return { data: seller, error: null };
+                  }
                 }
+                if (table === 'sms_conversations') {
+                  const conv = global.mockDb.conversations.find(c => c.id === filters.id);
+                  if (conv) {
+                    Object.assign(conv, updates);
+                    return { data: conv, error: null };
+                  }
+                }
+                if (table === 'listings') {
+                  const listing = global.mockDb.listings.find(l => l.id === filters.id);
+                  if (listing) {
+                    Object.assign(listing, updates);
+                    return { data: listing, error: null };
+                  }
+                }
+                return { data: null, error: null };
+              }
+            }),
+            // Also support direct .then() for backwards compatibility
+            then: async (cb) => {
+              if (table === 'sellers') {
+                const seller = global.mockDb.sellers.find(s => s.id === filters.id);
+                if (seller) Object.assign(seller, updates);
               }
               if (table === 'sms_conversations') {
-                const conv = global.mockDb.conversations.find(c => c.id === value);
-                if (conv) {
-                  Object.assign(conv, updates);
-                  return { data: conv, error: null };
+                // Handle revokeOtherSessions with neq filter
+                if (filters.seller_id && filters._neq && filters.is_authorized === true) {
+                  global.mockDb.revokeOtherSessions(filters.seller_id, filters._neq.value);
+                } else {
+                  const conv = global.mockDb.conversations.find(c => c.id === filters.id);
+                  if (conv) Object.assign(conv, updates);
                 }
               }
               if (table === 'listings') {
-                const listing = global.mockDb.listings.find(l => l.id === value);
-                if (listing) {
-                  Object.assign(listing, updates);
-                  return { data: listing, error: null };
-                }
+                const listing = global.mockDb.listings.find(l => l.id === filters.id);
+                if (listing) Object.assign(listing, updates);
               }
-              return { data: null, error: null };
+              return cb ? cb({ error: null, data: null }) : { error: null, data: null };
             }
-          }),
-          // Also support direct .then() for backwards compatibility
-          then: async (cb) => {
-            if (table === 'sellers') {
-              const seller = global.mockDb.sellers.find(s => s.id === value);
-              if (seller) Object.assign(seller, updates);
-            }
-            if (table === 'sms_conversations') {
-              const conv = global.mockDb.conversations.find(c => c.id === value);
-              if (conv) Object.assign(conv, updates);
-            }
-            if (table === 'listings') {
-              const listing = global.mockDb.listings.find(l => l.id === value);
-              if (listing) Object.assign(listing, updates);
-            }
-            return cb ? cb({ error: null }) : { error: null };
-          }
-        })
+          });
+
+          return createChain();
+        }
       }),
 
       delete: () => ({

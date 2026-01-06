@@ -1,113 +1,81 @@
 // tests/test-utils.js
-// Helper functions for testing the SMS webhook
+// Helper functions for testing the WhatsApp webhook
 
 /**
- * Create a mock request object simulating Twilio webhook
+ * Create a mock WhatsApp Cloud API request
  */
 export function createMockRequest(phone, message, extraParams = {}) {
   return {
     method: 'POST',
     body: {
-      From: phone,
-      Body: message,
+      object: 'whatsapp_business_account',
+      entry: [{
+        changes: [{
+          value: {
+            messages: [{
+              from: phone.replace('+', ''),
+              id: `msg_${Date.now()}`,
+              type: 'text',
+              text: { body: message }
+            }]
+          }
+        }]
+      }],
       ...extraParams
     }
   };
 }
 
 /**
- * Create a mock response object that captures the response
+ * Create a mock response object
  */
 export function createMockResponse() {
   const res = {
     statusCode: null,
     headers: {},
     body: null,
-    
+
     status(code) {
       this.statusCode = code;
       return this;
     },
-    
+
     setHeader(key, value) {
       this.headers[key] = value;
       return this;
     },
-    
+
     send(body) {
       this.body = body;
       return this;
     },
-    
+
     json(data) {
-      this.body = JSON.stringify(data);
+      this.body = data;
       return this;
     }
   };
-  
+
   return res;
 }
 
 /**
- * Extract message text from TwiML XML response
+ * Send a simulated WhatsApp message and get the response
  */
-export function extractMessageFromXml(xml) {
-  const match = xml.match(/<Message>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/Message>/);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Send a simulated SMS and get the response
- */
-export async function sendSms(handler, phone, message, extraParams = {}) {
+export async function sendMessage(handler, phone, message, extraParams = {}) {
   const req = createMockRequest(phone, message, extraParams);
   const res = createMockResponse();
-  
+
   await handler(req, res);
-  
+
   return {
     statusCode: res.statusCode,
-    headers: res.headers,
-    rawBody: res.body,
-    message: extractMessageFromXml(res.body)
+    body: res.body
   };
 }
 
 /**
- * Run a full conversation flow - returns array of message strings
- */
-export async function runConversation(handler, phone, messages) {
-  const results = [];
-  
-  for (const message of messages) {
-    const result = await sendSms(handler, phone, message);
-    results.push(result.message);
-  }
-  
-  return results;
-}
-
-/**
- * Assert response contains expected text
- */
-export function assertContains(response, expected) {
-  if (!response.message?.includes(expected)) {
-    throw new Error(`Expected response to contain "${expected}" but got: "${response.message}"`);
-  }
-}
-
-/**
- * Assert response matches one of expected patterns
- */
-export function assertMatchesAny(response, patterns) {
-  const matches = patterns.some(p => response.message?.includes(p));
-  if (!matches) {
-    throw new Error(`Expected response to match one of ${JSON.stringify(patterns)} but got: "${response.message}"`);
-  }
-}
-
-/**
- * Test phone numbers for different scenarios
+ * Test phone numbers
  */
 export const TEST_PHONES = {
   EXISTING_SELLER: '+15551234567',
