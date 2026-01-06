@@ -110,8 +110,10 @@ export default async function handler(req, res) {
     // Route message and get response
     const response = await route(message, conv, seller, phone, supabaseUrls);
 
-    // Send response via WhatsApp
-    await sendWhatsAppMessage(phone, response);
+    // Send response via WhatsApp (skip if null - duplicate prevention)
+    if (response) {
+      await sendWhatsAppMessage(phone, response);
+    }
     return res.status(200).json({ status: 'ok' });
 
   } catch (error) {
