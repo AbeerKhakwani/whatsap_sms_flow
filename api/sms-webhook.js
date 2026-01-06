@@ -16,7 +16,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Simple in-memory message dedup (for batching photos sent together)
 const recentMessages = new Map();
-const DEDUP_WINDOW_MS = 2000; // 2 second window to batch photos
+const DEDUP_WINDOW_MS = 4000; // 4 second window to batch photos (WhatsApp can be slow)
 
 // WhatsApp Cloud API config
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
@@ -51,34 +51,32 @@ export default async function handler(req, res) {
 
     let { phone, message, mediaUrls, messageId, audioId } = parsed;
 
+    // Process ONE photo at a time for better UX
+    // If multiple photos sent at once, only process the first one
+    // This gives immediate feedback and avoids batching issues
+    if (mediaUrls.length > 1) {
+      console.log(`📸 Multiple photos (${mediaUrls.length}) - processing only first one`);
+      mediaUrls = [mediaUrls[0]]; // Only take the first photo
+    }
+
     // Deduplicate rapid photo messages (WhatsApp sends each photo separately)
-    // If we got a photo with no text, batch it with others in the same window
+    // Skip if we just got a photo without text (likely part of a multi-send)
     if (mediaUrls.length > 0 && !message && !audioId) {
-      const dedupKey = `${phone}:photos`;
-      const existing = recentMessages.get(dedupKey);
+      const dedupKey = `${phone}:photo:${messageId}`;
       const now = Date.now();
 
-      if (existing && (now - existing.timestamp) < DEDUP_WINDOW_MS) {
-        // Add to existing batch, don't respond yet
-        existing.mediaUrls.push(...mediaUrls);
-        existing.timestamp = now;
-        console.log(`📸 Batching photo ${existing.mediaUrls.length} for ${phone}`);
-        return res.status(200).json({ status: 'batched' });
+      // Simple dedup - ignore if we processed this exact message recently
+      if (recentMessages.has(dedupKey)) {
+        console.log(`📸 Skipping duplicate message ${messageId}`);
+        return res.status(200).json({ status: 'duplicate' });
       }
 
-      // First photo in a potential batch - store it and wait
-      recentMessages.set(dedupKey, { mediaUrls: [...mediaUrls], timestamp: now });
+      // Mark as processed
+      recentMessages.set(dedupKey, now);
 
-      // Wait briefly for more photos to arrive
-      await new Promise(resolve => setTimeout(resolve, DEDUP_WINDOW_MS));
-
-      // Now grab all batched photos
-      const batch = recentMessages.get(dedupKey);
-      recentMessages.delete(dedupKey);
-
-      if (batch) {
-        mediaUrls = batch.mediaUrls;
-        console.log(`📸 Processing batch of ${mediaUrls.length} photos for ${phone}`);
+      // Clean up old entries (keep map from growing)
+      for (const [key, timestamp] of recentMessages.entries()) {
+        if (now - timestamp > 60000) recentMessages.delete(key);
       }
     }
 
