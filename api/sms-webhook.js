@@ -10,7 +10,7 @@ import { detectIntent } from '../lib/sms/intent.js';
 import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from '../lib/sms/flows/auth.js';
 import { handleSellFlow } from '../lib/sms/flows/sell.js';
 import { processWhatsAppMedia } from '../lib/sms/media.js';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -182,19 +182,36 @@ async function transcribeVoiceNote(audioId) {
       `https://graph.facebook.com/v18.0/${audioId}`,
       { headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` } }
     );
+
+    if (!mediaResponse.ok) {
+      console.error('Failed to get media URL:', await mediaResponse.text());
+      return null;
+    }
+
     const mediaData = await mediaResponse.json();
     const downloadUrl = mediaData.url;
+
+    if (!downloadUrl) {
+      console.error('No download URL in response:', mediaData);
+      return null;
+    }
 
     // Download audio file
     const audioResponse = await fetch(downloadUrl, {
       headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
     });
-    const audioBuffer = await audioResponse.arrayBuffer();
 
-    // Transcribe with Whisper
-    const audioFile = new File([audioBuffer], 'voice.ogg', { type: 'audio/ogg' });
+    if (!audioResponse.ok) {
+      console.error('Failed to download audio:', audioResponse.status);
+      return null;
+    }
+
+    const audioBuffer = await audioResponse.arrayBuffer();
+    const buffer = Buffer.from(audioBuffer);
+
+    // Transcribe with Whisper using toFile helper
     const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
+      file: await toFile(buffer, 'voice.ogg', { type: 'audio/ogg' }),
       model: 'whisper-1',
     });
 
@@ -366,25 +383,11 @@ async function route(message, conv, seller, phone, supabaseUrls = []) {
   if (state === 'awaiting_new_email') return handleAwaitingNewEmail(message, conv, phone);
   if (state === 'awaiting_email') return handleAwaitingEmail(message, conv, seller);
 
-  // Draft check
+  // Draft check - delegate to sell flow
   if (state === 'sell_draft_check') {
-    const lower = message.toLowerCase().trim();
-    const pendingPhotos = conv.context?.pending_media_urls || [];
-    const listingId = conv.context?.listing_id;
-    const draft = listingId ? await findDraftListing(seller.id) : null;
-
-    if (['continue', 'c', '1'].includes(lower) && draft) {
-      await setState(conv.id, 'sell_awaiting_text', { listing_id: draft.id });
-      return `Let's continue! ${draft.designer ? `You were listing a ${draft.designer}.` : ''} What else can you tell me?`;
-    }
-
-    if (['new', 'n', '2'].includes(lower)) {
-      if (draft) await deleteListing(draft.id);
-      await setState(conv.id, 'sell_started', { media_urls: pendingPhotos });
-      return msg('SELL_DRAFT_DELETED');
-    }
-
-    return msg('SELL_DRAFT_FOUND', draft?.designer || '', draft?.item_type || '');
+    // Pass to unified sell flow which handles draft choice
+    conv.state = 'sell_draft_choice';
+    return handleSellFlow(message, conv, seller, supabaseUrls);
   }
 
   // Sell flow

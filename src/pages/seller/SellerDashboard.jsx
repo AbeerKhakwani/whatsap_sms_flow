@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2 } from 'lucide-react';
 
+const API_URL = import.meta.env.VITE_API_URL || '';
+
 export default function SellerDashboard() {
   const navigate = useNavigate();
   const [email, setEmail] = useState(null);
@@ -20,16 +22,53 @@ export default function SellerDashboard() {
   const photoInputRef = useRef(null);
 
   useEffect(() => {
+    const token = localStorage.getItem('seller_token');
     const storedEmail = localStorage.getItem('seller_email');
 
-    if (!storedEmail) {
+    // If no token, redirect to login
+    if (!token) {
       navigate('/seller/login');
       return;
     }
 
-    setEmail(storedEmail);
-    fetchListings(storedEmail);
+    // Verify token with API
+    verifyAndFetch(token, storedEmail);
   }, [navigate]);
+
+  async function verifyAndFetch(token, storedEmail) {
+    try {
+      // Verify token
+      const authRes = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: 'verify-token' })
+      });
+
+      const authData = await authRes.json();
+
+      if (!authRes.ok || !authData.success) {
+        // Token invalid - redirect to login
+        localStorage.removeItem('seller_token');
+        localStorage.removeItem('seller_email');
+        navigate('/seller/login');
+        return;
+      }
+
+      // Use email from token verification
+      const sellerEmail = authData.seller.email || storedEmail;
+      setEmail(sellerEmail);
+      setSeller(authData.seller);
+
+      // Fetch listings
+      fetchListings(sellerEmail);
+    } catch (error) {
+      console.error('Auth error:', error);
+      navigate('/seller/login');
+    }
+  }
 
   async function fetchListings(sellerEmail) {
     try {
@@ -50,6 +89,7 @@ export default function SellerDashboard() {
   }
 
   function handleLogout() {
+    localStorage.removeItem('seller_token');
     localStorage.removeItem('seller_email');
     navigate('/seller/login');
   }

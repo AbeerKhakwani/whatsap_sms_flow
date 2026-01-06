@@ -1,18 +1,57 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, DollarSign, Settings, Send, LogOut, Upload } from 'lucide-react';
+import { LayoutDashboard, Package, Users, DollarSign, Settings, Send, LogOut, Upload, Loader2 } from 'lucide-react';
+
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Layout({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [verified, setVerified] = useState(false);
 
-  // Simple auth check
+  // Auth check with token verification
   useEffect(() => {
     const token = localStorage.getItem('admin_token');
+
     if (!token) {
       navigate('/login');
+      return;
     }
+
+    // Skip API verification for old email-auth tokens (backward compat)
+    if (token === 'email-auth') {
+      setVerified(true);
+      return;
+    }
+
+    // Verify JWT token
+    verifyToken(token);
   }, [navigate]);
+
+  async function verifyToken(token) {
+    try {
+      const res = await fetch(`${API_URL}/api/admin-auth`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: 'verify' })
+      });
+
+      if (res.ok) {
+        setVerified(true);
+      } else {
+        // Token invalid
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('admin_email');
+        navigate('/login');
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      navigate('/login');
+    }
+  }
 
   const navigation = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -28,6 +67,15 @@ export default function Layout({ children }) {
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_email');
     navigate('/login');
+  }
+
+  // Show loading while verifying
+  if (!verified) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+      </div>
+    );
   }
 
   return (

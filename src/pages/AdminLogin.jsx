@@ -1,39 +1,89 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, ArrowRight } from 'lucide-react';
+import { Lock, ArrowRight, Loader2 } from 'lucide-react';
 
-// Allowed admin emails
-const ADMIN_EMAILS = [
-  'thephirstory@gmail.com',
-  'admin@thephirstory.com'
-];
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function AdminLogin() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   // Check if already logged in
   useEffect(() => {
-    const adminEmail = localStorage.getItem('admin_email');
-    if (adminEmail && ADMIN_EMAILS.includes(adminEmail.toLowerCase())) {
-      navigate('/');
-    }
+    checkExistingAuth();
   }, [navigate]);
 
-  function handleLogin(e) {
-    e.preventDefault();
-    if (!email.trim()) return;
+  async function checkExistingAuth() {
+    const token = localStorage.getItem('admin_token');
 
-    const normalizedEmail = email.toLowerCase().trim();
-
-    if (ADMIN_EMAILS.includes(normalizedEmail)) {
-      localStorage.setItem('admin_email', normalizedEmail);
-      localStorage.setItem('admin_token', 'email-auth'); // Keep for backward compat
-      navigate('/');
-    } else {
-      setError('This email is not authorized for admin access');
+    if (!token || token === 'email-auth') {
+      // Old auth or no auth
+      setChecking(false);
+      return;
     }
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin-auth`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: 'verify' })
+      });
+
+      if (res.ok) {
+        navigate('/');
+        return;
+      }
+    } catch (err) {
+      // Token invalid, continue to login
+    }
+
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_email');
+    setChecking(false);
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    if (!password.trim()) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin-auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Invalid password');
+      }
+
+      localStorage.setItem('admin_token', data.token);
+      localStorage.setItem('admin_email', 'admin@thephirstory.com');
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+      </div>
+    );
   }
 
   return (
@@ -58,28 +108,35 @@ export default function AdminLogin() {
           <form onSubmit={handleLogin}>
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email
+                Password
               </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                  placeholder="admin@thephirstory.com"
+                  type="password"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                  placeholder="Enter admin password"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
                   required
+                  autoFocus
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              disabled={!email.trim()}
+              disabled={!password.trim() || loading}
               className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
             >
-              Sign In
-              <ArrowRight className="w-4 h-4" />
+              {loading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  Sign In
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
         </div>
