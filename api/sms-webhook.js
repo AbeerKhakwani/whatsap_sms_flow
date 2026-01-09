@@ -1,6 +1,6 @@
 /**
  * WhatsApp Webhook - Conversational Sell Flow
- * Uses existing APIs: validate-listing, create-draft, product-image, transcribe
+ * State machine with button-first UX, persistent listings, safe field merging
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -16,6 +16,46 @@ const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
+
+// Required fields for submission (in order of asking)
+const REQUIRED_FIELDS = ['designer', 'item_type', 'size', 'condition', 'pieces_included', 'asking_price_usd'];
+
+// ============ UTILITY FUNCTIONS (A) ============
+
+function normalizeInput(text) {
+  if (!text) return '';
+  return text
+    .replace(/\bNWT\b/ig, 'New with tags')
+    .replace(/\bNWOT\b/ig, 'New without tags')
+    .replace(/\bEUC\b/ig, 'Gently used')
+    .replace(/\$\s*(\d+)/g, '$1')
+    .trim();
+}
+
+function isNonEmpty(v) {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return v.trim().length > 0;
+  return true;
+}
+
+function safeMerge(existing, incoming) {
+  const merged = { ...(existing || {}) };
+  for (const key of Object.keys(incoming || {})) {
+    const val = incoming[key];
+    if (isNonEmpty(val)) merged[key] = val;
+  }
+  return merged;
+}
+
+function getMissingFields(listing) {
+  return REQUIRED_FIELDS.filter(f => !isNonEmpty(listing?.[f]));
+}
+
+function isListingComplete(listing) {
+  return getMissingFields(listing).length === 0;
+}
+
+// ============ MAIN HANDLER ============
 
 export default async function handler(req, res) {
   // Webhook verification (GET)
@@ -52,14 +92,15 @@ export default async function handler(req, res) {
       text = message.text?.body?.trim() || '';
     } else if (message.type === 'interactive') {
       buttonId = message.interactive?.button_reply?.id;
+      text = buttonId || '';
     } else if (message.type === 'audio') {
-      // Use existing transcribe API
       try {
-        text = await transcribeAudio(message.audio.id);
-        await sendMessage(phone, `🎤 I heard: "${text}"`);
+        const transcribed = await transcribeAudio(message.audio.id);
+        text = normalizeInput(transcribed);
+        await sendMessage(phone, `🎤 "${text}"`);
       } catch (e) {
         console.error('Transcribe error:', e);
-        await sendMessage(phone, "Couldn't transcribe that. Please type instead.");
+        await sendMessage(phone, "Couldn't catch that. Try typing instead.");
         return res.status(200).json({ status: 'voice failed' });
       }
     } else if (message.type === 'image') {
@@ -69,26 +110,41 @@ export default async function handler(req, res) {
     const cmd = text.toLowerCase();
     console.log(`📱 ${phone} [${session.state}]: "${text}" btn=${buttonId}`);
 
-    // Global commands
+    // ============ GLOBAL COMMANDS ============
+
     if (cmd === 'cancel') {
-      await resetSession(phone);
-      await sendMessage(phone, "Cancelled. Reply SELL to start over.");
+      await handleCancel(phone, session);
       return res.status(200).json({ status: 'cancelled' });
     }
 
     if (cmd === 'info') {
-      await sendMessage(phone,
-        `🛍️ Shop: thephirstory.com\n` +
-        `📧 Questions: admin@thephirstory.com\n` +
-        `💬 Sell with us: Reply SELL`
-      );
-      return res.status(200).json({ status: 'info sent' });
+      await sendMessage(phone, `🛍️ Shop: thephirstory.com\n📧 Help: admin@thephirstory.com`);
+      return res.status(200).json({ status: 'info' });
     }
 
-    // State machine
+    if (cmd === 'hi' || cmd === 'hello' || cmd === 'hey') {
+      await sendWelcome(phone);
+      return res.status(200).json({ status: 'welcome' });
+    }
+
+    if (cmd === 'sell') {
+      // If mid-flow, warn them
+      if (session.state !== 'welcome' && session.state !== 'submitted') {
+        await sendMessage(phone, "We're still working on your listing.\nType CANCEL to start over.");
+        return res.status(200).json({ status: 'mid-flow' });
+      }
+      session.state = 'awaiting_email';
+      await saveSession(phone, session);
+      await sendMessage(phone, "What's your email?");
+      return res.status(200).json({ status: 'asked email' });
+    }
+
+    // ============ STATE MACHINE ============
+
     switch (session.state) {
       case 'welcome':
-        return await handleWelcome(phone, cmd, session, res);
+        await sendWelcome(phone);
+        return res.status(200).json({ status: 'welcome' });
 
       case 'awaiting_email':
         return await handleEmail(phone, text, session, res);
@@ -96,20 +152,25 @@ export default async function handler(req, res) {
       case 'awaiting_description':
         return await handleDescription(phone, text, session, res);
 
-      case 'awaiting_field':
-        return await handleField(phone, text, buttonId, session, res);
+      case 'awaiting_field_value':
+        return await handleFieldValue(phone, text, buttonId, session, res);
 
       case 'awaiting_confirmation':
         return await handleConfirmation(phone, text, buttonId, session, res);
 
-      case 'awaiting_photos':
-        return await handlePhotosState(phone, text, buttonId, session, res);
+      case 'awaiting_edit_choice':
+        return await handleEditChoice(phone, text, buttonId, session, res);
 
-      case 'done':
-        return await handleWelcome(phone, cmd, session, res);
+      case 'collecting_photos':
+        return await handlePhotoState(phone, text, buttonId, session, res);
+
+      case 'submitted':
+        await sendWelcome(phone);
+        return res.status(200).json({ status: 'welcome' });
 
       default:
-        return await handleWelcome(phone, cmd, session, res);
+        await sendWelcome(phone);
+        return res.status(200).json({ status: 'welcome' });
     }
 
   } catch (error) {
@@ -118,229 +179,258 @@ export default async function handler(req, res) {
   }
 }
 
-// ============ State Handlers ============
+// ============ STATE HANDLERS ============
 
-async function handleWelcome(phone, cmd, session, res) {
-  if (cmd === 'sell') {
-    session.state = 'awaiting_email';
-    await saveSession(phone, session);
-    await sendMessage(phone, "What's your email address?\n\n(Type CANCEL to start over)");
-    return res.status(200).json({ status: 'asked email' });
+async function sendWelcome(phone) {
+  await sendMessage(phone, `Hi! 👋 Welcome to The Phir Story.\n\n• SELL — List an item\n• INFO — Learn more`);
+}
+
+async function handleCancel(phone, session) {
+  // If there's a draft listing, mark it rejected
+  if (session.listing?.listing_id) {
+    await supabase
+      .from('listings')
+      .update({ status: 'rejected', updated_at: new Date().toISOString() })
+      .eq('id', session.listing.listing_id);
   }
-
-  await sendMessage(phone,
-    `Hi! 👋 Welcome to The Phir Story.\n\n` +
-    `• SELL - List an item\n` +
-    `• INFO - Learn more`
-  );
-  return res.status(200).json({ status: 'welcome sent' });
+  await resetSession(phone);
+  await sendMessage(phone, "Cancelled. Reply SELL to start over.");
 }
 
 async function handleEmail(phone, text, session, res) {
   const email = text.toLowerCase().trim();
 
-  // Validate email format
   if (!email.includes('@') || !email.includes('.')) {
-    await sendMessage(phone, "That doesn't look right. Please type your email (e.g., you@example.com)");
+    await sendMessage(phone, "Hmm, that doesn't look right.\nTry: you@example.com");
     return res.status(200).json({ status: 'invalid email' });
   }
 
-  // Check if email exists in database
-  const { data: existingSeller } = await supabase
+  // Check seller exists
+  const { data: seller } = await supabase
     .from('sellers')
-    .select('id, name, email, phone')
+    .select('id, name, phone')
     .ilike('email', email)
     .maybeSingle();
 
-  let greeting;
-
-  if (existingSeller) {
-    // Email exists - check if phone matches
-    if (existingSeller.phone && !phonesMatch(existingSeller.phone, phone)) {
-      // Phone doesn't match - reject
-      await sendMessage(phone,
-        "This email is linked to a different phone number.\n\n" +
-        "Please text from that phone, or contact admin@thephirstory.com for help."
-      );
-      return res.status(200).json({ status: 'email mismatch' });
-    }
-
-    // Phone matches (or no phone on file) - welcome back
-    greeting = `Welcome back${existingSeller.name ? ', ' + existingSeller.name : ''}! ✓`;
-    session.sellerId = existingSeller.id;
-    session.sellerName = existingSeller.name;
-
-    // Update seller's phone if not set
-    if (!existingSeller.phone) {
-      await supabase
-        .from('sellers')
-        .update({ phone: phone })
-        .eq('id', existingSeller.id);
-    }
-  } else {
-    // New user - email doesn't exist in database
-    greeting = "Looks like you're new here! Welcome to The Phir Story ✨";
-    session.sellerId = null;
-    session.sellerName = null;
-    session.isNewSeller = true;
+  if (seller?.phone && !phonesMatch(seller.phone, phone)) {
+    await sendMessage(phone, "This email is linked to another phone.\nText from that phone or email admin@thephirstory.com");
+    return res.status(200).json({ status: 'phone mismatch' });
   }
 
-  // Save email and move to description
+  // Update seller phone if missing
+  if (seller && !seller.phone) {
+    await supabase.from('sellers').update({ phone }).eq('id', seller.id);
+  }
+
   session.email = email;
+  session.seller_id = seller?.id || null;
+  session.seller_name = seller?.name || null;
   session.state = 'awaiting_description';
   await saveSession(phone, session);
 
-  await sendMessage(phone,
-    `${greeting}\n\n` +
-    `Describe your item (text or voice):\n` +
-    `• Designer/brand\n` +
-    `• Size\n` +
-    `• Condition\n` +
-    `• Asking price\n\n` +
-    `Example: "Sana Safinaz 3-piece, size M, like new, $80"`
-  );
-  return res.status(200).json({ status: 'asked description', isNew: !existingSeller });
+  const greeting = seller ? `Welcome back${seller.name ? ', ' + seller.name : ''}!` : "Welcome! Let's list your item.";
+  await sendMessage(phone, `${greeting}\n\nDescribe it in one message:\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
+  return res.status(200).json({ status: 'asked description' });
 }
 
 async function handleDescription(phone, text, session, res) {
-  if (!text) {
-    await sendMessage(phone, "Please describe your item (text or voice message).");
+  const normalized = normalizeInput(text);
+  if (!normalized) {
+    await sendMessage(phone, "Tell me about your item:\nDesigner, size, condition, price");
     return res.status(200).json({ status: 'no description' });
   }
 
-  // Use existing validate-listing API
-  const validation = await callValidateListing(text);
-  console.log('🤖 Validation result:', validation);
+  try {
+    // Extract using AI
+    const validation = await callValidateListing(normalized);
+    console.log('🤖 Extracted:', validation.extracted);
 
-  session.listing = {
-    ...session.listing,
-    ...validation.extracted,
-    description: text
-  };
-  session.aiMessage = validation.message;
-  await saveSession(phone, session);
+    // Safe merge into session listing (never overwrites existing values)
+    session.listing = safeMerge(session.listing, validation.extracted);
+    session.listing.details = normalized; // Store original description
+    await saveSession(phone, session);
 
-  if (validation.isComplete) {
-    // All required fields extracted, show confirmation
-    return await showConfirmation(phone, session, res);
+    // DON'T create listings draft during chat - only on SUBMIT
+
+    // Show what we extracted (clearer feedback)
+    const l = session.listing;
+    let feedback = `Got it ✓\n\n`;
+    if (l.designer) feedback += `${l.designer}`;
+    if (l.item_type) feedback += ` ${l.item_type}`;
+    if (l.size) feedback += ` • Size ${l.size}`;
+    if (l.condition) feedback += `\n${l.condition}`;
+    if (l.asking_price_usd) feedback += ` • $${l.asking_price_usd}`;
+    if (l.pieces_included) feedback += `\n${l.pieces_included}`;
+
+    await sendMessage(phone, feedback);
+
+    // Ask for next missing field or confirm
+    return await askNextOrConfirm(phone, session, res);
+
+  } catch (error) {
+    console.error('❌ AI extraction error:', error);
+    // DON'T reset - just ask them to try again
+    await sendMessage(phone, "Couldn't understand that. Try again:\nExample: \"Maria B lawn 3pc, M, like new, $80\"");
+    return res.status(200).json({ status: 'extraction error' });
   }
-
-  // Ask for missing fields
-  return await askNextMissing(phone, session, validation.missing, res);
 }
 
-async function handleField(phone, text, buttonId, session, res) {
-  const field = session.currentField;
-  const value = buttonId || text;
+async function handleFieldValue(phone, text, buttonId, session, res) {
+  const field = session.current_field;
+  let value = buttonId || normalizeInput(text);
 
-  if (!value) {
+  // Handle "Type" button - ask them to type
+  if (value === 'type' || value === 'Type' || value === 'Type my own') {
+    await sendMessage(phone, getTypePrompt(field));
+    return res.status(200).json({ status: 'asked to type' });
+  }
+
+  // Map button values to field values
+  value = mapButtonToValue(field, value);
+
+  if (!isNonEmpty(value)) {
+    await sendMessage(phone, "Didn't catch that. Try again?");
     return res.status(200).json({ status: 'no value' });
   }
 
-  // Map button IDs to field values
-  session.listing[field] = value;
+  // Safe merge
+  session.listing = safeMerge(session.listing, { [field]: value });
+  session.current_field = null;
   await saveSession(phone, session);
 
-  // Re-validate with updated data
-  const desc = buildDescription(session.listing);
-  const validation = await callValidateListing(desc);
+  // DON'T create listings draft during chat - only on SUBMIT
 
-  session.listing = { ...session.listing, ...validation.extracted };
-  await saveSession(phone, session);
+  // Acknowledge what we got, show progress, and ask for next
+  const l = session.listing;
+  const missing = getMissingFields(l);
 
-  if (validation.isComplete || validation.missing.length === 0) {
-    return await showConfirmation(phone, session, res);
-  }
+  // Show what we have so far (clearer context)
+  let summary = `Got it ✓\n\n`;
+  if (l.designer) summary += `${l.designer}`;
+  if (l.item_type) summary += ` ${l.item_type}`;
+  if (l.size) summary += ` • Size ${l.size}`;
+  if (l.condition) summary += `\n${l.condition}`;
+  if (l.asking_price_usd) summary += ` • $${l.asking_price_usd}`;
+  if (l.pieces_included) summary += `\n${l.pieces_included}`;
 
-  return await askNextMissing(phone, session, validation.missing, res);
+  await sendMessage(phone, summary);
+  return await askNextOrConfirm(phone, session, res);
 }
 
 async function handleConfirmation(phone, text, buttonId, session, res) {
-  const response = buttonId || text.toLowerCase();
+  const response = (buttonId || text).toLowerCase();
 
-  if (response === 'yes' || response.includes('yes')) {
-    session.state = 'awaiting_photos';
+  if (response === 'yes' || response === 'yes ✓') {
+    session.state = 'collecting_photos';
     session.photos = session.photos || [];
-    // Include any early photos
-    if (session.earlyPhotos?.length) {
-      session.photos = [...session.photos, ...session.earlyPhotos];
-      session.earlyPhotos = [];
+    // Include early photos
+    if (session.early_photos?.length) {
+      session.photos = [...session.photos, ...session.early_photos];
+      session.early_photos = [];
     }
     await saveSession(phone, session);
 
-    const photoCount = session.photos.length;
-    if (photoCount >= 3) {
-      await sendMessage(phone, `Got it! (${photoCount} photos) ✓`);
-      await sendButtons(phone, "Ready to submit, or send more photos.", [
+    const count = session.photos.length;
+    if (count >= 3) {
+      await sendMessage(phone, `Got ${count} photos ✓`);
+      await sendButtons(phone, "Ready to submit?", [
         { id: 'submit', title: 'SUBMIT ✓' },
-        { id: 'add_more', title: 'ADD MORE' }
+        { id: 'add_more', title: 'Add more' }
       ]);
     } else {
-      await sendMessage(phone,
-        `Send ${3 - photoCount}+ photos:\n` +
-        `📸 Front view\n` +
-        `📸 Back view\n` +
-        `📸 Brand tag\n\n` +
-        `Send all at once or one by one.`
-      );
+      await sendMessage(phone, `Great — send 3+ photos:\n📸 Front • Back • Brand tag`);
     }
-    return res.status(200).json({ status: 'asked photos' });
+    return res.status(200).json({ status: 'collecting photos' });
   }
 
-  if (response === 'update' || response === 'edit') {
-    await sendButtons(phone, "What would you like to change?", [
+  if (response === 'update') {
+    session.state = 'awaiting_edit_choice';
+    await saveSession(phone, session);
+    await sendButtons(phone, "What to change?", [
+      { id: 'edit_designer', title: 'Designer' },
+      { id: 'edit_item_type', title: 'Item type' },
+      { id: 'edit_size', title: 'Size' }
+    ]);
+    // Send second row
+    await sendButtons(phone, "Or:", [
+      { id: 'edit_condition', title: 'Condition' },
+      { id: 'edit_pieces', title: 'Pieces' },
+      { id: 'edit_price', title: 'Price' }
+    ]);
+    return res.status(200).json({ status: 'asked edit choice' });
+  }
+
+  return res.status(200).json({ status: 'unknown' });
+}
+
+async function handleEditChoice(phone, text, buttonId, session, res) {
+  const choice = (buttonId || text).toLowerCase();
+
+  const fieldMap = {
+    'edit_designer': 'designer',
+    'designer': 'designer',
+    'edit_item_type': 'item_type',
+    'item type': 'item_type',
+    'edit_size': 'size',
+    'size': 'size',
+    'edit_condition': 'condition',
+    'condition': 'condition',
+    'edit_pieces': 'pieces_included',
+    'pieces': 'pieces_included',
+    'edit_price': 'asking_price_usd',
+    'price': 'asking_price_usd'
+  };
+
+  const field = fieldMap[choice];
+  if (!field) {
+    await sendButtons(phone, "Pick one:", [
       { id: 'edit_designer', title: 'Designer' },
       { id: 'edit_size', title: 'Size' },
       { id: 'edit_price', title: 'Price' }
     ]);
-    return res.status(200).json({ status: 'asked what to edit' });
+    return res.status(200).json({ status: 'asked again' });
   }
 
-  if (response.startsWith('edit_')) {
-    const field = response.replace('edit_', '');
-    session.currentField = field === 'price' ? 'asking_price' : field;
-    session.state = 'awaiting_field';
-    await saveSession(phone, session);
-    await sendMessage(phone, `What's the new ${field}?`);
-    return res.status(200).json({ status: 'editing field' });
-  }
+  session.current_field = field;
+  session.state = 'awaiting_field_value';
+  await saveSession(phone, session);
 
-  return res.status(200).json({ status: 'unknown confirmation' });
+  await askForField(phone, field);
+  return res.status(200).json({ status: `editing ${field}` });
 }
 
-async function handlePhotosState(phone, text, buttonId, session, res) {
-  if (buttonId === 'submit' || text.toLowerCase() === 'submit') {
+async function handlePhotoState(phone, text, buttonId, session, res) {
+  const cmd = (buttonId || text).toLowerCase();
+
+  if (cmd === 'submit' || cmd === 'submit ✓') {
     return await submitListing(phone, session, res);
   }
 
-  if (buttonId === 'add_more') {
-    await sendMessage(phone, "Send more photos. Tap SUBMIT when done.");
-    return res.status(200).json({ status: 'waiting more photos' });
+  if (cmd === 'add_more' || cmd === 'add more') {
+    await sendMessage(phone, "Send more photos. Tap SUBMIT when ready.");
+    return res.status(200).json({ status: 'adding more' });
   }
 
-  await sendMessage(phone, "Please send photos of your item, or tap SUBMIT if done.");
+  await sendMessage(phone, "Send photos or tap SUBMIT when ready.");
   return res.status(200).json({ status: 'waiting photos' });
 }
 
 async function handlePhoto(phone, mediaId, session, res) {
-  // Download image
   const imageData = await downloadMedia(mediaId);
 
-  if (session.state !== 'awaiting_photos') {
-    // Save for later
-    session.earlyPhotos = session.earlyPhotos || [];
-    session.earlyPhotos.push(imageData);
+  if (session.state !== 'collecting_photos') {
+    session.early_photos = session.early_photos || [];
+    session.early_photos.push(imageData);
     await saveSession(phone, session);
 
     if (session.state === 'welcome') {
-      await sendMessage(phone, "Got the photo! 📸 Reply SELL to start listing your item.");
+      await sendMessage(phone, "Got the photo! 📸\nReply SELL to list your item.");
     } else {
-      await sendMessage(phone, "Got the photo! 📸 I'll add it to your listing.");
+      await sendMessage(phone, "Got it! 📸 I'll add it to your listing.");
     }
-    return res.status(200).json({ status: 'photo saved early' });
+    return res.status(200).json({ status: 'early photo' });
   }
 
-  // Add photo
   session.photos = session.photos || [];
   session.photos.push(imageData);
   await saveSession(phone, session);
@@ -348,130 +438,154 @@ async function handlePhoto(phone, mediaId, session, res) {
   const count = session.photos.length;
 
   if (count < 3) {
-    await sendMessage(phone, `Got it! (${count} photo${count > 1 ? 's' : ''}) - send ${3 - count} more`);
+    const remaining = 3 - count;
+    await sendMessage(phone, `${count} photo${count > 1 ? 's' : ''} ✓ — send ${remaining} more`);
   } else {
-    await sendMessage(phone, `Got it! (${count} photos) ✓`);
-    await sendButtons(phone, "Ready to submit, or send more photos.", [
+    await sendMessage(phone, `${count} photos ✓`);
+    await sendButtons(phone, "Ready to submit?", [
       { id: 'submit', title: 'SUBMIT ✓' },
-      { id: 'add_more', title: 'ADD MORE' }
+      { id: 'add_more', title: 'Add more' }
     ]);
   }
 
   return res.status(200).json({ status: 'photo received', count });
 }
 
-// ============ Helpers ============
+// ============ FLOW HELPERS ============
 
-async function showConfirmation(phone, session, res) {
-  session.state = 'awaiting_confirmation';
-  await saveSession(phone, session);
+async function askNextOrConfirm(phone, session, res) {
+  const missing = getMissingFields(session.listing);
 
-  const l = session.listing;
-  const summary = `Here's your listing:\n\n` +
-    `📦 ${l.designer || 'Unknown'} - ${l.item_type || 'Item'}\n` +
-    `📏 Size: ${l.size || '?'}\n` +
-    `✨ Condition: ${l.condition || '?'}\n` +
-    `💰 Price: $${l.asking_price || '?'}\n` +
-    (l.color ? `🎨 ${l.color}\n` : '') +
-    (l.material ? `🧵 ${l.material}\n` : '');
-
-  await sendMessage(phone, summary);
-  await sendButtons(phone, "Look good?", [
-    { id: 'yes', title: 'YES ✓' },
-    { id: 'update', title: 'UPDATE' }
-  ]);
-
-  return res.status(200).json({ status: 'asked confirmation' });
-}
-
-async function askNextMissing(phone, session, missing, res) {
-  if (!missing || missing.length === 0) {
-    return await showConfirmation(phone, session, res);
-  }
-
-  const field = missing[0];
-  session.currentField = field;
-  session.state = 'awaiting_field';
-  await saveSession(phone, session);
-
-  // Send AI message if available, otherwise ask directly
-  if (session.aiMessage) {
-    await sendMessage(phone, session.aiMessage);
-    session.aiMessage = null;
+  if (missing.length === 0) {
+    // All fields complete - show confirmation
+    session.state = 'awaiting_confirmation';
     await saveSession(phone, session);
-  } else {
-    const question = getFieldQuestion(field);
-    if (question.buttons) {
-      await sendButtons(phone, question.text, question.buttons);
-    } else {
-      await sendMessage(phone, question.text);
+
+    const l = session.listing;
+    const summary = `Perfect! Here's your listing:\n\n` +
+      `📦 ${l.designer} ${l.item_type || ''}\n` +
+      `📏 Size ${l.size}\n` +
+      `✨ ${l.condition}\n` +
+      `🧵 ${l.pieces_included}\n` +
+      `💰 $${l.asking_price_usd}`;
+
+    await sendMessage(phone, summary);
+    await sendButtons(phone, "Ready for photos?", [
+      { id: 'yes', title: 'YES ✓' },
+      { id: 'update', title: 'UPDATE' }
+    ]);
+    return res.status(200).json({ status: 'confirmation' });
+  }
+
+  // Ask for next missing field (one at a time)
+  const nextField = missing[0];
+  session.current_field = nextField;
+  session.state = 'awaiting_field_value';
+  await saveSession(phone, session);
+
+  await askForField(phone, nextField);
+  return res.status(200).json({ status: `asked ${nextField}` });
+}
+
+async function askForField(phone, field) {
+  const questions = {
+    designer: {
+      text: "What's the designer/brand?",
+      buttons: null // Free text
+    },
+    item_type: {
+      text: "What type of item?",
+      buttons: [
+        { id: 'Lawn Suit', title: 'Lawn Suit' },
+        { id: 'Formal', title: 'Formal' },
+        { id: 'Type', title: 'Type' }
+      ]
+    },
+    size: {
+      text: "What size?",
+      buttons: [
+        { id: 'S', title: 'S' },
+        { id: 'M', title: 'M' },
+        { id: 'L', title: 'L' }
+      ]
+    },
+    condition: {
+      text: "Condition?",
+      buttons: [
+        { id: 'New with tags', title: 'New with tags' },
+        { id: 'Like new', title: 'Like new' },
+        { id: 'Gently used', title: 'Gently used' }
+      ]
+    },
+    pieces_included: {
+      text: "What's included?",
+      buttons: [
+        { id: 'Kurta only', title: 'Kurta only' },
+        { id: '2-piece', title: '2-piece' },
+        { id: '3-piece', title: '3-piece' }
+      ]
+    },
+    asking_price_usd: {
+      text: "Asking price (USD)?",
+      buttons: [
+        { id: '50', title: '$50' },
+        { id: '80', title: '$80' },
+        { id: 'Type my own', title: 'Type my own' }
+      ]
     }
-  }
+  };
 
-  return res.status(200).json({ status: `asked ${field}` });
-}
+  const q = questions[field] || { text: `What's the ${field}?`, buttons: null };
 
-function getFieldQuestion(field) {
-  switch (field) {
-    case 'designer':
-      return { text: "What's the designer/brand?" };
-    case 'size':
-      return {
-        text: "What size?",
-        buttons: [
-          { id: 'S', title: 'S' },
-          { id: 'M', title: 'M' },
-          { id: 'L', title: 'L' }
-        ]
-      };
-    case 'condition':
-      return {
-        text: "What condition?",
-        buttons: [
-          { id: 'New with tags', title: 'New with tags' },
-          { id: 'Like new', title: 'Like new' },
-          { id: 'Gently used', title: 'Gently used' }
-        ]
-      };
-    case 'asking_price':
-      return { text: "What's your asking price in USD?" };
-    default:
-      return { text: `What's the ${field}?` };
+  if (q.buttons) {
+    await sendButtons(phone, q.text, q.buttons);
+  } else {
+    await sendMessage(phone, q.text);
   }
 }
 
-function buildDescription(listing) {
-  const parts = [];
-  if (listing.designer) parts.push(listing.designer);
-  if (listing.item_type) parts.push(listing.item_type);
-  if (listing.size) parts.push(`size ${listing.size}`);
-  if (listing.condition) parts.push(listing.condition);
-  if (listing.asking_price) parts.push(`$${listing.asking_price}`);
-  if (listing.color) parts.push(listing.color);
-  if (listing.material) parts.push(listing.material);
-  return parts.join(', ') || listing.description || '';
+function getTypePrompt(field) {
+  const prompts = {
+    size: "Type your size (e.g., XL, US 10, Chest 42):",
+    asking_price_usd: "Type your price in USD (just the number):",
+    item_type: "Type the item type (e.g., Kurta, Lehnga, Sharara):"
+  };
+  return prompts[field] || `Type the ${field}:`;
 }
+
+function mapButtonToValue(field, value) {
+  // Remove $ from price buttons
+  if (field === 'asking_price_usd') {
+    return value.replace(/[$,]/g, '').trim();
+  }
+  return value;
+}
+
+function formatFieldValue(field, value) {
+  if (field === 'asking_price_usd') return `$${value}`;
+  return value;
+}
+
+// (Removed createOrUpdateListingsDraft - we only create listings on SUBMIT now)
 
 async function submitListing(phone, session, res) {
   const listing = session.listing;
 
   try {
-    // Call existing create-draft API
+    // Call create-draft API for Shopify
     const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: session.email,
         phone: phone,
-        description: listing.description,
+        description: listing.details || '',
         extracted: {
           designer: listing.designer,
           item_type: listing.item_type,
           size: listing.size,
           condition: listing.condition,
-          asking_price: listing.asking_price,
-          color: listing.color,
-          material: listing.material
+          asking_price: listing.asking_price_usd
         }
       })
     });
@@ -483,7 +597,7 @@ async function submitListing(phone, session, res) {
       throw new Error(draftData.error || 'Failed to create draft');
     }
 
-    // Upload photos using existing product-image API
+    // Upload photos
     if (session.photos?.length > 0) {
       for (let i = 0; i < session.photos.length; i++) {
         const photo = session.photos[i];
@@ -498,32 +612,58 @@ async function submitListing(phone, session, res) {
             })
           });
         } catch (e) {
-          console.error(`Photo ${i + 1} upload failed:`, e);
+          console.error(`Photo ${i + 1} failed:`, e);
         }
       }
     }
 
+    // CREATE listings row on submit (not during chat)
+    const { data: createdListing } = await supabase
+      .from('listings')
+      .insert({
+        seller_id: session.seller_id,
+        conversation_id: null,
+        status: 'pending_approval',
+        input_method: 'whatsapp',
+        shopify_product_id: draftData.productId,
+        designer: listing.designer,
+        item_type: listing.item_type,
+        size: listing.size,
+        condition: listing.condition,
+        pieces_included: listing.pieces_included,
+        asking_price_usd: parseFloat(listing.asking_price_usd) || null,
+        details: listing.details,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select('id')
+      .single();
+
+    console.log('✅ Listing created in DB:', createdListing?.id);
+
     // Reset session
+    session.state = 'submitted';
+    await saveSession(phone, session);
     await resetSession(phone);
 
     await sendMessage(phone,
-      `🎉 Submitted for review!\n\n` +
-      `📦 ${listing.designer || 'Item'} - ${listing.item_type || ''}\n` +
-      `📏 Size ${listing.size || '?'} | $${listing.asking_price || '?'}\n\n` +
-      `We'll notify you when it's live.\n\n` +
-      `Reply SELL to list another item.`
+      `🎉 Submitted!\n\n` +
+      `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+      `📏 ${listing.size} • $${listing.asking_price_usd}\n\n` +
+      `We'll notify you when it's live.\nReply SELL to list another.`
     );
 
     return res.status(200).json({ status: 'submitted', productId: draftData.productId });
 
   } catch (error) {
-    console.error('Submit error:', error);
-    await sendMessage(phone, "Something went wrong. Please try again or email admin@thephirstory.com");
-    return res.status(200).json({ status: 'submit failed', error: error.message });
+    console.error('❌ Submit error:', error);
+    // DON'T reset session - keep their data so they can try again
+    await sendMessage(phone, "Oops, something went wrong submitting your listing.\n\nYour info is saved. Reply SUBMIT to try again, or CANCEL to start over.");
+    return res.status(200).json({ status: 'error', error: error.message });
   }
 }
 
-// ============ External API Calls ============
+// ============ EXTERNAL APIs ============
 
 async function callValidateListing(description) {
   try {
@@ -534,18 +674,12 @@ async function callValidateListing(description) {
     });
     return await response.json();
   } catch (e) {
-    console.error('Validate listing error:', e);
-    return {
-      extracted: {},
-      missing: ['designer', 'size', 'condition', 'asking_price'],
-      isComplete: false,
-      message: "Could you tell me: designer, size, condition, and price?"
-    };
+    console.error('Validate error:', e);
+    return { extracted: {}, missing: REQUIRED_FIELDS, isComplete: false };
   }
 }
 
 async function transcribeAudio(mediaId) {
-  // Download audio from WhatsApp
   const mediaRes = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
     headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
   });
@@ -557,7 +691,6 @@ async function transcribeAudio(mediaId) {
   const audioBuffer = await audioRes.arrayBuffer();
   const base64 = Buffer.from(audioBuffer).toString('base64');
 
-  // Call existing transcribe API
   const transcribeRes = await fetch(`${API_BASE}/api/transcribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -587,12 +720,12 @@ async function downloadMedia(mediaId) {
 }
 
 function phonesMatch(phone1, phone2) {
-  const digits1 = phone1?.replace(/\D/g, '').slice(-10);
-  const digits2 = phone2?.replace(/\D/g, '').slice(-10);
-  return digits1 === digits2;
+  const d1 = phone1?.replace(/\D/g, '').slice(-10);
+  const d2 = phone2?.replace(/\D/g, '').slice(-10);
+  return d1 === d2;
 }
 
-// ============ Session Management (Supabase) ============
+// ============ SESSION MANAGEMENT ============
 
 async function getSession(phone) {
   const { data } = await supabase
@@ -602,36 +735,41 @@ async function getSession(phone) {
     .maybeSingle();
 
   if (data) {
+    // Read seller_id from listing JSON (stored as _seller_id) since whatsapp_sessions doesn't have those columns
+    const listing = data.listing || {};
     return {
       state: data.state || 'welcome',
       email: data.email,
-      sellerId: data.seller_id,
-      sellerName: data.seller_name,
-      listing: data.listing || {},
+      seller_id: listing._seller_id || null,
+      seller_name: listing._seller_name || null,
+      listing: listing,
       photos: data.photos || [],
-      earlyPhotos: data.early_photos || [],
-      currentField: data.current_field,
-      aiMessage: data.ai_message
+      early_photos: data.early_photos || [],
+      current_field: data.current_field
     };
   }
 
-  return { state: 'welcome', listing: {}, photos: [], earlyPhotos: [] };
+  return { state: 'welcome', listing: {}, photos: [], early_photos: [] };
 }
 
 async function saveSession(phone, session) {
+  // Store seller_id in listing json since whatsapp_sessions doesn't have that column
+  const listingWithMeta = {
+    ...session.listing,
+    _seller_id: session.seller_id,
+    _seller_name: session.seller_name
+  };
+
   await supabase
     .from('whatsapp_sessions')
     .upsert({
       phone,
       state: session.state,
       email: session.email || null,
-      seller_id: session.sellerId || null,
-      seller_name: session.sellerName || null,
-      listing: session.listing || {},
+      listing: listingWithMeta,
       photos: session.photos || [],
-      early_photos: session.earlyPhotos || [],
-      current_field: session.currentField || null,
-      ai_message: session.aiMessage || null,
+      early_photos: session.early_photos || [],
+      current_field: session.current_field || null,
       updated_at: new Date().toISOString()
     }, { onConflict: 'phone' });
 }
@@ -643,21 +781,18 @@ async function resetSession(phone) {
       phone,
       state: 'welcome',
       email: null,
-      seller_id: null,
-      seller_name: null,
       listing: {},
       photos: [],
       early_photos: [],
       current_field: null,
-      ai_message: null,
       updated_at: new Date().toISOString()
     }, { onConflict: 'phone' });
 }
 
-// ============ WhatsApp API ============
+// ============ WHATSAPP API ============
 
 async function sendMessage(phone, text) {
-  const response = await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+  await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
@@ -670,11 +805,10 @@ async function sendMessage(phone, text) {
       text: { body: text }
     })
   });
-  return response.json();
 }
 
 async function sendButtons(phone, text, buttons) {
-  const response = await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+  await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
@@ -688,7 +822,7 @@ async function sendButtons(phone, text, buttons) {
         type: 'button',
         body: { text },
         action: {
-          buttons: buttons.map(b => ({
+          buttons: buttons.slice(0, 3).map(b => ({
             type: 'reply',
             reply: { id: b.id, title: b.title }
           }))
@@ -696,5 +830,4 @@ async function sendButtons(phone, text, buttons) {
       }
     })
   });
-  return response.json();
 }
