@@ -418,22 +418,34 @@ async function extractFields(text) {
       messages: [
         {
           role: 'system',
-          content: `Extract listing fields from description. Return JSON:
-{
-  "designer": "brand name or null",
-  "pieces": "Kurta only|2-piece|3-piece or null",
-  "size": "XS|S|M|L|XL or specific measurement or null",
-  "condition": "New with tags|Like new|Gently used or null",
-  "price": "number only or null",
-  "details": "color, fabric, other details or null"
-}`
+          content: `You extract product details from descriptions of Pakistani designer clothing.
+
+Extract these fields:
+- designer: brand name (e.g., "Sana Safinaz", "Maria B", "Khaadi", "Elan", "Zara Shahjahan", "Agha Noor")
+- pieces: what's included ("Kurta only", "2-piece", "3-piece")
+- size: size (e.g., "XS", "S", "M", "L", "XL", or measurements)
+- condition: item condition ("New with tags", "Like new", "Gently used")
+- price: asking price (number only)
+- details: color, fabric, other details
+
+Handle transcription errors:
+- "Santa Safinas" → "Sana Safinaz"
+- "Maria Bee" → "Maria B"
+- "Caddy" → "Khaadi"
+- "Eland" / "Ellen" → "Elan"
+
+Return JSON with ONLY the fields you found. Use null for fields not mentioned.
+Example: {"designer": "Sana Safinaz", "pieces": "2-piece", "size": "XL", "condition": "Like new", "price": null, "details": null}`
         },
         { role: 'user', content: text }
       ],
       response_format: { type: 'json_object' },
       temperature: 0.2
     });
-    return JSON.parse(response.choices[0].message.content);
+
+    const result = JSON.parse(response.choices[0].message.content);
+    console.log('🤖 AI extracted:', result);
+    return result;
   } catch (e) {
     console.error('Extract error:', e);
     return {};
