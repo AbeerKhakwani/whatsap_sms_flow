@@ -332,7 +332,7 @@ export default async function handler(req, res) {
         } else {
           // Show summary again
           const listing = session.listing;
-          const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+          const photoCount = (session.photos || []).filter(url => url).length;
 
           const summary =
             `📋 *Ready to submit!*\n\n` +
@@ -480,7 +480,7 @@ async function handleResumeChoice(phone, text, buttonId, session, res) {
 
     // Determine where to resume based on previous state and data
     if (prevState === 'collecting_photos' || session.photos?.length > 0) {
-      const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+      const photoCount = (session.photos || []).filter(url => url).length;
       session.state = 'collecting_photos';
       session.prev_state = null; // Clear prev_state
       await saveSession(phone, session);
@@ -702,11 +702,11 @@ async function handleAdditionalDetails(phone, text, buttonId, session, res) {
     // Re-fetch session to ensure we have latest photos
     const freshSession = await getSession(phone);
     const listing = freshSession.listing;
-    const photoCount = (freshSession.photos || []).filter(p => p.imageUrl).length;
+    const photoCount = (freshSession.photos || []).filter(url => url).length;
 
     console.log(`📊 Summary - Total photos in session: ${freshSession.photos?.length || 0}, with URLs: ${photoCount}`);
     if (freshSession.photos?.length > 0) {
-      console.log(`📸 First photo check:`, freshSession.photos[0]);
+      console.log(`📸 First photo URL:`, freshSession.photos[0]);
     }
 
     const summary =
@@ -747,7 +747,7 @@ async function handleAdditionalDetails(phone, text, buttonId, session, res) {
 
     // Show summary
     const listing = session.listing;
-    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+    const photoCount = (session.photos || []).filter(url => url).length;
 
     const summary =
       `📋 *Ready to submit!*\n\n` +
@@ -772,7 +772,7 @@ async function handleAdditionalDetails(phone, text, buttonId, session, res) {
   await saveSession(phone, session);
 
   const listing = session.listing;
-  const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+  const photoCount = (session.photos || []).filter(url => url).length;
 
   const summary =
     `📋 *Ready to submit!*\n\n` +
@@ -808,7 +808,7 @@ async function handleAdditionalDetailsText(phone, text, session, res) {
 
   // Show summary
   const listing = session.listing;
-  const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+  const photoCount = (session.photos || []).filter(url => url).length;
 
   const summary =
     `📋 *Ready to submit!*\n\n` +
@@ -920,7 +920,7 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   if (userText === 'done' || userText === 'next' || userText === 'continue' || buttonId === 'done') {
     // CRITICAL: Re-fetch session to get latest photos (photos were saved by separate webhook calls)
     const freshSession = await getSession(phone);
-    const photoCount = (freshSession.photos || []).filter(p => p.imageUrl).length;
+    const photoCount = (freshSession.photos || []).filter(url => url).length;
     console.log(`✅ User indicated done with photos. Fresh fetch count: ${photoCount}`);
 
     // Move to additional details
@@ -938,7 +938,7 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   }
 
   // Any other text - remind them what to do
-  const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+  const photoCount = (session.photos || []).filter(url => url).length;
   await sendMessage(phone, `Send photos now (you have ${photoCount}). Text DONE when finished! 📸`);
   return res.status(200).json({ status: 'waiting for photos or done' });
 }
@@ -967,6 +967,7 @@ async function handlePhoto(phone, mediaId, session, res) {
     // Preserve freshest meta (processedMessages, created_at, etc.) from original session
     // This prevents photo uploads from rolling back idempotency tracking
     latestSession.processedMessages = session.processedMessages || latestSession.processedMessages;
+    latestSession.processedMediaIds = session.processedMediaIds || latestSession.processedMediaIds;
     latestSession.created_at = session.created_at || latestSession.created_at;
     latestSession.prev_state = session.prev_state || latestSession.prev_state;
     latestSession.shopify_product_id = session.shopify_product_id || latestSession.shopify_product_id;
@@ -979,8 +980,10 @@ async function handlePhoto(phone, mediaId, session, res) {
     }
 
     // Check if this photo already exists (by mediaId)
+    // Track processed mediaIds in session metadata
     latestSession.photos = latestSession.photos || [];
-    if (latestSession.photos.some(p => p.mediaId === mediaId)) {
+    latestSession.processedMediaIds = latestSession.processedMediaIds || [];
+    if (latestSession.processedMediaIds.includes(mediaId)) {
       console.log(`⏭️  Photo ${mediaId} already uploaded, skipping`);
       return res.status(200).json({ status: 'duplicate photo' });
     }
@@ -1072,23 +1075,23 @@ async function handlePhoto(phone, mediaId, session, res) {
 
     console.log(`✅ Validated photo URL: ${photoData.imageUrl}`);
 
-    // Save only the URL (not base64) - Shopify is our CDN now
-    latestSession.photos.push({
-      imageUrl: photoData.imageUrl,  // Shopify CDN URL
-      imageId: photoData.imageId,     // Shopify image ID
-      mediaId: mediaId                 // WhatsApp media ID (for deduplication)
-    });
+    // Save only the URL string (photos column is TEXT[], not JSONB)
+    latestSession.photos.push(photoData.imageUrl);
+
+    // Track this mediaId to prevent duplicates
+    latestSession.processedMediaIds.push(mediaId);
 
     console.log(`💾 Saving session: phone=${phone}, photos.length=${latestSession.photos.length}, state=${latestSession.state}`);
     await saveSession(phone, latestSession);
 
     // Verify it saved by re-fetching
     const verifySession = await getSession(phone);
-    const savedCount = (verifySession.photos || []).filter(p => p.imageUrl).length;
-    console.log(`✅ Photo saved! Verified count: ${savedCount}, Latest photo: ${verifySession.photos[verifySession.photos.length - 1]?.imageUrl?.substring(0, 50)}...`);
+    const savedCount = (verifySession.photos || []).filter(url => url).length;
+    const latestPhotoUrl = verifySession.photos?.[verifySession.photos.length - 1] || '';
+    console.log(`✅ Photo saved! Verified count: ${savedCount}, Latest photo: ${latestPhotoUrl.substring(0, 50)}...`);
 
     // Use .filter to count only photos with valid URLs (prevents counting phantom photos)
-    const count = (latestSession.photos || []).filter(p => p.imageUrl).length;
+    const count = (latestSession.photos || []).filter(url => url).length;
     console.log(`📸 Photo ${count} uploaded to Shopify: ${photoData.imageUrl}`);
 
     // Done! No batching, no delays, no automatic transitions
@@ -1106,7 +1109,7 @@ async function submitListing(phone, session, res) {
 
   try {
     // Count only photos with valid URLs
-    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+    const photoCount = (session.photos || []).filter(url => url).length;
 
     console.log('📤 Submitting listing...');
     console.log('📦 Session state:', {
@@ -1128,9 +1131,8 @@ async function submitListing(phone, session, res) {
         if (match) cleanPrice = parseFloat(match[1]);
       }
 
-      // Extract photo URLs (photos already uploaded to Shopify)
+      // Extract photo URLs (photos are already URL strings)
       const photoUrls = (session.photos || [])
-        .map(p => p.imageUrl)
         .filter(url => url); // Filter out any nulls
 
       console.log(`📸 Photos already in Shopify: ${photoUrls.length} valid URLs (${session.photos?.length || 0} total entries)`);
@@ -1345,6 +1347,7 @@ async function getSession(phone) {
       // Extract metadata from listing._meta
       created_at: meta.created_at || null, // Don't fallback to updated_at - only use true created_at
       processedMessages: meta.processedMessages || [],
+      processedMediaIds: meta.processedMediaIds || [],
       lastPhotoResponseAt: meta.lastPhotoResponseAt || null,
       shopify_product_id: meta.shopify_product_id || null,
       prev_state: meta.prev_state || null
@@ -1357,6 +1360,7 @@ async function getSession(phone) {
     photos: [],
     created_at: null, // Will be set on first save
     processedMessages: [],
+    processedMediaIds: [],
     lastPhotoResponseAt: null,
     shopify_product_id: null,
     prev_state: null
@@ -1373,6 +1377,7 @@ async function saveSession(phone, session) {
   listing._meta = {
     created_at: existingCreatedAt || session.created_at || new Date().toISOString(),
     processedMessages: session.processedMessages || [],
+    processedMediaIds: session.processedMediaIds || [],
     lastPhotoResponseAt: session.lastPhotoResponseAt || null,
     shopify_product_id: session.shopify_product_id || null,
     prev_state: session.prev_state || null
