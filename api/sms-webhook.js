@@ -601,17 +601,9 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   const photoCount = (session.photos || []).length;
 
   if (response === 'submit' && photoCount >= 3) {
-    // Move to additional details question
-    session.state = 'awaiting_additional_details';
-    await saveSession(phone, session);
-
-    await sendButtons(phone,
-      `Any additional details buyers should know?\n\n(beading, embellishments, flaws, etc.)\n\nOr skip if ready to submit:`,
-      [
-        { id: 'skip_details', title: 'READY TO SUBMIT ✓' }
-      ]
-    );
-    return res.status(200).json({ status: 'asked additional details' });
+    // Submit directly without asking for additional details
+    console.log('📤 User requested submit with sufficient photos - submitting directly');
+    return await submitListing(phone, session, res);
   }
 
   if (photoCount < 3) {
@@ -620,8 +612,8 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   }
 
   // >= 3 photos, show submit option
-  await sendButtons(phone, `Got ${photoCount} photos!\n\nReady to continue?`, [
-    { id: 'submit', title: 'CONTINUE ›' },
+  await sendButtons(phone, `Got ${photoCount} photos!\n\nReady to submit?`, [
+    { id: 'submit', title: 'SUBMIT ✓' },
     { id: 'add_more', title: 'ADD MORE' }
   ]);
   return res.status(200).json({ status: 'ready to submit' });
@@ -708,8 +700,8 @@ async function handlePhoto(phone, mediaId, session, res) {
       await sendMessage(phone, `Got ${finalCount}/3 photos. Send ${3 - finalCount} more 📸`);
       return res.status(200).json({ status: `photo ${finalCount}` });
     } else {
-      await sendButtons(phone, `Perfect! Got ${finalCount} photos.\n\nReady to continue?`, [
-        { id: 'submit', title: 'CONTINUE ›' },
+      await sendButtons(phone, `Perfect! Got ${finalCount} photos.\n\nReady to submit?`, [
+        { id: 'submit', title: 'SUBMIT ✓' },
         { id: 'add_more', title: 'ADD MORE' }
       ]);
       return res.status(200).json({ status: 'ready to submit' });
@@ -1037,26 +1029,50 @@ async function getSession(phone) {
 
   if (data) {
     const listing = data.listing || {};
+    const meta = listing._meta || {};
+
     return {
       state: data.state || 'welcome',
       email: data.email,
       listing: listing,
       photos: data.photos || [],
-      current_field: data.current_field
+      current_field: data.current_field,
+      // Extract metadata from listing._meta
+      created_at: meta.created_at || data.updated_at,
+      processedMessages: meta.processedMessages || [],
+      lastPhotoResponseAt: meta.lastPhotoResponseAt || null,
+      shopify_product_id: meta.shopify_product_id || null
     };
   }
 
-  return { state: 'welcome', listing: {}, photos: [] };
+  return {
+    state: 'welcome',
+    listing: {},
+    photos: [],
+    created_at: new Date().toISOString(),
+    processedMessages: [],
+    lastPhotoResponseAt: null,
+    shopify_product_id: null
+  };
 }
 
 async function saveSession(phone, session) {
+  // Store metadata in listing._meta to persist across sessions
+  const listing = session.listing || {};
+  listing._meta = {
+    created_at: session.created_at || new Date().toISOString(),
+    processedMessages: session.processedMessages || [],
+    lastPhotoResponseAt: session.lastPhotoResponseAt || null,
+    shopify_product_id: session.shopify_product_id || null
+  };
+
   await supabase
     .from('whatsapp_sessions')
     .upsert({
       phone,
       state: session.state,
       email: session.email,
-      listing: session.listing || {},
+      listing: listing,
       photos: session.photos || [],
       current_field: session.current_field,
       updated_at: new Date().toISOString()
