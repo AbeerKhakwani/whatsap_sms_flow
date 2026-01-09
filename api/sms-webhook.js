@@ -4,6 +4,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import sharp from 'sharp';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -106,6 +107,32 @@ function phonesMatch(p1, p2) {
   const clean1 = p1.replace(/\D/g, '').slice(-10);
   const clean2 = p2.replace(/\D/g, '').slice(-10);
   return clean1 === clean2;
+}
+
+/**
+ * Compress and resize image buffer to optimized JPEG base64
+ * Reduces file size significantly before uploading to Shopify
+ */
+async function bufferToOptimizedJpegBase64(buffer) {
+  try {
+    const out = await sharp(buffer)
+      .rotate() // Auto-rotate based on EXIF
+      .resize({
+        width: 1600,
+        height: 1600,
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+
+    console.log(`📸 Compressed: ${buffer.length} bytes → ${out.length} bytes (${Math.round(out.length / buffer.length * 100)}%)`);
+    return out.toString('base64');
+  } catch (error) {
+    console.error('❌ Image compression error:', error);
+    // Fallback to uncompressed if sharp fails
+    return buffer.toString('base64');
+  }
 }
 
 // ============ MAIN HANDLER ============
@@ -284,10 +311,49 @@ export default async function handler(req, res) {
       case 'awaiting_missing_field':
         return await handleMissingField(phone, text, buttonId, session, res);
 
+      case 'awaiting_additional_details':
+        return await handleAdditionalDetails(phone, text, buttonId, session, res);
+
+      case 'awaiting_additional_details_text':
+        return await handleAdditionalDetailsText(phone, text, session, res);
+
       case 'collecting_photos':
         return await handlePhotoState(phone, text, buttonId, session, res);
 
+      case 'ready_to_submit':
+        // Handle final submit confirmation
+        const submitResponse = (buttonId || text).toLowerCase();
+        if (submitResponse === 'submit' || submitResponse === 'yes') {
+          return await submitListing(phone, session, res);
+        } else if (submitResponse === 'cancel') {
+          await resetSession(phone);
+          await sendMessage(phone, "Listing cancelled. Reply SELL to start over.");
+          return res.status(200).json({ status: 'cancelled' });
+        } else {
+          // Show summary again
+          const listing = session.listing;
+          const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+
+          const summary =
+            `📋 *Ready to submit!*\n\n` +
+            `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+            `📏 Size: ${listing.size}\n` +
+            `✨ Condition: ${listing.condition}\n` +
+            `💰 Price: $${listing.asking_price_usd}\n` +
+            `📸 Photos: ${photoCount}\n\n` +
+            `Click SUBMIT to confirm`;
+
+          await sendButtons(phone, summary, [
+            { id: 'submit', title: 'YES, SUBMIT ✓' },
+            { id: 'cancel', title: 'CANCEL' }
+          ]);
+
+          return res.status(200).json({ status: 'waiting for submit' });
+        }
+
       case 'submitted':
+        // Reset session for new listing
+        await resetSession(phone);
         await sendWelcome(phone);
         return res.status(200).json({ status: 'welcome' });
 
@@ -401,19 +467,13 @@ async function handleResumeChoice(phone, text, buttonId, session, res) {
 
     // Determine where to resume based on previous state and data
     if (prevState === 'collecting_photos' || session.photos?.length > 0) {
-      const photoCount = session.photos?.length || 0;
+      const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
       session.state = 'collecting_photos';
       session.prev_state = null; // Clear prev_state
       await saveSession(phone, session);
 
-      if (photoCount >= 3) {
-        await sendButtons(phone, `You have ${photoCount} photos.\n\nReady to submit?`, [
-          { id: 'submit', title: 'SUBMIT ✓' },
-          { id: 'add_more', title: 'ADD MORE' }
-        ]);
-      } else {
-        await sendMessage(phone, `You have ${photoCount} photos. Send ${3 - photoCount} more 📸`);
-      }
+      // Just remind them to send photos - don't nag about count
+      await sendMessage(phone, `You have ${photoCount} photo(s).\n\nSend more or continue to submit! 📸`);
       return res.status(200).json({ status: 'resumed photos' });
     } else {
       // Resume asking for missing fields
@@ -543,17 +603,232 @@ async function handleMissingField(phone, text, buttonId, session, res) {
   return await askNextMissingField(phone, session, res);
 }
 
+/**
+ * Create Shopify draft product for this session
+ * Called BEFORE asking for photos (so we have a productId to upload to)
+ */
+async function createDraftForSession(phone, session) {
+  // Skip if draft already exists
+  if (session.shopify_product_id) {
+    console.log(`✅ Draft already exists: ${session.shopify_product_id}`);
+    return true;
+  }
+
+  const listing = session.listing;
+
+  // Validate price
+  let askingPrice = listing.asking_price_usd;
+  if (typeof askingPrice === 'string') {
+    const priceMatch = askingPrice.match(/(\d+)/);
+    if (priceMatch) {
+      askingPrice = parseFloat(priceMatch[1]);
+    } else {
+      askingPrice = null;
+    }
+  }
+
+  if (!askingPrice || askingPrice <= 0) {
+    console.error('❌ Invalid price:', listing.asking_price_usd);
+    return false;
+  }
+
+  try {
+    console.log(`📦 Creating Shopify draft BEFORE photos... (phone: ${phone})`);
+
+    const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: session.email,
+        phone: phone,
+        description: listing.details || '',
+        extracted: {
+          designer: listing.designer,
+          item_type: listing.item_type,
+          pieces: listing.pieces_included,
+          size: listing.size,
+          condition: listing.condition,
+          color: listing.color,
+          material: listing.material,
+          asking_price: askingPrice
+        },
+        source: 'whatsapp'  // Track WhatsApp-created drafts
+      })
+    });
+
+    const draftData = await draftRes.json();
+
+    if (!draftData.success || !draftData.productId) {
+      console.error('❌ Draft creation failed:', draftData.error);
+      return false;
+    }
+
+    // Save product ID to session
+    session.shopify_product_id = draftData.productId;
+    await saveSession(phone, session);
+
+    console.log(`✅ Created draft: ${draftData.productId}`);
+    return true;
+
+  } catch (error) {
+    console.error('❌ Error creating draft:', error.message);
+    return false;
+  }
+}
+
+async function handleAdditionalDetails(phone, text, buttonId, session, res) {
+  const response = (buttonId || text).toLowerCase();
+
+  if (response === 'skip_details' || response === 'no' || response === 'skip') {
+    // Skip additional details - show summary and ask for final confirmation
+    console.log('📝 Skipping additional details - showing summary');
+
+    session.state = 'ready_to_submit';
+    await saveSession(phone, session);
+
+    // Show summary of everything
+    const listing = session.listing;
+    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+
+    const summary =
+      `📋 *Ready to submit!*\n\n` +
+      `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+      `📏 Size: ${listing.size}\n` +
+      `✨ Condition: ${listing.condition}\n` +
+      `💰 Price: $${listing.asking_price_usd}\n` +
+      `📸 Photos: ${photoCount}\n\n` +
+      `Look good?`;
+
+    await sendButtons(phone, summary, [
+      { id: 'submit', title: 'YES, SUBMIT ✓' },
+      { id: 'cancel', title: 'CANCEL' }
+    ]);
+
+    return res.status(200).json({ status: 'ready to submit' });
+  }
+
+  if (response === 'add_details' || response === 'yes') {
+    // Ask them to type details
+    await sendMessage(phone, `Great! Tell me about any flaws or special details:\n\n(e.g., "slight stain on sleeve", "missing belt", "beautiful beadwork")`);
+    session.state = 'awaiting_additional_details_text';
+    await saveSession(phone, session);
+    return res.status(200).json({ status: 'waiting for details text' });
+  }
+
+  // They typed details directly
+  if (text && text.trim().length > 0) {
+    const existingDetails = session.listing.additional_details || '';
+    const newDetails = existingDetails ? `${existingDetails}. ${text.trim()}` : text.trim();
+
+    session.listing.additional_details = newDetails;
+    console.log(`📝 Added additional details: ${newDetails}`);
+
+    session.state = 'ready_to_submit';
+    await saveSession(phone, session);
+
+    // Show summary
+    const listing = session.listing;
+    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+
+    const summary =
+      `📋 *Ready to submit!*\n\n` +
+      `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+      `📏 Size: ${listing.size}\n` +
+      `✨ Condition: ${listing.condition}\n` +
+      `💰 Price: $${listing.asking_price_usd}\n` +
+      `📸 Photos: ${photoCount}\n` +
+      `📝 Notes: ${newDetails.substring(0, 50)}${newDetails.length > 50 ? '...' : ''}\n\n` +
+      `Look good?`;
+
+    await sendButtons(phone, summary, [
+      { id: 'submit', title: 'YES, SUBMIT ✓' },
+      { id: 'cancel', title: 'CANCEL' }
+    ]);
+
+    return res.status(200).json({ status: 'ready to submit' });
+  }
+
+  // Fallback - show summary
+  session.state = 'ready_to_submit';
+  await saveSession(phone, session);
+
+  const listing = session.listing;
+  const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+
+  const summary =
+    `📋 *Ready to submit!*\n\n` +
+    `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+    `📏 Size: ${listing.size}\n` +
+    `✨ Condition: ${listing.condition}\n` +
+    `💰 Price: $${listing.asking_price_usd}\n` +
+    `📸 Photos: ${photoCount}\n\n` +
+    `Look good?`;
+
+  await sendButtons(phone, summary, [
+    { id: 'submit', title: 'YES, SUBMIT ✓' },
+    { id: 'cancel', title: 'CANCEL' }
+  ]);
+
+  return res.status(200).json({ status: 'ready to submit' });
+}
+
+async function handleAdditionalDetailsText(phone, text, session, res) {
+  if (!text || text.trim().length === 0) {
+    await sendMessage(phone, "Please type any flaws or special details, or reply SKIP to continue.");
+    return res.status(200).json({ status: 'waiting for details' });
+  }
+
+  const existingDetails = session.listing.additional_details || '';
+  const newDetails = existingDetails ? `${existingDetails}. ${text.trim()}` : text.trim();
+
+  session.listing.additional_details = newDetails;
+  console.log(`📝 Added additional details: ${newDetails}`);
+
+  session.state = 'ready_to_submit';
+  await saveSession(phone, session);
+
+  // Show summary
+  const listing = session.listing;
+  const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+
+  const summary =
+    `📋 *Ready to submit!*\n\n` +
+    `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+    `📏 Size: ${listing.size}\n` +
+    `✨ Condition: ${listing.condition}\n` +
+    `💰 Price: $${listing.asking_price_usd}\n` +
+    `📸 Photos: ${photoCount}\n` +
+    `📝 Notes: ${newDetails.substring(0, 50)}${newDetails.length > 50 ? '...' : ''}\n\n` +
+    `Look good?`;
+
+  await sendButtons(phone, summary, [
+    { id: 'submit', title: 'YES, SUBMIT ✓' },
+    { id: 'cancel', title: 'CANCEL' }
+  ]);
+
+  return res.status(200).json({ status: 'ready to submit' });
+}
+
 async function askNextMissingField(phone, session, res) {
   const missing = getMissingFields(session.listing);
   console.log(`🔍 Missing fields: ${JSON.stringify(missing)}`);
 
   if (missing.length === 0) {
-    // All complete - ask for photos
+    // All required fields complete - ask for PHOTOS FIRST (gives Shopify time to process)
+    console.log('✅ All fields complete - asking for photos first');
+
+    // Create Shopify draft NOW (before photos)
+    const draftCreated = await createDraftForSession(phone, session);
+    if (!draftCreated) {
+      await sendMessage(phone, "Oops, couldn't create draft. Reply SUBMIT to try again.");
+      return res.status(200).json({ status: 'error creating draft' });
+    }
+
     session.state = 'collecting_photos';
     session.photos = session.photos || [];
     await saveSession(phone, session);
 
-    await sendMessage(phone, `Perfect! Now send 3+ photos:\n\n1️⃣ Front view\n2️⃣ Back view\n3️⃣ Designer tag\n\nJust send them one by one 📸`);
+    await sendMessage(phone, `Perfect! 🎉\n\nNow send at least 3 photos:\n\n1️⃣ Front view\n2️⃣ Back view\n3️⃣ Designer tag\n\nJust send them! 📸`);
     return res.status(200).json({ status: 'asked photos' });
   }
 
@@ -614,26 +889,17 @@ async function askForField(phone, field) {
 }
 
 async function handlePhotoState(phone, text, buttonId, session, res) {
-  const response = (buttonId || text).toLowerCase();
-  const photoCount = (session.photos || []).length;
-
-  if (response === 'submit' && photoCount >= 3) {
-    // Submit directly without asking for additional details
-    console.log('📤 User requested submit with sufficient photos - submitting directly');
-    return await submitListing(phone, session, res);
+  // Check if already submitted (race condition protection)
+  if (session.state === 'submitted') {
+    console.log('⏭️  Already submitted - ignoring photo state message');
+    return res.status(200).json({ status: 'already submitted' });
   }
 
-  if (photoCount < 3) {
-    await sendMessage(phone, `Still need ${3 - photoCount} more photo(s).\nJust send them! 📸`);
-    return res.status(200).json({ status: 'waiting for photos' });
-  }
-
-  // >= 3 photos, show submit option
-  await sendButtons(phone, `Got ${photoCount} photos!\n\nReady to submit?`, [
-    { id: 'submit', title: 'SUBMIT ✓' },
-    { id: 'add_more', title: 'ADD MORE' }
-  ]);
-  return res.status(200).json({ status: 'ready to submit' });
+  // Don't nag about photo count - just wait for them to send photos
+  // Photos will auto-advance to additional_details state after delay
+  // Photo count will be validated at SUBMIT time
+  console.log('📸 Still collecting photos...');
+  return res.status(200).json({ status: 'collecting photos' });
 }
 
 async function handlePhoto(phone, mediaId, session, res) {
@@ -649,6 +915,13 @@ async function handlePhoto(phone, mediaId, session, res) {
     // Re-fetch session to get latest photo count
     const latestSession = await getSession(phone);
 
+    // CRITICAL: Check if already submitted (race condition protection)
+    // User might have clicked SUBMIT while photos were still processing
+    if (!latestSession || latestSession.state === 'submitted') {
+      console.log(`⏭️  Skipping photo - listing already submitted`);
+      return res.status(200).json({ status: 'already submitted' });
+    }
+
     // Preserve freshest meta (processedMessages, created_at, etc.) from original session
     // This prevents photo uploads from rolling back idempotency tracking
     latestSession.processedMessages = session.processedMessages || latestSession.processedMessages;
@@ -656,46 +929,131 @@ async function handlePhoto(phone, mediaId, session, res) {
     latestSession.prev_state = session.prev_state || latestSession.prev_state;
     latestSession.shopify_product_id = session.shopify_product_id || latestSession.shopify_product_id;
 
-    // TEST_MODE: Skip Meta API download, use dummy base64
+    // Check if draft exists (should have been created before photos)
+    if (!latestSession.shopify_product_id) {
+      console.error('❌ No Shopify product ID - draft should have been created first!');
+      await sendMessage(phone, "Oops, something went wrong. Reply SUBMIT to try again.");
+      return res.status(200).json({ status: 'no product id' });
+    }
+
+    // Check if this photo already exists (by mediaId)
+    latestSession.photos = latestSession.photos || [];
+    if (latestSession.photos.some(p => p.mediaId === mediaId)) {
+      console.log(`⏭️  Photo ${mediaId} already uploaded, skipping`);
+      return res.status(200).json({ status: 'duplicate photo' });
+    }
+
+    // Download and compress photo
     let base64;
     if (process.env.TEST_MODE === 'true') {
       // Dummy 1x1 red pixel PNG for testing
       base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
       console.log(`🧪 TEST_MODE: Using dummy photo for ${mediaId}`);
     } else {
-      // Download and convert to base64
+      // Download, compress, and convert to base64
       const mediaUrl = await getMediaUrl(mediaId);
       const mediaBuffer = await downloadMedia(mediaUrl);
-      base64 = mediaBuffer.toString('base64');
+      base64 = await bufferToOptimizedJpegBase64(mediaBuffer);
     }
 
-    latestSession.photos = latestSession.photos || [];
-
-    // Check if this photo already exists (by mediaId)
-    if (latestSession.photos.some(p => p.mediaId === mediaId)) {
-      console.log(`⏭️  Photo ${mediaId} already saved, skipping`);
-      return res.status(200).json({ status: 'duplicate photo' });
+    // Send immediate acknowledgment ONLY for the very first photo
+    // Check if we've EVER sent this acknowledgment (using a flag, not photo count)
+    if (!latestSession.photos || latestSession.photos.length === 0) {
+      latestSession.photos = [];
+      await sendMessage(phone, `Got it! Processing your photos... 📸`);
     }
 
-    latestSession.photos.push({ base64, mediaId });
+    // Upload directly to Shopify (NEW - use Shopify as CDN)
+    // Use mediaId-based filename to avoid race conditions
+    console.log(`📸 Uploading photo to Shopify product ${latestSession.shopify_product_id}... (mediaId: ${mediaId})`);
 
-    const count = latestSession.photos.length;
+    const uploadPhoto = async (retryCount = 0) => {
+      try {
+        const photoRes = await fetch(`${API_BASE}/api/wa-product-image?action=add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId: latestSession.shopify_product_id,
+            base64: base64,
+            filename: `wa_${mediaId}.jpg`  // MediaId-based to avoid race conditions
+          })
+        });
+
+        const photoData = await photoRes.json();
+
+        // Strict validation: only accept if we got a valid URL
+        if (!photoData.success || !photoData.imageUrl) {
+          if (retryCount === 0) {
+            // Retry once after short delay (transient Shopify errors)
+            console.log(`⚠️ Photo upload failed, retrying once... (${photoData.error || 'No URL returned'})`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return uploadPhoto(1);
+          }
+          throw new Error(photoData.error || 'No URL returned');
+        }
+
+        return photoData;
+      } catch (error) {
+        if (retryCount === 0) {
+          console.log(`⚠️ Photo upload error, retrying once... (${error.message})`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return uploadPhoto(1);
+        }
+        throw error;
+      }
+    };
+
+    let photoData;
+    try {
+      photoData = await uploadPhoto();
+    } catch (error) {
+      console.error(`❌ Photo upload to Shopify failed after retry:`, error.message);
+      await sendMessage(phone, "That photo didn't upload—please resend it 📸");
+      return res.status(200).json({ status: 'upload failed', error: error.message });
+    }
+
+    // Strict validation: must have valid CDN URL (prevents phantom photos)
+    const hasValidUrl = photoData.imageUrl &&
+                       typeof photoData.imageUrl === 'string' &&
+                       photoData.imageUrl.length > 10 &&
+                       (photoData.imageUrl.startsWith('http://') || photoData.imageUrl.startsWith('https://'));
+
+    if (!hasValidUrl) {
+      console.error(`❌ Photo uploaded but no valid URL - skipping. Got: ${JSON.stringify(photoData.imageUrl)}`);
+      await sendMessage(phone, "That photo didn't upload—please resend it 📸");
+      return res.status(200).json({ status: 'no url', receivedUrl: photoData.imageUrl });
+    }
+
+    console.log(`✅ Validated photo URL: ${photoData.imageUrl}`);
+
+    // Save only the URL (not base64) - Shopify is our CDN now
+    latestSession.photos.push({
+      imageUrl: photoData.imageUrl,  // Shopify CDN URL
+      imageId: photoData.imageId,     // Shopify image ID
+      mediaId: mediaId                 // WhatsApp media ID (for deduplication)
+    });
+
     await saveSession(phone, latestSession);
-    console.log(`📸 Photo ${count}/3 saved (mediaId: ${mediaId})`);
 
-    // Wait 2 seconds to batch rapid uploads before responding
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Use .filter to count only photos with valid URLs (prevents counting phantom photos)
+    const count = (latestSession.photos || []).filter(p => p.imageUrl).length;
+    console.log(`✅ Photo ${count}/3 uploaded to Shopify: ${photoData.imageUrl}`);
+
+    // Wait 5 seconds to batch rapid uploads and give Shopify time to process
+    // This prevents responding too early when user sends multiple photos quickly
+    console.log(`⏸️  Waiting 5 seconds to batch photo responses...`);
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Re-check count after delay (in case more came in)
     const finalSession = await getSession(phone);
-    const finalCount = (finalSession.photos || []).length;
-    console.log(`📸 Final count after delay: ${finalCount}`);
+    const finalCount = (finalSession.photos || []).filter(p => p.imageUrl).length;
+    console.log(`📸 Final count after 5s delay: ${finalCount}`);
 
     // Only respond if we haven't already responded for this batch
-    // Check if we sent a message in the last 5 seconds
+    // Check if we sent a message in the last 7 seconds (matches our 5s delay + buffer)
     const lastPhotoResponse = finalSession.lastPhotoResponseAt;
     const now = Date.now();
-    if (lastPhotoResponse && now - lastPhotoResponse < 5000) {
+    if (lastPhotoResponse && now - lastPhotoResponse < 7000) {
       console.log(`📸 Already responded ${Math.round((now - lastPhotoResponse) / 1000)}s ago, skipping`);
       return res.status(200).json({ status: 'already responded' });
     }
@@ -704,17 +1062,21 @@ async function handlePhoto(phone, mediaId, session, res) {
     finalSession.lastPhotoResponseAt = now;
     await saveSession(phone, finalSession);
 
-    // Respond based on final count
-    if (finalCount < 3) {
-      await sendMessage(phone, `Got ${finalCount}/3 photos. Send ${3 - finalCount} more 📸`);
-      return res.status(200).json({ status: `photo ${finalCount}` });
-    } else {
-      await sendButtons(phone, `Perfect! Got ${finalCount} photos.\n\nReady to submit?`, [
-        { id: 'submit', title: 'SUBMIT ✓' },
-        { id: 'add_more', title: 'ADD MORE' }
-      ]);
-      return res.status(200).json({ status: 'ready to submit' });
-    }
+    // Move to additional details regardless of photo count
+    // We'll validate count at SUBMIT time
+    console.log(`📸 Got ${finalCount} photo(s) - moving to additional details`);
+
+    finalSession.state = 'awaiting_additional_details';
+    await saveSession(phone, finalSession);
+
+    await sendButtons(phone,
+      `Any flaws or special notes?\n\n(e.g., "slight stain", "missing belt", "beadwork intact")`,
+      [
+        { id: 'skip_details', title: 'NO, SKIP' },
+        { id: 'add_details', title: 'YES, ADD' }
+      ]
+    );
+    return res.status(200).json({ status: 'asked additional details' });
   } catch (error) {
     console.error('❌ Photo error:', error);
     await sendMessage(phone, "Photo upload failed. Try again.");
@@ -726,16 +1088,21 @@ async function submitListing(phone, session, res) {
   const listing = session.listing;
 
   try {
+    // Count only photos with valid URLs
+    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+
     console.log('📤 Submitting listing...');
     console.log('📦 Session state:', {
-      hasPhotos: session.photos?.length || 0,
+      phone: phone,
+      photoCount: photoCount,
+      totalPhotos: session.photos?.length || 0,
       hasDraftId: !!session.shopify_product_id,
-      existingDraftId: session.shopify_product_id
+      productId: session.shopify_product_id
     });
 
-    // Check if we already created a draft (retry scenario)
+    // Check if we already created a draft (should ALWAYS exist now)
     if (session.shopify_product_id) {
-      console.log(`♻️  Reusing existing draft: ${session.shopify_product_id}`);
+      console.log(`✅ Draft exists: ${session.shopify_product_id}`);
 
       // Clean price for DB insert
       let cleanPrice = listing.asking_price_usd;
@@ -744,32 +1111,30 @@ async function submitListing(phone, session, res) {
         if (match) cleanPrice = parseFloat(match[1]);
       }
 
-      // Skip to photo upload
-      const photoUrls = [];
-      if (session.photos?.length > 0) {
-        console.log(`📸 Uploading ${session.photos.length} photos to existing draft...`);
-        // Upload photos to existing draft
-        for (let i = 0; i < session.photos.length; i++) {
-          const photo = session.photos[i];
-          try {
-            const photoRes = await fetch(`${API_BASE}/api/product-image?action=add`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                productId: session.shopify_product_id,
-                base64: photo.base64,
-                filename: `photo_${i + 1}.jpg`
-              })
-            });
+      // Extract photo URLs (photos already uploaded to Shopify)
+      const photoUrls = (session.photos || [])
+        .map(p => p.imageUrl)
+        .filter(url => url); // Filter out any nulls
 
-            const photoData = await photoRes.json();
-            if (photoData.success && photoData.imageUrl) {
-              photoUrls.push(photoData.imageUrl);
-            }
-          } catch (e) {
-            console.error(`❌ Photo ${i + 1} error on retry:`, e.message);
-          }
-        }
+      console.log(`📸 Photos already in Shopify: ${photoUrls.length} valid URLs (${session.photos?.length || 0} total entries)`);
+
+      // Require at least 3 photos
+      if (photoUrls.length < 3) {
+        console.error(`❌ Not enough photos: ${photoUrls.length}/3. Phone: ${phone}, ProductId: ${session.shopify_product_id}`);
+
+        // Send them back to photo collection
+        session.state = 'collecting_photos';
+        await saveSession(phone, session);
+
+        await sendMessage(phone,
+          `⚠️ Need at least 3 photos (you have ${photoUrls.length}).\n\n` +
+          `Send ${3 - photoUrls.length} more photos now! 📸`
+        );
+        return res.status(200).json({
+          status: 'need more photos',
+          current: photoUrls.length,
+          needed: 3 - photoUrls.length
+        });
       }
 
       // Check if listing already exists (idempotency for retry)
@@ -797,6 +1162,8 @@ async function submitListing(phone, session, res) {
       }
 
       // Save to DB (first time)
+      console.log(`💾 Inserting listing to DB: phone=${phone}, productId=${session.shopify_product_id}, photoCount=${photoUrls.length}`);
+
       const { data: createdListing, error: listingError } = await supabase
         .from('listings')
         .insert({
@@ -821,162 +1188,49 @@ async function submitListing(phone, session, res) {
         .single();
 
       if (listingError) {
+        console.error(`❌ DB insert failed: phone=${phone}, error=${listingError.message}`);
         throw new Error('Failed to save listing: ' + listingError.message);
       }
 
-      // Success!
-      await sendMessage(phone,
-        `🎉 Submitted!\n\n` +
-        `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-        `📏 ${listing.size} • $${cleanPrice}\n\n` +
-        `We'll notify you when it's live.\nReply SELL to list another.`
-      );
+      console.log(`✅ DB insert successful: listingId=${createdListing.id}, phone=${phone}, productId=${session.shopify_product_id}`);
 
+      // Mark session as submitted BEFORE sending message (prevents race conditions)
       session.state = 'submitted';
+      session.submitted_at = new Date().toISOString();
       await saveSession(phone, session);
-      await resetSession(phone);
 
-      return res.status(200).json({ status: 'submitted (retry)', productId: session.shopify_product_id });
-    }
-
-    // Fresh submission - validate price first
-    let askingPrice = listing.asking_price_usd;
-    if (typeof askingPrice === 'string') {
-      const priceMatch = askingPrice.match(/(\d+)/);
-      if (priceMatch) {
-        askingPrice = parseFloat(priceMatch[1]);
-      } else {
-        askingPrice = null;
+      // Success! Send confirmation message
+      try {
+        console.log(`📤 Sending success message to ${phone}...`);
+        await sendMessage(phone,
+          `🎉 Submitted!\n\n` +
+          `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+          `📏 ${listing.size} • $${cleanPrice}\n\n` +
+          `We'll notify you when it's live.\nReply SELL to list another.`
+        );
+        console.log(`✅ Success message sent!`);
+      } catch (messageError) {
+        // Log but don't fail - listing is already created
+        console.error(`⚠️  Success message failed to send (listing still created):`, messageError.message);
       }
+
+      // Note: We DON'T delete the session here to prevent race conditions with photo processing
+      // The 'submitted' state handler will reset on next message
+
+      return res.status(200).json({ status: 'submitted', productId: session.shopify_product_id, listingId: createdListing.id });
     }
 
-    if (!askingPrice || askingPrice <= 0) {
-      throw new Error('Invalid price. Please provide a valid number.');
-    }
-
-    console.log('💰 Price validation: original=', listing.asking_price_usd, 'cleaned=', askingPrice);
-
-    // 1. Create Shopify draft
-    const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.email,
-        phone: phone,
-        description: listing.details || '',
-        extracted: {
-          designer: listing.designer,
-          item_type: listing.item_type,
-          pieces: listing.pieces_included,
-          size: listing.size,
-          condition: listing.condition,
-          color: listing.color,
-          material: listing.material,
-          asking_price: askingPrice
-        }
-      })
-    });
-
-    const draftData = await draftRes.json();
-    console.log('📦 Draft response:', draftData);
-
-    if (!draftData.success || !draftData.productId) {
-      throw new Error(draftData.error || 'Failed to create draft');
-    }
-
-    // Save product ID to session immediately so we can retry without duplicates
-    session.shopify_product_id = draftData.productId;
-    await saveSession(phone, session);
-    console.log(`✅ Saved draft ID to session: ${draftData.productId}`);
-
-    // 2. Upload photos
-    console.log(`📸 Uploading ${session.photos?.length || 0} photos to Shopify product ${draftData.productId}...`);
-    const photoUrls = [];
-    if (session.photos?.length > 0) {
-      for (let i = 0; i < session.photos.length; i++) {
-        const photo = session.photos[i];
-        try {
-          console.log(`📸 Uploading photo ${i + 1}/${session.photos.length} (mediaId: ${photo.mediaId})...`);
-
-          const photoRes = await fetch(`${API_BASE}/api/product-image?action=add`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              productId: draftData.productId,
-              base64: photo.base64,
-              filename: `photo_${i + 1}.jpg`
-            })
-          });
-
-          console.log(`📸 Photo ${i + 1} response status: ${photoRes.status} ${photoRes.statusText}`);
-
-          if (!photoRes.ok) {
-            const errorText = await photoRes.text();
-            console.error(`❌ Photo ${i + 1} HTTP error: ${errorText}`);
-            continue;
-          }
-
-          const photoData = await photoRes.json();
-          console.log(`📸 Photo ${i + 1} response data:`, JSON.stringify(photoData));
-
-          if (photoData.success && photoData.imageUrl) {
-            console.log(`✅ Photo ${i + 1} uploaded successfully - URL: ${photoData.imageUrl}`);
-            photoUrls.push(photoData.imageUrl);
-          } else {
-            console.error(`❌ Photo ${i + 1} upload failed:`, photoData.error || 'Unknown error');
-          }
-        } catch (e) {
-          console.error(`❌ Photo ${i + 1} exception:`, e.message, e.stack);
-        }
-      }
-    }
-    console.log(`📸 Upload complete: ${photoUrls.length}/${session.photos?.length || 0} photos succeeded`);
-
-    // 3. Create listings row
-    const { data: createdListing, error: listingError } = await supabase
-      .from('listings')
-      .insert({
-        seller_id: listing._seller_id,
-        conversation_id: null,
-        status: 'pending_approval',
-        input_method: 'whatsapp',
-        shopify_product_id: draftData.productId,
-        designer: listing.designer,
-        item_type: listing.item_type,
-        size: listing.size,
-        condition: listing.condition,
-        pieces_included: listing.pieces_included,
-        asking_price_usd: askingPrice, // Use validated price, not dirty parseFloat
-        details: listing.details,
-        additional_details: listing.additional_details || null,
-        photo_urls: photoUrls.length > 0 ? photoUrls : null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .select('id')
-      .single();
-
-    if (listingError) {
-      console.error('❌ Failed to create listing in DB:', listingError);
-      throw new Error('Failed to save listing: ' + listingError.message);
-    }
-
-    console.log('✅ Listing created in DB:', createdListing?.id);
-
-    // 4. Success message
+    // This should never happen - draft should always be created before photos now
+    console.error('❌ CRITICAL: No Shopify product ID during SUBMIT! Draft should have been created before photos.');
     await sendMessage(phone,
-      `🎉 Submitted!\n\n` +
-      `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-      `📏 ${listing.size} • $${askingPrice}\n\n` +
-      `We'll notify you when it's live.\nReply SELL to list another.`
+      `⚠️ Something went wrong.\n\n` +
+      `Your listing info is saved. Please reply SUBMIT to try again.\n\n` +
+      `Or reply CANCEL to start over.`
     );
-
-    // 5. Reset session
-    session.state = 'submitted';
-    await saveSession(phone, session);
-    await resetSession(phone);
-
-    return res.status(200).json({ status: 'submitted', productId: draftData.productId });
+    return res.status(200).json({
+      status: 'error',
+      error: 'No product ID - draft should have been created before photos'
+    });
 
   } catch (error) {
     console.error('❌ Submit error:', error.message);
@@ -1002,6 +1256,7 @@ function formatListingSummary(listing) {
   if (listing.asking_price_usd) parts.push(`✓ Price: $${listing.asking_price_usd}`);
   if (listing.color) parts.push(`✓ Color: ${listing.color}`);
   if (listing.material) parts.push(`✓ Material: ${listing.material}`);
+  if (listing.additional_details) parts.push(`✓ Notes: ${listing.additional_details}`);
 
   return parts.join('\n');
 }
@@ -1129,47 +1384,82 @@ async function resetSession(phone) {
 // ============ MESSAGING ============
 
 async function sendMessage(phone, text) {
-  await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: phone,
-      type: 'text',
-      text: { body: text }
-    })
-  });
+  try {
+    const response = await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'text',
+        text: { body: text }
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error(`❌ WhatsApp message send failed (HTTP ${response.status}):`, JSON.stringify(data));
+      throw new Error(`WhatsApp API error: ${data.error?.message || response.statusText}`);
+    }
+
+    console.log(`✅ Message sent to ${phone}: "${text.substring(0, 50)}..."`);
+    return data;
+  } catch (error) {
+    console.error(`❌ Failed to send message to ${phone}:`, error.message);
+    throw error;
+  }
 }
 
 async function sendButtons(phone, text, buttons) {
-  await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: phone,
-      type: 'interactive',
-      interactive: {
-        type: 'button',
-        body: { text },
-        action: {
-          buttons: buttons.map(b => ({
-            type: 'reply',
-            reply: { id: b.id, title: b.title }
-          }))
+  try {
+    const response = await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text },
+          action: {
+            buttons: buttons.map(b => ({
+              type: 'reply',
+              reply: { id: b.id, title: b.title }
+            }))
+          }
         }
-      }
-    })
-  });
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error(`❌ WhatsApp buttons send failed (HTTP ${response.status}):`, JSON.stringify(data));
+      throw new Error(`WhatsApp API error: ${data.error?.message || response.statusText}`);
+    }
+
+    console.log(`✅ Buttons sent to ${phone}`);
+    return data;
+  } catch (error) {
+    console.error(`❌ Failed to send buttons to ${phone}:`, error.message);
+    throw error;
+  }
 }
 
 async function sendListMessage(phone, text, options, sectionTitle) {
+  // Generate descriptive button text based on field
+  const buttonText = sectionTitle === 'size' ? 'Select size' :
+                     sectionTitle === 'condition' ? 'Select condition' :
+                     'Select';
+
   await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
     method: 'POST',
     headers: {
@@ -1184,7 +1474,7 @@ async function sendListMessage(phone, text, options, sectionTitle) {
         type: 'list',
         body: { text },
         action: {
-          button: 'Choose',
+          button: buttonText,
           sections: [{
             title: sectionTitle.replace(/_/g, ' ').toUpperCase(),
             rows: options.map(o => ({
