@@ -1,476 +1,398 @@
 /**
- * WhatsApp Webhook - Clean Router
- * Handles WhatsApp Cloud API (Meta) only
+ * WhatsApp Webhook
+ * Handles: text, voice, images, and Flow submissions
  */
 
-import { msg } from '../lib/sms/messages.js';
-import { normalizePhone, getGlobalCommand, logState } from '../lib/sms/helpers.js';
-import { findSellerByPhone, findConversation, createConversation, updateConversation, setState, findDraftListing, isSessionExpired, revokeAuth, deleteListing } from '../lib/sms/db.js';
-import { detectIntent } from '../lib/sms/intent.js';
-import { handleAwaitingAccountCheck, handleAwaitingExistingEmail, handleAwaitingNewEmail, handleAwaitingEmail } from '../lib/sms/flows/auth.js';
-import { handleSellFlow } from '../lib/sms/flows/sell.js';
-import { processWhatsAppMedia } from '../lib/sms/media.js';
-import OpenAI, { toFile } from 'openai';
+import OpenAI from 'openai';
+
+const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'tps123';
+const FLOW_ID = process.env.WHATSAPP_FLOW_ID || '1068790168720795';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Simple in-memory message dedup (for batching photos sent together)
-const recentMessages = new Map();
-const DEDUP_WINDOW_MS = 4000; // 4 second window to batch photos (WhatsApp can be slow)
-
-// WhatsApp Cloud API config
-const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
-const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-const WEBHOOK_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'phirstory_verify_token';
+// Pakistani fashion context for transcription
+const FASHION_PROMPT = `Pakistani designer clothing description. Terms: kurta, kameez, dupatta, gharara, sharara, lehenga. Designers: Sana Safinaz, Maria B, Khaadi, Gul Ahmed, Asim Jofa, Zara Shahjahan, Elan. Fabrics: lawn, chiffon, organza, silk. Embroidery: thread work, mirror work, sequins, zardozi.`;
 
 export default async function handler(req, res) {
-  // WhatsApp webhook verification (GET request)
+  // Webhook verification (GET)
   if (req.method === 'GET') {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
-      console.log('✅ WhatsApp webhook verified');
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('✅ Webhook verified');
       return res.status(200).send(challenge);
     }
     return res.status(403).json({ error: 'Verification failed' });
   }
 
+  // Handle incoming messages (POST)
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Parse WhatsApp Cloud API message
-    const parsed = parseWhatsAppMessage(req.body);
-    if (!parsed) {
-      // Status update, not a message - acknowledge it
-      return res.status(200).json({ status: 'ok' });
-    }
-
-    let { phone, message, mediaUrls, messageId, audioId } = parsed;
-
-    // Process ONE photo at a time for better UX
-    // If multiple photos sent at once, only process the first one
-    // This gives immediate feedback and avoids batching issues
-    if (mediaUrls.length > 1) {
-      console.log(`📸 Multiple photos (${mediaUrls.length}) - processing only first one`);
-      mediaUrls = [mediaUrls[0]]; // Only take the first photo
-    }
-
-    // Deduplicate rapid photo messages (WhatsApp sends each photo separately)
-    // Skip if we just got a photo without text (likely part of a multi-send)
-    if (mediaUrls.length > 0 && !message && !audioId) {
-      const dedupKey = `${phone}:photo:${messageId}`;
-      const now = Date.now();
-
-      // Simple dedup - ignore if we processed this exact message recently
-      if (recentMessages.has(dedupKey)) {
-        console.log(`📸 Skipping duplicate message ${messageId}`);
-        return res.status(200).json({ status: 'duplicate' });
-      }
-
-      // Mark as processed
-      recentMessages.set(dedupKey, now);
-
-      // Clean up old entries (keep map from growing)
-      for (const [key, timestamp] of recentMessages.entries()) {
-        if (now - timestamp > 60000) recentMessages.delete(key);
-      }
-    }
-
-    // Transcribe voice notes
-    if (audioId) {
-      const transcribedText = await transcribeVoiceNote(audioId);
-      if (transcribedText) {
-        message = transcribedText;
-      } else {
-        await sendWhatsAppMessage(phone, "Sorry, I couldn't hear that clearly. Could you type it out or try again?");
-        return res.status(200).json({ status: 'ok' });
-      }
-    }
-
-    // Load seller and conversation
-    const seller = await findSellerByPhone(phone);
-    let conv = await findConversation(phone);
-    if (!conv) conv = await createConversation(phone, seller?.id);
-
-    logState(phone, seller, conv);
-
-    // Process media if present (use 'pending' as seller_id if not authenticated yet)
-    let supabaseUrls = [];
-    if (mediaUrls.length > 0) {
-      const uploadSellerId = seller?.id || 'pending';
-      supabaseUrls = await processWhatsAppMedia(mediaUrls, uploadSellerId, messageId);
-    }
-
-    // Route message and get response
-    const response = await route(message, conv, seller, phone, supabaseUrls);
-
-    // Send response via WhatsApp (skip if null - duplicate prevention)
-    if (response) {
-      await sendWhatsAppMessage(phone, response);
-    }
-    return res.status(200).json({ status: 'ok' });
-
-  } catch (error) {
-    console.error('❌ Error:', error);
-    return res.status(200).json({ status: 'error', message: error.message });
-  }
-}
-
-/**
- * Parse WhatsApp Cloud API message
- */
-function parseWhatsAppMessage(body) {
-  try {
-    const entry = body.entry?.[0];
+    // Parse WhatsApp message
+    const entry = req.body?.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
-    const messages = value?.messages;
+    const message = value?.messages?.[0];
 
-    if (!messages || messages.length === 0) {
-      return null;
+    if (!message) {
+      return res.status(200).json({ status: 'no message' });
     }
 
-    const msg = messages[0];
-    const phone = normalizePhone(msg.from);
-    const messageId = msg.id;
+    const phone = message.from;
 
-    let message = '';
-    let mediaUrls = [];
-    let audioId = null;
+    // Handle Flow submission (nfm_reply)
+    if (message.type === 'interactive' && message.interactive?.type === 'nfm_reply') {
+      const responseJson = message.interactive.nfm_reply?.response_json;
+      console.log('📋 FLOW SUBMITTED from:', phone);
+      console.log('📋 Raw response_json:', responseJson);
 
-    if (msg.type === 'text') {
-      message = msg.text?.body || '';
-    } else if (msg.type === 'image') {
-      mediaUrls.push({ type: 'image', id: msg.image.id, mime: msg.image.mime_type });
-      message = msg.image.caption || '';
-    } else if (msg.type === 'video') {
-      mediaUrls.push({ type: 'video', id: msg.video.id, mime: msg.video.mime_type });
-      message = msg.video.caption || '';
-    } else if (msg.type === 'document') {
-      mediaUrls.push({ type: 'document', id: msg.document.id, mime: msg.document.mime_type });
-      message = msg.document.caption || '';
-    } else if (msg.type === 'audio') {
-      audioId = msg.audio.id;
-    } else if (msg.type === 'interactive') {
-      if (msg.interactive.type === 'button_reply') {
-        message = msg.interactive.button_reply.id;
-      } else if (msg.interactive.type === 'list_reply') {
-        message = msg.interactive.list_reply.id;
+      if (responseJson) {
+        const flowData = JSON.parse(responseJson);
+        console.log('📋 Parsed flow data:', JSON.stringify(flowData, null, 2));
+      }
+
+      await sendMessage(phone, 'Got your submission! (Testing - check logs)');
+      return res.status(200).json({ status: 'flow submission logged' });
+    }
+
+    // Handle voice message
+    if (message.type === 'audio') {
+      const mediaId = message.audio?.id;
+      console.log('🎤 Voice message from:', phone, 'mediaId:', mediaId);
+
+      await sendMessage(phone, '🎤 Got your voice message, transcribing...');
+
+      try {
+        const transcription = await transcribeVoiceMessage(mediaId);
+        console.log('📝 Transcription:', transcription);
+
+        await sendMessage(phone, `📝 Here's what I heard:\n\n"${transcription}"\n\nIs this correct?`);
+        return res.status(200).json({ status: 'voice transcribed', text: transcription });
+      } catch (err) {
+        console.error('❌ Transcription error:', err.message);
+        await sendMessage(phone, "Sorry, I couldn't transcribe that. Please try again or type your description.");
+        return res.status(200).json({ status: 'transcription failed', error: err.message });
       }
     }
 
-    return { phone, message: message.trim(), mediaUrls, messageId, audioId };
-  } catch (error) {
-    console.error('Error parsing WhatsApp message:', error);
-    return null;
-  }
-}
+    // Handle image message
+    if (message.type === 'image') {
+      const mediaId = message.image?.id;
+      const caption = message.image?.caption || '';
+      console.log('📷 Image from:', phone, 'mediaId:', mediaId, 'caption:', caption);
 
-/**
- * Transcribe voice note using Whisper
- */
-async function transcribeVoiceNote(audioId) {
-  try {
-    // Get download URL from WhatsApp
-    const mediaResponse = await fetch(
-      `https://graph.facebook.com/v18.0/${audioId}`,
-      { headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` } }
+      await sendMessage(phone, '📷 Got your photo! Send more photos or reply DONE when finished.');
+      return res.status(200).json({ status: 'image received', mediaId });
+    }
+
+    const text = message.text?.body?.toLowerCase()?.trim() || '';
+    console.log(`📱 From ${phone}: "${text}"`);
+
+    // "sell" → send Flow form
+    if (text === 'sell') {
+      await sendFlow(phone);
+      return res.status(200).json({ status: 'flow sent' });
+    }
+
+    // "info" → send links
+    if (text === 'info') {
+      await sendMessage(phone,
+        `📍 Your listings: sell.thephirstory.com\n` +
+        `🛍️ Shop outfits: thephirstory.com\n` +
+        `📧 Need help? admin@thephirstory.com`
+      );
+      return res.status(200).json({ status: 'info sent' });
+    }
+
+    // Otherwise → welcome message
+    await sendMessage(phone,
+      `Thanks for messaging The Phir Story! ✨\n\n` +
+      `To list & sell your outfit, reply SELL\n` +
+      `For links & help, reply INFO`
     );
+    return res.status(200).json({ status: 'welcome sent' });
 
-    if (!mediaResponse.ok) {
-      console.error('Failed to get media URL:', await mediaResponse.text());
-      return null;
-    }
-
-    const mediaData = await mediaResponse.json();
-    const downloadUrl = mediaData.url;
-
-    if (!downloadUrl) {
-      console.error('No download URL in response:', mediaData);
-      return null;
-    }
-
-    // Download audio file
-    const audioResponse = await fetch(downloadUrl, {
-      headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
-    });
-
-    if (!audioResponse.ok) {
-      console.error('Failed to download audio:', audioResponse.status);
-      return null;
-    }
-
-    const audioBuffer = await audioResponse.arrayBuffer();
-    const buffer = Buffer.from(audioBuffer);
-
-    // Transcribe with Whisper using toFile helper
-    const transcription = await openai.audio.transcriptions.create({
-      file: await toFile(buffer, 'voice.ogg', { type: 'audio/ogg' }),
-      model: 'whisper-1',
-    });
-
-    console.log('🎤 Transcribed:', transcription.text);
-    return transcription.text;
   } catch (error) {
-    console.error('Voice transcription error:', error);
-    return null;
+    console.error('❌ Error:', error.message);
+    return res.status(200).json({ status: 'error', error: error.message });
   }
 }
 
 /**
- * Send WhatsApp message (text, buttons, or template)
+ * Send WhatsApp Flow form
  */
-async function sendWhatsAppMessage(phone, content) {
-  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.error('❌ WhatsApp credentials not configured');
-    return;
-  }
+async function sendFlow(phone) {
+  const url = `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`;
 
-  const to = phone.replace('+', '');
-  let body;
-
-  if (typeof content === 'object' && content.template) {
-    // Template message
-    body = {
-      messaging_product: 'whatsapp',
-      to,
-      type: 'template',
-      template: {
-        name: content.template,
-        language: { code: 'en_US' }
-      }
-    };
-    if (content.params?.length > 0) {
-      body.template.components = [{
-        type: 'body',
-        parameters: content.params.map(p => ({ type: 'text', text: p }))
-      }];
-    }
-  } else if (typeof content === 'object' && content.buttons) {
-    // Interactive button message
-    body = {
-      messaging_product: 'whatsapp',
-      to,
-      type: 'interactive',
-      interactive: {
-        type: 'button',
-        body: { text: content.text },
-        action: {
-          buttons: content.buttons.map(btn => ({
-            type: 'reply',
-            reply: { id: btn.id, title: btn.title }
-          }))
+  const body = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      header: {
+        type: 'text',
+        text: 'List Your Item'
+      },
+      body: {
+        text: 'Fill out this form to list your item for sale!'
+      },
+      footer: {
+        text: 'The Phir Story'
+      },
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_id: FLOW_ID,
+          flow_cta: 'Start Listing',
+          flow_action: 'navigate',
+          flow_action_payload: {
+            screen: 'OUTFIT'
+          }
         }
       }
-    };
-  } else {
-    // Plain text message
-    body = {
-      messaging_product: 'whatsapp',
-      to,
-      type: 'text',
-      text: { body: content }
-    };
-  }
-
-  try {
-    const response = await fetch(
-      `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('❌ WhatsApp API error:', error);
     }
-  } catch (error) {
-    console.error('❌ Error sending WhatsApp message:', error);
-  }
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const result = await response.json();
+  console.log('📤 Flow sent:', result);
+  return result;
 }
 
 /**
- * Route message to appropriate handler
+ * Send text message
  */
-async function route(message, conv, seller, phone, supabaseUrls = []) {
-  const state = conv.state || 'new';
+async function sendMessage(phone, text) {
+  const url = `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`;
 
-  // If no seller but conversation thinks authorized, force re-auth
-  if (!seller && (conv.is_authorized || state.startsWith('sell_') || state === 'authorized')) {
-    await updateConversation(conv.id, {
-      state: 'awaiting_account_check',
-      is_authorized: false,
-      context: {}
-    });
-    return msg('WELCOME_NEW_USER');
-  }
+  const body = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'text',
+    text: { body: text }
+  };
 
-  // Global commands
-  const cmd = getGlobalCommand(message);
-  if (cmd === 'HELP') return msg('HELP');
-  if (cmd === 'STOP') {
-    await setState(conv.id, 'unsubscribed');
-    return msg('STOP');
-  }
-  if (cmd === 'LOGOUT') {
-    await revokeAuth(conv.id);
-    await setState(conv.id, 'awaiting_action');
-    return msg('LOGOUT');
-  }
-  if (cmd === 'START' || cmd === 'MENU') {
-    if (conv.is_authorized && isSessionExpired(conv)) {
-      await revokeAuth(conv.id);
-      await setState(conv.id, 'awaiting_email', { pending_intent: null });
-      return msg('SESSION_EXPIRED');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  const result = await response.json();
+  console.log('📤 Message sent:', result);
+  return result;
+}
+
+/**
+ * Send interactive buttons
+ * @param {string} phone - recipient phone
+ * @param {string} bodyText - message body
+ * @param {Array} buttons - [{id: 'btn_1', title: 'Yes'}]
+ * @param {string} [header] - optional header text
+ */
+async function sendButtons(phone, bodyText, buttons, header = null) {
+  const url = `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`;
+
+  const interactive = {
+    type: 'button',
+    body: { text: bodyText },
+    action: {
+      buttons: buttons.map(btn => ({
+        type: 'reply',
+        reply: { id: btn.id, title: btn.title }
+      }))
     }
-    if (conv.is_authorized) {
-      await setState(conv.id, 'authorized');
-      return msg('MENU');
-    }
-    if (seller) {
-      await setState(conv.id, 'awaiting_action');
-      return msg('WELCOME_KNOWN_SELLER');
-    }
-    await setState(conv.id, 'awaiting_account_check');
-    return msg('WELCOME_NEW_USER');
+  };
+
+  if (header) {
+    interactive.header = { type: 'text', text: header };
   }
 
-  // Check session expiry
-  if (conv.is_authorized && isSessionExpired(conv)) {
-    await revokeAuth(conv.id);
-    await setState(conv.id, 'awaiting_email', { pending_intent: null });
-    return msg('SESSION_EXPIRED');
-  }
+  const body = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive
+  };
 
-  // Media with no sell flow = start sell
-  if (supabaseUrls.length > 0 && seller && !state.startsWith('sell_')) {
-    if (!conv.is_authorized) {
-      await setState(conv.id, 'awaiting_email', { pending_intent: 'sell', media_urls: supabaseUrls });
-      return msg('ASK_EMAIL_VERIFY');
-    }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
 
-    const draft = await findDraftListing(seller.id);
-    if (draft) {
-      await setState(conv.id, 'sell_draft_check', {
-        listing_id: draft.id,
-        pending_media_urls: supabaseUrls
-      });
-      return msg('SELL_DRAFT_FOUND', draft.designer || '', draft.item_type || '');
-    }
+  const result = await response.json();
+  console.log('📤 Buttons sent:', result);
+  return result;
+}
 
-    await setState(conv.id, 'sell_started', { media_urls: supabaseUrls });
-    return msg('SELL_START');
-  }
+/**
+ * Send interactive list
+ * @param {string} phone - recipient phone
+ * @param {string} bodyText - message body
+ * @param {string} buttonText - text on the list button
+ * @param {Array} sections - [{title: 'Options', rows: [{id, title, description}]}]
+ */
+async function sendList(phone, bodyText, buttonText, sections) {
+  const url = `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`;
 
-  // Blocked if unsubscribed
-  if (state === 'unsubscribed') return msg('UNSUBSCRIBED_BLOCK');
-
-  // Auth states
-  if (state === 'awaiting_account_check') return handleAwaitingAccountCheck(message, conv, phone);
-  if (state === 'awaiting_existing_email') return handleAwaitingExistingEmail(message, conv, phone);
-  if (state === 'awaiting_new_email') return handleAwaitingNewEmail(message, conv, phone);
-  if (state === 'awaiting_email') return handleAwaitingEmail(message, conv, seller);
-
-  // Draft check - delegate to sell flow
-  if (state === 'sell_draft_check') {
-    // Pass to unified sell flow which handles draft choice
-    conv.state = 'sell_draft_choice';
-    return handleSellFlow(message, conv, seller, supabaseUrls);
-  }
-
-  // Sell flow
-  if (state.startsWith('sell_')) {
-    const lower = message.toLowerCase().trim();
-    const listingId = conv.context?.listing_id;
-
-    if (['start over', 'startover', 'clear', 'reset', 'delete draft'].includes(lower)) {
-      // Delete the listing from DB too
-      if (listingId) await deleteListing(listingId);
-      await setState(conv.id, 'authorized', {});
-      return msg('SELL_DRAFT_DELETED');
-    }
-
-    const exitCommands = ['exit', 'cancel', 'quit', 'nvm', 'nevermind', 'never mind', 'back', 'done', 'later', 'wait', 'hold on', 'one sec', 'brb', 'not now', 'not rn', 'gtg', 'busy'];
-    if (exitCommands.includes(lower)) {
-      // Keep listing_id in context so they can resume
-      await setState(conv.id, 'authorized', { listing_id: listingId });
-      return msg('SELL_DRAFT_SAVED');
-    }
-
-    const allUrls = [...(conv.context?.media_urls || []), ...supabaseUrls];
-    return handleSellFlow(message, conv, seller, allUrls);
-  }
-
-  // New user
-  if (state === 'new') {
-    if (seller) {
-      await updateConversation(conv.id, { state: 'awaiting_action', seller_id: seller.id });
-      return msg('WELCOME_KNOWN_SELLER');
-    }
-    await setState(conv.id, 'awaiting_account_check');
-    return msg('WELCOME_NEW_USER');
-  }
-
-  // Ready for action
-  if (state === 'awaiting_action' || state === 'authorized') {
-    const intent = await detectIntent(message);
-
-    if (intent === 'sell') {
-      if (!seller) {
-        await setState(conv.id, 'awaiting_account_check');
-        return msg('WELCOME_NEW_USER');
+  const body = {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: bodyText },
+      action: {
+        button: buttonText,
+        sections
       }
-      if (!conv.is_authorized) {
-        await setState(conv.id, 'awaiting_email', { pending_intent: 'sell' });
-        return msg('ASK_EMAIL_VERIFY');
-      }
-
-      const draft = await findDraftListing(seller.id);
-      if (draft) {
-        await setState(conv.id, 'sell_draft_check', { listing_id: draft.id });
-        return msg('SELL_DRAFT_FOUND', draft.designer || '', draft.item_type || '');
-      }
-
-      await setState(conv.id, 'sell_started', {});
-      return msg('SELL_START');
     }
+  };
 
-    if (intent === 'offer') {
-      if (!seller) {
-        await setState(conv.id, 'awaiting_account_check');
-        return msg('WELCOME_NEW_USER');
-      }
-      if (!conv.is_authorized) {
-        await setState(conv.id, 'awaiting_email', { pending_intent: 'offer' });
-        return msg('ASK_EMAIL_VERIFY');
-      }
-      return msg('OFFER_START');
-    }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
 
-    if (intent === 'listings') {
-      if (!seller) {
-        await setState(conv.id, 'awaiting_account_check');
-        return msg('WELCOME_NEW_USER');
-      }
-      if (!conv.is_authorized) {
-        await setState(conv.id, 'awaiting_email', { pending_intent: 'listings' });
-        return msg('ASK_EMAIL_VERIFY');
-      }
-      return msg('LISTINGS_START');
-    }
+  const result = await response.json();
+  console.log('📤 List sent:', result);
+  return result;
+}
 
-    return msg('MENU');
+/**
+ * Download media from WhatsApp and transcribe with Whisper
+ */
+async function transcribeVoiceMessage(mediaId) {
+  // Step 1: Get media URL from WhatsApp
+  const mediaUrl = `https://graph.facebook.com/v18.0/${mediaId}`;
+  const mediaRes = await fetch(mediaUrl, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+
+  if (!mediaRes.ok) {
+    throw new Error('Failed to get media URL');
   }
 
-  return msg('MENU');
+  const mediaInfo = await mediaRes.json();
+  console.log('📥 Media info:', mediaInfo);
+
+  // Step 2: Download the actual audio file
+  const audioRes = await fetch(mediaInfo.url, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+
+  if (!audioRes.ok) {
+    throw new Error('Failed to download audio');
+  }
+
+  const audioBuffer = await audioRes.arrayBuffer();
+  console.log('📥 Downloaded audio:', audioBuffer.byteLength, 'bytes');
+
+  // Step 3: Send to OpenAI Whisper
+  const audioFile = new File([audioBuffer], 'voice.ogg', { type: 'audio/ogg' });
+
+  const transcription = await openai.audio.transcriptions.create({
+    file: audioFile,
+    model: 'whisper-1',
+    prompt: FASHION_PROMPT,
+    language: 'en'
+  });
+
+  return transcription.text;
+}
+
+/**
+ * Extract structured listing data from description using GPT
+ */
+async function extractListingDetails(description) {
+  const systemPrompt = `You extract structured data from Pakistani designer clothing descriptions.
+Return JSON with these fields:
+- designer: brand name (Sana Safinaz, Maria B, Khaadi, Gul Ahmed, Asim Jofa, Zara Shahjahan, Elan, etc.)
+- item_type: type of clothing (kurta, suit, lehenga, sharara, gharara, dress, etc.)
+- size: XS, S, M, L, XL, or specific measurements
+- color: main color(s)
+- condition: new with tags, like new, good, fair
+- material: lawn, chiffon, silk, organza, cotton, etc.
+- asking_price: number only, no currency symbol
+- additional_details: any other relevant info
+
+If a field cannot be determined, use null.`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: description }
+    ],
+    response_format: { type: 'json_object' },
+    temperature: 0.2
+  });
+
+  const result = JSON.parse(response.choices[0].message.content);
+  console.log('🤖 Extracted:', result);
+  return result;
+}
+
+/**
+ * Download image from WhatsApp
+ * Returns base64 encoded image
+ */
+async function downloadImage(mediaId) {
+  // Step 1: Get media URL
+  const mediaUrl = `https://graph.facebook.com/v18.0/${mediaId}`;
+  const mediaRes = await fetch(mediaUrl, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+
+  if (!mediaRes.ok) {
+    throw new Error('Failed to get media URL');
+  }
+
+  const mediaInfo = await mediaRes.json();
+
+  // Step 2: Download the image
+  const imageRes = await fetch(mediaInfo.url, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+
+  if (!imageRes.ok) {
+    throw new Error('Failed to download image');
+  }
+
+  const imageBuffer = await imageRes.arrayBuffer();
+  const base64 = Buffer.from(imageBuffer).toString('base64');
+
+  return {
+    base64,
+    mimeType: mediaInfo.mime_type || 'image/jpeg',
+    size: imageBuffer.byteLength
+  };
 }
