@@ -402,14 +402,20 @@ async function handleEmail(phone, text, session, res) {
       await supabase.from('sellers').update({ phone }).eq('id', seller.id);
     }
 
-    // Welcome back
+    // Welcome back - COMPLETE RESET for new listing
+    console.log(`✅ Existing seller: ${seller.id}, resetting session for new listing`);
+
     session.email = email;
-    // Preserve _meta when resetting listing
-    const meta = session.listing?._meta;
-    session.listing = { _seller_id: seller.id, _seller_name: seller.name, _meta: meta };
+    session.listing = { _seller_id: seller.id, _seller_name: seller.name };  // Start fresh, no old data
+    session.photos = [];  // Clear old photos
+    session.shopify_product_id = null;  // Clear old draft
     session.state = 'awaiting_description';
-    session.created_at = session.created_at || new Date().toISOString();
+    session.current_field = null;
+    session.prev_state = null;
+    session.created_at = new Date().toISOString();  // New timestamp
     await saveSession(phone, session);
+
+    console.log(`📝 Session reset - state: awaiting_description, listing fields: ${Object.keys(session.listing).length}`);
 
     const greeting = `Welcome back${seller.name ? ', ' + seller.name : ''}! ✓`;
     await sendMessage(phone, `${greeting}\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
@@ -441,12 +447,19 @@ async function handleAccountConfirmation(phone, text, buttonId, session, res) {
       .select('id')
       .single();
 
-    // Preserve _meta when resetting listing
-    const meta = session.listing?._meta;
-    session.listing = { _seller_id: newSeller.id, _meta: meta };
+    console.log(`✅ New seller created: ${newSeller.id}, resetting session for first listing`);
+
+    // COMPLETE RESET for new listing
+    session.listing = { _seller_id: newSeller.id };  // Start fresh, no old data
+    session.photos = [];  // Clear old photos
+    session.shopify_product_id = null;  // No draft yet
     session.state = 'awaiting_description';
-    session.created_at = session.created_at || new Date().toISOString();
+    session.current_field = null;
+    session.prev_state = null;
+    session.created_at = new Date().toISOString();  // New timestamp
     await saveSession(phone, session);
+
+    console.log(`📝 Session reset - state: awaiting_description, listing fields: ${Object.keys(session.listing).length}`);
 
     await sendMessage(phone, `Account created! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
     return res.status(200).json({ status: 'asked description' });
@@ -1064,11 +1077,17 @@ async function handlePhoto(phone, mediaId, session, res) {
       mediaId: mediaId                 // WhatsApp media ID (for deduplication)
     });
 
+    console.log(`💾 Saving session: phone=${phone}, photos.length=${latestSession.photos.length}, state=${latestSession.state}`);
     await saveSession(phone, latestSession);
+
+    // Verify it saved by re-fetching
+    const verifySession = await getSession(phone);
+    const savedCount = (verifySession.photos || []).filter(p => p.imageUrl).length;
+    console.log(`✅ Photo saved! Verified count: ${savedCount}, Latest photo: ${verifySession.photos[verifySession.photos.length - 1]?.imageUrl?.substring(0, 50)}...`);
 
     // Use .filter to count only photos with valid URLs (prevents counting phantom photos)
     const count = (latestSession.photos || []).filter(p => p.imageUrl).length;
-    console.log(`✅ Photo ${count} uploaded to Shopify: ${photoData.imageUrl}`);
+    console.log(`📸 Photo ${count} uploaded to Shopify: ${photoData.imageUrl}`);
 
     // Done! No batching, no delays, no automatic transitions
     // User will text "DONE" when ready to continue
