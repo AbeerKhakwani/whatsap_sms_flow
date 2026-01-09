@@ -918,10 +918,17 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
 
   // User says they're done sending photos
   if (userText === 'done' || userText === 'next' || userText === 'continue' || buttonId === 'done') {
+    console.log(`📸 User said DONE - waiting 2s for any in-flight photo uploads to complete...`);
+
+    // CRITICAL: Wait a moment for any in-flight photo uploads to finish saving
+    // Photos can take 3-5 seconds to upload+process, so if user says DONE quickly,
+    // we need to wait for the last photo webhook to complete
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
     // CRITICAL: Re-fetch session to get latest photos (photos were saved by separate webhook calls)
     const freshSession = await getSession(phone);
     const photoCount = (freshSession.photos || []).filter(url => url).length;
-    console.log(`✅ User indicated done with photos. Fresh fetch count: ${photoCount}`);
+    console.log(`✅ After 2s wait, photo count: ${photoCount}`);
 
     // Move to additional details
     freshSession.state = 'awaiting_additional_details';
@@ -937,9 +944,9 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
     return res.status(200).json({ status: 'asked additional details' });
   }
 
-  // Any other text - remind them what to do
-  const photoCount = (session.photos || []).filter(url => url).length;
-  await sendMessage(phone, `Send photos now (you have ${photoCount}). Text DONE when finished! 📸`);
+  // Any other text - just remind them to send photos or say DONE
+  // Don't show count here because session might be stale (photos still uploading)
+  await sendMessage(phone, `Send photos or text DONE when finished! 📸`);
   return res.status(200).json({ status: 'waiting for photos or done' });
 }
 
