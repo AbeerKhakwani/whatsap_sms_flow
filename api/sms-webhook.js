@@ -192,18 +192,22 @@ export default async function handler(req, res) {
 
     if (cmd === 'submit') {
       const photoCount = (session.photos || []).length;
+      const missing = getMissingFields(session.listing);
 
-      if (session.state === 'collecting_photos' && photoCount >= 3) {
+      // Ready to submit: has all fields + 3+ photos (regardless of state)
+      if (photoCount >= 3 && missing.length === 0) {
         return await submitListing(phone, session, res);
       }
 
-      if (session.state === 'collecting_photos' && photoCount < 3) {
+      // Has fields but needs more photos
+      if (photoCount < 3 && missing.length === 0) {
         await sendMessage(phone, `You can submit after 3 photos. Need ${3 - photoCount} more 📸`);
         return res.status(200).json({ status: 'need more photos' });
       }
 
-      await sendMessage(phone, "You're not in photo upload yet. Reply SELL to start a listing.");
-      return res.status(200).json({ status: 'submit ignored' });
+      // Missing required fields
+      await sendMessage(phone, `Almost there — I still need: ${missing.join(', ')}.\nReply SELL to continue.`);
+      return res.status(200).json({ status: 'missing fields' });
     }
 
     if (cmd === 'sell') {
@@ -281,9 +285,6 @@ export default async function handler(req, res) {
 
       case 'collecting_photos':
         return await handlePhotoState(phone, text, buttonId, session, res);
-
-      case 'awaiting_additional_details':
-        return await handleAdditionalDetails(phone, text, buttonId, session, res);
 
       case 'submitted':
         await sendWelcome(phone);
@@ -634,29 +635,6 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   return res.status(200).json({ status: 'ready to submit' });
 }
 
-async function handleAdditionalDetails(phone, text, buttonId, session, res) {
-  const response = (buttonId || text).trim();
-  const lowerResponse = response.toLowerCase();
-
-  // Accept button ID or various text responses meaning "skip/submit"
-  if (response === 'skip_details' ||
-      lowerResponse === 'skip' ||
-      lowerResponse === 'submit' ||
-      lowerResponse.includes('ready to submit')) {
-    // Skip details, go straight to submit
-    console.log('📤 Skipping additional details, submitting...');
-    return await submitListing(phone, session, res);
-  }
-
-  // They provided details - save and submit
-  session.listing.additional_details = response;
-  await saveSession(phone, session);
-
-  console.log(`📝 Additional details: "${response}" - submitting...`);
-  await sendMessage(phone, "Got it! Submitting now...");
-  return await submitListing(phone, session, res);
-}
-
 async function handlePhoto(phone, mediaId, session, res) {
   if (session.state !== 'collecting_photos') {
     await sendMessage(phone, "Send photos after describing your item.\n\nReply SELL to start.");
@@ -928,7 +906,7 @@ async function submitListing(phone, session, res) {
         size: listing.size,
         condition: listing.condition,
         pieces_included: listing.pieces_included,
-        asking_price_usd: parseFloat(listing.asking_price_usd) || null,
+        asking_price_usd: askingPrice, // Use validated price, not dirty parseFloat
         details: listing.details,
         additional_details: listing.additional_details || null,
         photo_urls: photoUrls.length > 0 ? photoUrls : null,
