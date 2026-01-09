@@ -2,7 +2,7 @@
 // Auth endpoint - handles seller login with email/phone verification
 
 import { createClient } from '@supabase/supabase-js';
-import { sendVerificationCode, sendWelcomeEmail } from '../lib/email.js';
+import { sendVerificationCode, sendWelcomeEmail, sendListingApproved } from '../lib/email.js';
 import {
   generateCode,
   storeVerificationCode,
@@ -12,7 +12,7 @@ import {
 } from '../lib/auth-utils.js';
 
 const supabase = createClient(
-  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
@@ -92,9 +92,12 @@ export default async function handler(req, res) {
           channel: 'whatsapp'
         });
       } else if (email) {
+        console.log('📧 Attempting to send email to:', email);
         const sent = await sendVerificationCode(email, code);
-        if (!sent) {
-          return res.status(500).json({ error: 'Failed to send email' });
+        console.log('📧 Email result:', JSON.stringify(sent));
+        if (!sent || !sent.success) {
+          console.error('📧 Email failed:', sent?.error);
+          return res.status(500).json({ error: 'Failed to send email', details: sent?.error });
         }
         return res.status(200).json({
           success: true,
@@ -210,6 +213,80 @@ export default async function handler(req, res) {
       });
     }
 
+    // TEST-EMAIL - Send test emails (for testing)
+    if (action === 'test-email') {
+      const { email, type } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email required' });
+      }
+
+      let result = false;
+      let message = '';
+
+      switch (type) {
+        case 'code':
+          result = await sendVerificationCode(email, '123456');
+          message = 'Verification code email sent';
+          break;
+        case 'approved':
+          result = await sendListingApproved(
+            email,
+            'Test Seller',
+            'Beautiful Maria B Kurta - Size M',
+            'https://thephirstory.com/products/test',
+            82.00
+          );
+          message = 'Listing approved email sent';
+          break;
+        case 'welcome':
+          result = await sendWelcomeEmail(email, 'Test Seller');
+          message = 'Welcome email sent';
+          break;
+        default:
+          return res.status(400).json({
+            error: 'Invalid type. Use: code, approved, or welcome'
+          });
+      }
+
+      return res.status(200).json({ success: result, message });
+    }
+
+    // UPDATE-PHONE - Add phone number to existing seller (after login)
+    if (action === 'update-phone') {
+      const { email, phone } = req.body;
+
+      if (!email || !phone) {
+        return res.status(400).json({ error: 'Email and phone required' });
+      }
+
+      // Find seller by email
+      const { data: seller, error: findError } = await supabase
+        .from('sellers')
+        .select('*')
+        .ilike('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (findError || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      // Update phone
+      const { error: updateError } = await supabase
+        .from('sellers')
+        .update({ phone })
+        .eq('id', seller.id);
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update phone' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Phone number added'
+      });
+    }
+
     return res.status(400).json({ error: 'Invalid action' });
 
   } catch (error) {
@@ -233,27 +310,43 @@ async function findSeller(identifier) {
     return data;
   }
 
-  // Phone - try multiple formats
+  // Phone - normalize and try multiple lookup strategies
   const digits = identifier.replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+
+  // First try: exact match with different formats
   const formats = [
     identifier,
     digits,
-    digits.slice(-10),
-    '+' + digits,
-    '+1' + digits.slice(-10),
-  ].filter(f => f && f.length > 0);
+    last10,
+    `+${digits}`,
+    `+1${last10}`,
+  ].filter(Boolean);
 
-  const { data } = await supabase
-    .from('sellers')
-    .select('*')
-    .in('phone', formats)
-    .maybeSingle();
+  for (const format of formats) {
+    const { data } = await supabase
+      .from('sellers')
+      .select('*')
+      .eq('phone', format)
+      .maybeSingle();
+    if (data) return data;
+  }
 
-  return data;
+  // Fallback: pattern match on last 10 digits
+  if (last10.length === 10) {
+    const { data } = await supabase
+      .from('sellers')
+      .select('*')
+      .like('phone', `%${last10}`)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  return null;
 }
 
 /**
- * Send verification code via WhatsApp
+ * Send verification code via WhatsApp using approved template
  */
 async function sendWhatsAppCode(phone, code) {
   if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
@@ -275,9 +368,22 @@ async function sendWhatsAppCode(phone, code) {
         body: JSON.stringify({
           messaging_product: 'whatsapp',
           to,
-          type: 'text',
-          text: {
-            body: `Your The Phir Story login code is: ${code}\n\nThis code expires in 10 minutes.`
+          type: 'template',
+          template: {
+            name: 'login_code',
+            language: { code: 'en_US' },
+            components: [
+              {
+                type: 'body',
+                parameters: [{ type: 'text', text: code }]
+              },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
+                parameters: [{ type: 'text', text: code }]
+              }
+            ]
           }
         })
       }

@@ -50,7 +50,28 @@ export default async function handler(req, res) {
     // Use sanitized data
     const safeFields = validation.data;
 
-    // Create Shopify draft with sanitized data
+    // Find or create seller FIRST so we have their ID and phone
+    let seller = null;
+    if (email || phone) {
+      try {
+        seller = await findOrCreateSeller({ email, phone });
+        console.log('👤 Seller found/created:', seller?.id, seller?.email, seller?.phone);
+      } catch (err) {
+        console.error('Seller lookup error (non-fatal):', err);
+      }
+    }
+
+    console.log('📦 Creating Shopify draft:', {
+      designer: safeFields.designer,
+      itemType: safeFields.item_type,
+      size: fields.size,
+      askingPrice: safeFields.asking_price,
+      sellerEmail: email,
+      sellerId: seller?.id,
+      sellerPhone: seller?.phone
+    });
+
+    // Create Shopify draft with seller info in metafields
     const product = await createDraft({
       designer: safeFields.designer,
       itemType: safeFields.item_type,
@@ -59,18 +80,20 @@ export default async function handler(req, res) {
       askingPrice: safeFields.asking_price,
       color: safeFields.color,
       material: safeFields.material,
-      description: safeFields.description
+      description: safeFields.description,
+      sellerEmail: email,
+      sellerId: seller?.id?.toString() || '',
+      sellerPhone: seller?.phone || ''
     });
 
-    // Track seller (optional - only if email/phone provided)
-    if (email || phone) {
+    console.log('✅ Shopify draft created:', product.id);
+
+    // Link product to seller
+    if (seller) {
       try {
-        const seller = await findOrCreateSeller({ email, phone });
-        if (seller) {
-          await addProductToSeller(seller.id, product.id);
-        }
+        await addProductToSeller(seller.id, product.id);
       } catch (err) {
-        console.error('Seller tracking error (non-fatal):', err);
+        console.error('Product linking error (non-fatal):', err);
       }
     }
 
