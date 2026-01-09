@@ -205,9 +205,10 @@ export default async function handler(req, res) {
         return res.status(200).json({ status: 'need more photos' });
       }
 
-      // Missing required fields
-      await sendMessage(phone, `Almost there — I still need: ${missing.join(', ')}.\nReply SELL to continue.`);
-      return res.status(200).json({ status: 'missing fields' });
+      // Missing required fields - resume automatically
+      session.state = 'awaiting_missing_field';
+      await saveSession(phone, session);
+      return await askNextMissingField(phone, session, res);
     }
 
     if (cmd === 'sell') {
@@ -648,6 +649,13 @@ async function handlePhoto(phone, mediaId, session, res) {
     // Re-fetch session to get latest photo count
     const latestSession = await getSession(phone);
 
+    // Preserve freshest meta (processedMessages, created_at, etc.) from original session
+    // This prevents photo uploads from rolling back idempotency tracking
+    latestSession.processedMessages = session.processedMessages || latestSession.processedMessages;
+    latestSession.created_at = session.created_at || latestSession.created_at;
+    latestSession.prev_state = session.prev_state || latestSession.prev_state;
+    latestSession.shopify_product_id = session.shopify_product_id || latestSession.shopify_product_id;
+
     // Download and convert to base64
     const mediaUrl = await getMediaUrl(mediaId);
     const mediaBuffer = await downloadMedia(mediaUrl);
@@ -756,7 +764,31 @@ async function submitListing(phone, session, res) {
         }
       }
 
-      // Save to DB
+      // Check if listing already exists (idempotency for retry)
+      const { data: existing } = await supabase
+        .from('listings')
+        .select('id')
+        .eq('shopify_product_id', session.shopify_product_id)
+        .maybeSingle();
+
+      if (existing?.id) {
+        console.log(`✅ Listing already exists in DB: ${existing.id}`);
+        // Already submitted - just send success message
+        await sendMessage(phone,
+          `🎉 Already submitted!\n\n` +
+          `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+          `📏 ${listing.size} • $${cleanPrice}\n\n` +
+          `We'll notify you when it's live.\nReply SELL to list another.`
+        );
+
+        session.state = 'submitted';
+        await saveSession(phone, session);
+        await resetSession(phone);
+
+        return res.status(200).json({ status: 'already_submitted', listingId: existing.id });
+      }
+
+      // Save to DB (first time)
       const { data: createdListing, error: listingError } = await supabase
         .from('listings')
         .insert({
@@ -927,7 +959,7 @@ async function submitListing(phone, session, res) {
     await sendMessage(phone,
       `🎉 Submitted!\n\n` +
       `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-      `📏 ${listing.size} • $${listing.asking_price_usd}\n\n` +
+      `📏 ${listing.size} • $${askingPrice}\n\n` +
       `We'll notify you when it's live.\nReply SELL to list another.`
     );
 
