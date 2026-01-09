@@ -656,10 +656,18 @@ async function handlePhoto(phone, mediaId, session, res) {
     latestSession.prev_state = session.prev_state || latestSession.prev_state;
     latestSession.shopify_product_id = session.shopify_product_id || latestSession.shopify_product_id;
 
-    // Download and convert to base64
-    const mediaUrl = await getMediaUrl(mediaId);
-    const mediaBuffer = await downloadMedia(mediaUrl);
-    const base64 = mediaBuffer.toString('base64');
+    // TEST_MODE: Skip Meta API download, use dummy base64
+    let base64;
+    if (process.env.TEST_MODE === 'true') {
+      // Dummy 1x1 red pixel PNG for testing
+      base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+      console.log(`🧪 TEST_MODE: Using dummy photo for ${mediaId}`);
+    } else {
+      // Download and convert to base64
+      const mediaUrl = await getMediaUrl(mediaId);
+      const mediaBuffer = await downloadMedia(mediaUrl);
+      base64 = mediaBuffer.toString('base64');
+    }
 
     latestSession.photos = latestSession.photos || [];
 
