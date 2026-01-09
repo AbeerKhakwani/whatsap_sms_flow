@@ -686,9 +686,15 @@ async function handleAdditionalDetails(phone, text, buttonId, session, res) {
     session.state = 'ready_to_submit';
     await saveSession(phone, session);
 
-    // Show summary of everything
-    const listing = session.listing;
-    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+    // Re-fetch session to ensure we have latest photos
+    const freshSession = await getSession(phone);
+    const listing = freshSession.listing;
+    const photoCount = (freshSession.photos || []).filter(p => p.imageUrl).length;
+
+    console.log(`📊 Summary - Total photos in session: ${freshSession.photos?.length || 0}, with URLs: ${photoCount}`);
+    if (freshSession.photos?.length > 0) {
+      console.log(`📸 First photo check:`, freshSession.photos[0]);
+    }
 
     const summary =
       `📋 *Ready to submit!*\n\n` +
@@ -895,11 +901,31 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
     return res.status(200).json({ status: 'already submitted' });
   }
 
-  // Don't nag about photo count - just wait for them to send photos
-  // Photos will auto-advance to additional_details state after delay
-  // Photo count will be validated at SUBMIT time
-  console.log('📸 Still collecting photos...');
-  return res.status(200).json({ status: 'collecting photos' });
+  const userText = (text || '').trim().toLowerCase();
+
+  // User says they're done sending photos
+  if (userText === 'done' || userText === 'next' || userText === 'continue' || buttonId === 'done') {
+    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+    console.log(`✅ User indicated done with photos. Count: ${photoCount}`);
+
+    // Move to additional details
+    session.state = 'awaiting_additional_details';
+    await saveSession(phone, session);
+
+    await sendButtons(phone,
+      `Great! Got ${photoCount} photo${photoCount !== 1 ? 's' : ''} 📸\n\nAny flaws or special notes?`,
+      [
+        { id: 'skip_details', title: 'NO, SKIP' },
+        { id: 'add_details', title: 'YES, ADD' }
+      ]
+    );
+    return res.status(200).json({ status: 'asked additional details' });
+  }
+
+  // Any other text - remind them what to do
+  const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
+  await sendMessage(phone, `Send photos now (you have ${photoCount}). Text DONE when finished! 📸`);
+  return res.status(200).json({ status: 'waiting for photos or done' });
 }
 
 async function handlePhoto(phone, mediaId, session, res) {
@@ -956,16 +982,20 @@ async function handlePhoto(phone, mediaId, session, res) {
       base64 = await bufferToOptimizedJpegBase64(mediaBuffer);
     }
 
-    // Send immediate acknowledgment ONLY for the very first photo
-    // Check if we've EVER sent this acknowledgment (using a flag, not photo count)
-    if (!latestSession.photos || latestSession.photos.length === 0) {
+    // Initialize photos array if needed
+    if (!latestSession.photos) {
       latestSession.photos = [];
-      await sendMessage(phone, `Got it! Processing your photos... 📸`);
+    }
+
+    // Send acknowledgment ONLY for the very first photo (gives user clear instruction)
+    const isFirstPhoto = latestSession.photos.length === 0;
+    if (isFirstPhoto) {
+      await sendMessage(phone, `Got it! 📸\n\nKeep sending photos. Text DONE when finished.`);
     }
 
     // Upload directly to Shopify (NEW - use Shopify as CDN)
     // Use mediaId-based filename to avoid race conditions
-    console.log(`📸 Uploading photo to Shopify product ${latestSession.shopify_product_id}... (mediaId: ${mediaId})`);
+    console.log(`📸 Uploading photo ${latestSession.photos.length + 1} to Shopify product ${latestSession.shopify_product_id}... (mediaId: ${mediaId})`);
 
     const uploadPhoto = async (retryCount = 0) => {
       try {
@@ -1037,46 +1067,11 @@ async function handlePhoto(phone, mediaId, session, res) {
 
     // Use .filter to count only photos with valid URLs (prevents counting phantom photos)
     const count = (latestSession.photos || []).filter(p => p.imageUrl).length;
-    console.log(`✅ Photo ${count}/3 uploaded to Shopify: ${photoData.imageUrl}`);
+    console.log(`✅ Photo ${count} uploaded to Shopify: ${photoData.imageUrl}`);
 
-    // Wait 5 seconds to batch rapid uploads and give Shopify time to process
-    // This prevents responding too early when user sends multiple photos quickly
-    console.log(`⏸️  Waiting 5 seconds to batch photo responses...`);
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    // Re-check count after delay (in case more came in)
-    const finalSession = await getSession(phone);
-    const finalCount = (finalSession.photos || []).filter(p => p.imageUrl).length;
-    console.log(`📸 Final count after 5s delay: ${finalCount}`);
-
-    // Only respond if we haven't already responded for this batch
-    // Check if we sent a message in the last 7 seconds (matches our 5s delay + buffer)
-    const lastPhotoResponse = finalSession.lastPhotoResponseAt;
-    const now = Date.now();
-    if (lastPhotoResponse && now - lastPhotoResponse < 7000) {
-      console.log(`📸 Already responded ${Math.round((now - lastPhotoResponse) / 1000)}s ago, skipping`);
-      return res.status(200).json({ status: 'already responded' });
-    }
-
-    // Mark that we're responding
-    finalSession.lastPhotoResponseAt = now;
-    await saveSession(phone, finalSession);
-
-    // Move to additional details regardless of photo count
-    // We'll validate count at SUBMIT time
-    console.log(`📸 Got ${finalCount} photo(s) - moving to additional details`);
-
-    finalSession.state = 'awaiting_additional_details';
-    await saveSession(phone, finalSession);
-
-    await sendButtons(phone,
-      `Any flaws or special notes?\n\n(e.g., "slight stain", "missing belt", "beadwork intact")`,
-      [
-        { id: 'skip_details', title: 'NO, SKIP' },
-        { id: 'add_details', title: 'YES, ADD' }
-      ]
-    );
-    return res.status(200).json({ status: 'asked additional details' });
+    // Done! No batching, no delays, no automatic transitions
+    // User will text "DONE" when ready to continue
+    return res.status(200).json({ status: 'photo uploaded', count });
   } catch (error) {
     console.error('❌ Photo error:', error);
     await sendMessage(phone, "Photo upload failed. Try again.");
