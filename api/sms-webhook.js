@@ -25,8 +25,7 @@ const DROPDOWN_OPTIONS = {
   pieces_included: [
     { value: 'Kurta', label: 'Kurta only', keywords: ['kurta', 'kameez', 'single', '1 piece', '1-piece', 'one piece'] },
     { value: '2-piece', label: '2-piece', keywords: ['2 piece', '2-piece', 'two piece', 'shirt pants', 'shirt trouser', 'dupatta'] },
-    { value: '3-piece', label: '3-piece', keywords: ['3 piece', '3-piece', 'three piece', 'suit', 'complete', 'full set'] },
-    { value: 'Other', label: 'Other', keywords: ['lehnga', 'lehenga', 'lengha', 'choli', 'saree', 'sari', 'saaree'] }
+    { value: '3-piece', label: '3-piece', keywords: ['3 piece', '3-piece', 'three piece', 'suit', 'complete', 'full set'] }
   ],
   size: [
     { value: 'XS', label: 'XS', keywords: ['xs', 'extra small', 'xsmall'] },
@@ -199,6 +198,8 @@ export default async function handler(req, res) {
       if (hasProgress && isNotWelcome) {
         // Mid-flow - offer resume or restart
         console.log(`⏸️  ${phone} mid-flow (state: ${session.state}) - offering resume/restart`);
+        // Store previous state before overwriting
+        session.prev_state = session.state;
         session.state = 'awaiting_resume_choice';
         await saveSession(phone, session);
 
@@ -370,13 +371,15 @@ async function handleResumeChoice(phone, text, buttonId, session, res) {
   const response = (buttonId || text).toLowerCase();
 
   if (response === 'resume' || response === 'continue') {
-    // Resume where they left off
-    console.log(`▶️  Resuming from state: ${session.state}`);
+    // Resume where they left off using prev_state
+    const prevState = session.prev_state || 'awaiting_description';
+    console.log(`▶️  Resuming from prev_state: ${prevState}`);
 
-    // Determine where to resume based on what they have
-    if (session.state === 'collecting_photos' || session.photos?.length > 0) {
+    // Determine where to resume based on previous state and data
+    if (prevState === 'collecting_photos' || session.photos?.length > 0) {
       const photoCount = session.photos?.length || 0;
       session.state = 'collecting_photos';
+      session.prev_state = null; // Clear prev_state
       await saveSession(phone, session);
 
       if (photoCount >= 3) {
@@ -391,6 +394,7 @@ async function handleResumeChoice(phone, text, buttonId, session, res) {
     } else {
       // Resume asking for missing fields
       session.state = 'awaiting_missing_field';
+      session.prev_state = null; // Clear prev_state
       await saveSession(phone, session);
       return await askNextMissingField(phone, session, res);
     }
@@ -486,14 +490,7 @@ async function handleMissingField(phone, text, buttonId, session, res) {
     if (matched) value = matched;
   }
 
-  // Check if "Other" or "Measurements" - need details
-  if (value === 'Other' && currentField === 'pieces_included') {
-    session.current_field = 'pieces_other_details';
-    await saveSession(phone, session);
-    await sendMessage(phone, "Please explain what pieces are included:");
-    return res.status(200).json({ status: 'asked pieces details' });
-  }
-
+  // Check if "Measurements" - need details
   if (value === 'Measurements' && currentField === 'size') {
     session.current_field = 'size_measurements';
     await saveSession(phone, session);
@@ -501,11 +498,8 @@ async function handleMissingField(phone, text, buttonId, session, res) {
     return res.status(200).json({ status: 'asked measurements' });
   }
 
-  // Handle "Other" details responses
-  if (currentField === 'pieces_other_details') {
-    session.listing.pieces_included = `Other (${value})`;
-    session.current_field = null;
-  } else if (currentField === 'size_measurements') {
+  // Handle size measurements details response
+  if (currentField === 'size_measurements') {
     session.listing.size = `Measurements: ${value}`;
     session.current_field = null;
   } else {
@@ -561,8 +555,7 @@ async function askForField(phone, field) {
       buttons: [
         { id: 'Kurta', title: 'Kurta only' },
         { id: '2-piece', title: '2-piece' },
-        { id: '3-piece', title: '3-piece' },
-        { id: 'Other', title: 'Other' }
+        { id: '3-piece', title: '3-piece' }
       ]
     },
     size: {
@@ -1038,10 +1031,11 @@ async function getSession(phone) {
       photos: data.photos || [],
       current_field: data.current_field,
       // Extract metadata from listing._meta
-      created_at: meta.created_at || data.updated_at,
+      created_at: meta.created_at || null, // Don't fallback to updated_at - only use true created_at
       processedMessages: meta.processedMessages || [],
       lastPhotoResponseAt: meta.lastPhotoResponseAt || null,
-      shopify_product_id: meta.shopify_product_id || null
+      shopify_product_id: meta.shopify_product_id || null,
+      prev_state: meta.prev_state || null
     };
   }
 
@@ -1049,21 +1043,27 @@ async function getSession(phone) {
     state: 'welcome',
     listing: {},
     photos: [],
-    created_at: new Date().toISOString(),
+    created_at: null, // Will be set on first save
     processedMessages: [],
     lastPhotoResponseAt: null,
-    shopify_product_id: null
+    shopify_product_id: null,
+    prev_state: null
   };
 }
 
 async function saveSession(phone, session) {
   // Store metadata in listing._meta to persist across sessions
   const listing = session.listing || {};
+
+  // Preserve existing created_at if it exists, otherwise set it now (only once)
+  const existingCreatedAt = listing._meta?.created_at;
+
   listing._meta = {
-    created_at: session.created_at || new Date().toISOString(),
+    created_at: existingCreatedAt || session.created_at || new Date().toISOString(),
     processedMessages: session.processedMessages || [],
     lastPhotoResponseAt: session.lastPhotoResponseAt || null,
-    shopify_product_id: session.shopify_product_id || null
+    shopify_product_id: session.shopify_product_id || null,
+    prev_state: session.prev_state || null
   };
 
   await supabase
