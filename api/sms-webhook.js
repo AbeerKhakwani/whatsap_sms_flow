@@ -190,6 +190,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'cancelled' });
     }
 
+    if (cmd === 'submit') {
+      const photoCount = (session.photos || []).length;
+
+      if (session.state === 'collecting_photos' && photoCount >= 3) {
+        return await submitListing(phone, session, res);
+      }
+
+      if (session.state === 'collecting_photos' && photoCount < 3) {
+        await sendMessage(phone, `You can submit after 3 photos. Need ${3 - photoCount} more 📸`);
+        return res.status(200).json({ status: 'need more photos' });
+      }
+
+      await sendMessage(phone, "You're not in photo upload yet. Reply SELL to start a listing.");
+      return res.status(200).json({ status: 'submit ignored' });
+    }
+
     if (cmd === 'sell') {
       // Check if they're mid-flow
       const hasProgress = session.email || session.listing?.designer || session.photos?.length > 0;
@@ -220,7 +236,9 @@ export default async function handler(req, res) {
         // Session is still valid - go straight to description
         console.log(`✅ ${phone} has valid session (${Math.round(sessionAge / (24 * 60 * 60 * 1000))} days old) - skip email`);
         session.state = 'awaiting_description';
-        session.listing = { _seller_id: session.listing._seller_id };
+        // Preserve _meta when resetting listing
+        const meta = session.listing?._meta;
+        session.listing = { _seller_id: session.listing._seller_id, _meta: meta };
         session.photos = [];
         session.shopify_product_id = null; // Clear any old draft ID
         await saveSession(phone, session);
@@ -318,7 +336,9 @@ async function handleEmail(phone, text, session, res) {
 
     // Welcome back
     session.email = email;
-    session.listing = { _seller_id: seller.id, _seller_name: seller.name };
+    // Preserve _meta when resetting listing
+    const meta = session.listing?._meta;
+    session.listing = { _seller_id: seller.id, _seller_name: seller.name, _meta: meta };
     session.state = 'awaiting_description';
     session.created_at = session.created_at || new Date().toISOString();
     await saveSession(phone, session);
@@ -353,7 +373,9 @@ async function handleAccountConfirmation(phone, text, buttonId, session, res) {
       .select('id')
       .single();
 
-    session.listing = { _seller_id: newSeller.id };
+    // Preserve _meta when resetting listing
+    const meta = session.listing?._meta;
+    session.listing = { _seller_id: newSeller.id, _meta: meta };
     session.state = 'awaiting_description';
     session.created_at = session.created_at || new Date().toISOString();
     await saveSession(phone, session);
