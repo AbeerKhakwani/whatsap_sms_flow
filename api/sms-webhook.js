@@ -24,11 +24,9 @@ const REQUIRED_FIELDS = ['designer', 'pieces_included', 'size', 'condition', 'as
 const DROPDOWN_OPTIONS = {
   pieces_included: [
     { value: 'Kurta', label: 'Kurta only', keywords: ['kurta', 'kameez', 'single', '1 piece', '1-piece', 'one piece'] },
-    { value: '2-piece', label: '2-piece', keywords: ['2 piece', '2-piece', 'two piece', 'shirt pants', 'shirt trouser'] },
-    { value: '3-piece', label: '3-piece', keywords: ['3 piece', '3-piece', 'three piece', 'suit', 'complete'] },
-    { value: 'Lehnga Set', label: 'Lehnga Set', keywords: ['lehnga', 'lehenga', 'lengha', 'choli'] },
-    { value: 'Saree', label: 'Saree', keywords: ['saree', 'sari', 'saaree'] },
-    { value: 'Other', label: 'Other', keywords: [] }
+    { value: '2-piece', label: '2-piece', keywords: ['2 piece', '2-piece', 'two piece', 'shirt pants', 'shirt trouser', 'dupatta'] },
+    { value: '3-piece', label: '3-piece', keywords: ['3 piece', '3-piece', 'three piece', 'suit', 'complete', 'full set'] },
+    { value: 'Other', label: 'Other', keywords: ['lehnga', 'lehenga', 'lengha', 'choli', 'saree', 'sari', 'saaree'] }
   ],
   size: [
     { value: 'XS', label: 'XS', keywords: ['xs', 'extra small', 'xsmall'] },
@@ -38,7 +36,8 @@ const DROPDOWN_OPTIONS = {
     { value: 'XL', label: 'XL', keywords: ['xl', 'extra large', 'xlarge'] },
     { value: 'XXL', label: 'XXL', keywords: ['xxl', '2xl', 'double xl'] },
     { value: 'One Size', label: 'One Size', keywords: ['one size', 'free size', 'fits all'] },
-    { value: 'Unstitched', label: 'Unstitched', keywords: ['unstitched', 'not stitched', 'fabric only'] }
+    { value: 'Unstitched', label: 'Unstitched', keywords: ['unstitched', 'not stitched', 'fabric only'] },
+    { value: 'Measurements', label: 'Measurements', keywords: ['measurements', 'custom', 'specific size'] }
   ],
   condition: [
     { value: 'New with tags', label: 'New with tags', keywords: ['new with tags', 'nwt', 'brand new', 'never worn', 'tags attached'] },
@@ -140,7 +139,23 @@ export default async function handler(req, res) {
     }
 
     const phone = message.from;
+    const messageId = message.id;
     const session = await getSession(phone);
+
+    // Idempotency: Skip if we've already processed this message
+    if (session.processedMessages?.includes(messageId)) {
+      console.log(`⏭️  Skipping duplicate message ${messageId}`);
+      return res.status(200).json({ status: 'duplicate' });
+    }
+
+    // Mark as processed and save immediately to prevent race conditions
+    session.processedMessages = session.processedMessages || [];
+    session.processedMessages.push(messageId);
+    // Keep only last 20 message IDs to prevent unbounded growth
+    if (session.processedMessages.length > 20) {
+      session.processedMessages = session.processedMessages.slice(-20);
+    }
+    await saveSession(phone, session);
 
     // Parse message
     let text = '';
@@ -177,14 +192,51 @@ export default async function handler(req, res) {
     }
 
     if (cmd === 'sell') {
-      // ALWAYS reset and ask for email
-      await resetSession(phone);
-      const freshSession = await getSession(phone);
-      freshSession.state = 'awaiting_email';
-      await saveSession(phone, freshSession);
-      await sendMessage(phone, "What's your email?");
-      console.log(`✅ ${phone} starting fresh - asked for email`);
-      return res.status(200).json({ status: 'asked email' });
+      // Check if they're mid-flow
+      const hasProgress = session.email || session.listing?.designer || session.photos?.length > 0;
+      const isNotWelcome = session.state !== 'welcome';
+
+      if (hasProgress && isNotWelcome) {
+        // Mid-flow - offer resume or restart
+        console.log(`⏸️  ${phone} mid-flow (state: ${session.state}) - offering resume/restart`);
+        session.state = 'awaiting_resume_choice';
+        await saveSession(phone, session);
+
+        await sendButtons(phone, "You're already listing an item. Continue where you left off?", [
+          { id: 'resume', title: 'CONTINUE' },
+          { id: 'restart', title: 'RESTART' }
+        ]);
+        return res.status(200).json({ status: 'offered resume' });
+      }
+
+      // Check if they have a valid recent session (within 7 days)
+      const hasValidEmail = session.email && session.email.includes('@');
+      const hasSeller = session.listing?._seller_id;
+      const sessionAge = session.created_at ? Date.now() - new Date(session.created_at).getTime() : Infinity;
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+
+      if (hasValidEmail && hasSeller && sessionAge < sevenDays) {
+        // Session is still valid - go straight to description
+        console.log(`✅ ${phone} has valid session (${Math.round(sessionAge / (24 * 60 * 60 * 1000))} days old) - skip email`);
+        session.state = 'awaiting_description';
+        session.listing = { _seller_id: session.listing._seller_id };
+        session.photos = [];
+        session.shopify_product_id = null; // Clear any old draft ID
+        await saveSession(phone, session);
+
+        await sendMessage(phone, `Welcome back! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
+        return res.status(200).json({ status: 'returning user - asked description' });
+      } else {
+        // Session expired or invalid - reset and ask for email
+        console.log(`✅ ${phone} session expired or invalid - asking for email`);
+        await resetSession(phone);
+        const freshSession = await getSession(phone);
+        freshSession.state = 'awaiting_email';
+        freshSession.created_at = new Date().toISOString();
+        await saveSession(phone, freshSession);
+        await sendMessage(phone, "What's your email?");
+        return res.status(200).json({ status: 'asked email' });
+      }
     }
 
     // State machine
@@ -192,6 +244,9 @@ export default async function handler(req, res) {
       case 'welcome':
         await sendWelcome(phone);
         return res.status(200).json({ status: 'welcome' });
+
+      case 'awaiting_resume_choice':
+        return await handleResumeChoice(phone, text, buttonId, session, res);
 
       case 'awaiting_email':
         return await handleEmail(phone, text, session, res);
@@ -207,6 +262,9 @@ export default async function handler(req, res) {
 
       case 'collecting_photos':
         return await handlePhotoState(phone, text, buttonId, session, res);
+
+      case 'awaiting_additional_details':
+        return await handleAdditionalDetails(phone, text, buttonId, session, res);
 
       case 'submitted':
         await sendWelcome(phone);
@@ -261,6 +319,7 @@ async function handleEmail(phone, text, session, res) {
     session.email = email;
     session.listing = { _seller_id: seller.id, _seller_name: seller.name };
     session.state = 'awaiting_description';
+    session.created_at = session.created_at || new Date().toISOString();
     await saveSession(phone, session);
 
     const greeting = `Welcome back${seller.name ? ', ' + seller.name : ''}! ✓`;
@@ -270,6 +329,7 @@ async function handleEmail(phone, text, session, res) {
     // New seller - confirm account creation
     session.email = email;
     session.state = 'awaiting_account_confirmation';
+    session.created_at = session.created_at || new Date().toISOString();
     await saveSession(phone, session);
 
     await sendMessage(phone, `New here? Let's create your account!`);
@@ -294,6 +354,7 @@ async function handleAccountConfirmation(phone, text, buttonId, session, res) {
 
     session.listing = { _seller_id: newSeller.id };
     session.state = 'awaiting_description';
+    session.created_at = session.created_at || new Date().toISOString();
     await saveSession(phone, session);
 
     await sendMessage(phone, `Account created! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
@@ -302,6 +363,47 @@ async function handleAccountConfirmation(phone, text, buttonId, session, res) {
     await resetSession(phone);
     await sendMessage(phone, "Cancelled. Reply SELL when ready.");
     return res.status(200).json({ status: 'cancelled' });
+  }
+}
+
+async function handleResumeChoice(phone, text, buttonId, session, res) {
+  const response = (buttonId || text).toLowerCase();
+
+  if (response === 'resume' || response === 'continue') {
+    // Resume where they left off
+    console.log(`▶️  Resuming from state: ${session.state}`);
+
+    // Determine where to resume based on what they have
+    if (session.state === 'collecting_photos' || session.photos?.length > 0) {
+      const photoCount = session.photos?.length || 0;
+      session.state = 'collecting_photos';
+      await saveSession(phone, session);
+
+      if (photoCount >= 3) {
+        await sendButtons(phone, `You have ${photoCount} photos.\n\nReady to submit?`, [
+          { id: 'submit', title: 'SUBMIT ✓' },
+          { id: 'add_more', title: 'ADD MORE' }
+        ]);
+      } else {
+        await sendMessage(phone, `You have ${photoCount} photos. Send ${3 - photoCount} more 📸`);
+      }
+      return res.status(200).json({ status: 'resumed photos' });
+    } else {
+      // Resume asking for missing fields
+      session.state = 'awaiting_missing_field';
+      await saveSession(phone, session);
+      return await askNextMissingField(phone, session, res);
+    }
+  } else {
+    // Restart fresh
+    console.log(`🔄 Restarting fresh`);
+    await resetSession(phone);
+    const freshSession = await getSession(phone);
+    freshSession.state = 'awaiting_email';
+    freshSession.created_at = new Date().toISOString();
+    await saveSession(phone, freshSession);
+    await sendMessage(phone, "What's your email?");
+    return res.status(200).json({ status: 'restarted' });
   }
 }
 
@@ -319,6 +421,15 @@ async function handleDescription(phone, text, session, res) {
 
     // Smart match dropdowns
     const extracted = validation.extracted || {};
+
+    // Extract embellishment/detail keywords from description
+    const embellishmentKeywords = ['beadwork', 'beaded', 'embroidery', 'embroidered', 'sequin', 'sequins',
+                                   'stone', 'stones', 'mirror', 'mirrors', 'lace', 'pearl', 'pearls',
+                                   'threadwork', 'handwork', 'zari', 'gota', 'tilla'];
+    const foundEmbellishments = embellishmentKeywords.filter(keyword =>
+      normalized.toLowerCase().includes(keyword)
+    );
+
     const matched = {
       designer: extracted.designer || '',
       item_type: extracted.item_type || extracted.pieces || '',
@@ -328,6 +439,7 @@ async function handleDescription(phone, text, session, res) {
       asking_price_usd: extracted.asking_price || extracted.asking_price_usd || '',
       color: extracted.color || '',
       material: extracted.material || '',
+      additional_details: foundEmbellishments.length > 0 ? foundEmbellishments.join(', ') : '',
       details: normalized
     };
 
@@ -358,15 +470,50 @@ async function handleMissingField(phone, text, buttonId, session, res) {
 
   let value = buttonId || text.trim();
 
+  // Handle price validation
+  if (currentField === 'asking_price_usd') {
+    const priceMatch = value.match(/(\d+)/);
+    if (!priceMatch) {
+      await sendMessage(phone, "Please enter a number for the price.\ne.g., 80");
+      return res.status(200).json({ status: 'invalid price' });
+    }
+    value = priceMatch[1];
+  }
+
   // Smart match for dropdowns
   if (['pieces_included', 'size', 'condition'].includes(currentField)) {
     const matched = matchToDropdown(value, currentField);
     if (matched) value = matched;
   }
 
-  // Update listing
-  session.listing[currentField] = value;
-  session.current_field = null;
+  // Check if "Other" or "Measurements" - need details
+  if (value === 'Other' && currentField === 'pieces_included') {
+    session.current_field = 'pieces_other_details';
+    await saveSession(phone, session);
+    await sendMessage(phone, "Please explain what pieces are included:");
+    return res.status(200).json({ status: 'asked pieces details' });
+  }
+
+  if (value === 'Measurements' && currentField === 'size') {
+    session.current_field = 'size_measurements';
+    await saveSession(phone, session);
+    await sendMessage(phone, "Enter measurements here:\n(e.g., Bust 36\", Waist 28\", Length 42\")");
+    return res.status(200).json({ status: 'asked measurements' });
+  }
+
+  // Handle "Other" details responses
+  if (currentField === 'pieces_other_details') {
+    session.listing.pieces_included = `Other (${value})`;
+    session.current_field = null;
+  } else if (currentField === 'size_measurements') {
+    session.listing.size = `Measurements: ${value}`;
+    session.current_field = null;
+  } else {
+    // Normal field
+    session.listing[currentField] = value;
+    session.current_field = null;
+  }
+
   console.log(`📦 Added ${currentField}=${value}`);
   await saveSession(phone, session);
 
@@ -410,8 +557,13 @@ async function askForField(phone, field) {
       note: "e.g., Maria B, Sana Safinaz, Khaadi"
     },
     pieces_included: {
-      text: "What type of outfit?",
-      list: DROPDOWN_OPTIONS.pieces_included.filter(o => o.value).slice(0, 10)
+      text: "How many pieces?",
+      buttons: [
+        { id: 'Kurta', title: 'Kurta only' },
+        { id: '2-piece', title: '2-piece' },
+        { id: '3-piece', title: '3-piece' },
+        { id: 'Other', title: 'Other' }
+      ]
     },
     size: {
       text: "What size?",
@@ -433,9 +585,12 @@ async function askForField(phone, field) {
     return;
   }
 
-  if (q.list) {
+  if (q.buttons) {
+    // Use buttons for quick selections
+    await sendButtons(phone, q.text, q.buttons);
+  } else if (q.list) {
     // Use List Message for cleaner UI (like templates)
-    await sendListMessage(phone, q.text + "\n\nOr type your answer", q.list, field);
+    await sendListMessage(phone, q.text, q.list, field);
   } else {
     await sendMessage(phone, q.text + (q.note ? `\n${q.note}` : ''));
   }
@@ -446,7 +601,17 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   const photoCount = (session.photos || []).length;
 
   if (response === 'submit' && photoCount >= 3) {
-    return await submitListing(phone, session, res);
+    // Move to additional details question
+    session.state = 'awaiting_additional_details';
+    await saveSession(phone, session);
+
+    await sendButtons(phone,
+      `Any additional details buyers should know?\n\n(beading, embellishments, flaws, etc.)\n\nOr skip if ready to submit:`,
+      [
+        { id: 'skip_details', title: 'READY TO SUBMIT ✓' }
+      ]
+    );
+    return res.status(200).json({ status: 'asked additional details' });
   }
 
   if (photoCount < 3) {
@@ -455,11 +620,34 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
   }
 
   // >= 3 photos, show submit option
-  await sendButtons(phone, `Got ${photoCount} photos!\n\nReady to submit?`, [
-    { id: 'submit', title: 'SUBMIT ✓' },
+  await sendButtons(phone, `Got ${photoCount} photos!\n\nReady to continue?`, [
+    { id: 'submit', title: 'CONTINUE ›' },
     { id: 'add_more', title: 'ADD MORE' }
   ]);
   return res.status(200).json({ status: 'ready to submit' });
+}
+
+async function handleAdditionalDetails(phone, text, buttonId, session, res) {
+  const response = (buttonId || text).trim();
+  const lowerResponse = response.toLowerCase();
+
+  // Accept button ID or various text responses meaning "skip/submit"
+  if (response === 'skip_details' ||
+      lowerResponse === 'skip' ||
+      lowerResponse === 'submit' ||
+      lowerResponse.includes('ready to submit')) {
+    // Skip details, go straight to submit
+    console.log('📤 Skipping additional details, submitting...');
+    return await submitListing(phone, session, res);
+  }
+
+  // They provided details - save and submit
+  session.listing.additional_details = response;
+  await saveSession(phone, session);
+
+  console.log(`📝 Additional details: "${response}" - submitting...`);
+  await sendMessage(phone, "Got it! Submitting now...");
+  return await submitListing(phone, session, res);
 }
 
 async function handlePhoto(phone, mediaId, session, res) {
@@ -469,33 +657,59 @@ async function handlePhoto(phone, mediaId, session, res) {
   }
 
   try {
+    // Small random delay to prevent concurrent updates from overwriting each other
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 300));
+
+    // Re-fetch session to get latest photo count
+    const latestSession = await getSession(phone);
+
     // Download and convert to base64
     const mediaUrl = await getMediaUrl(mediaId);
     const mediaBuffer = await downloadMedia(mediaUrl);
     const base64 = mediaBuffer.toString('base64');
 
-    session.photos = session.photos || [];
-    session.photos.push({ base64, mediaId });
+    latestSession.photos = latestSession.photos || [];
 
-    const count = session.photos.length;
+    // Check if this photo already exists (by mediaId)
+    if (latestSession.photos.some(p => p.mediaId === mediaId)) {
+      console.log(`⏭️  Photo ${mediaId} already saved, skipping`);
+      return res.status(200).json({ status: 'duplicate photo' });
+    }
 
-    // Prevent race condition - only save and respond once per photo
-    await saveSession(phone, session);
-    console.log(`📸 Photo ${count} saved`);
+    latestSession.photos.push({ base64, mediaId });
 
-    // Wait a tiny bit to batch rapid uploads
-    await new Promise(resolve => setTimeout(resolve, 500));
+    const count = latestSession.photos.length;
+    await saveSession(phone, latestSession);
+    console.log(`📸 Photo ${count}/3 saved (mediaId: ${mediaId})`);
 
-    // Reload session to get latest count (in case multiple photos came in)
-    const latestSession = await getSession(phone);
-    const latestCount = (latestSession.photos || []).length;
+    // Wait 2 seconds to batch rapid uploads before responding
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    if (latestCount < 3) {
-      await sendMessage(phone, `Got ${latestCount}/3 photos. Send ${3 - latestCount} more 📸`);
-      return res.status(200).json({ status: `photo ${latestCount}` });
+    // Re-check count after delay (in case more came in)
+    const finalSession = await getSession(phone);
+    const finalCount = (finalSession.photos || []).length;
+    console.log(`📸 Final count after delay: ${finalCount}`);
+
+    // Only respond if we haven't already responded for this batch
+    // Check if we sent a message in the last 5 seconds
+    const lastPhotoResponse = finalSession.lastPhotoResponseAt;
+    const now = Date.now();
+    if (lastPhotoResponse && now - lastPhotoResponse < 5000) {
+      console.log(`📸 Already responded ${Math.round((now - lastPhotoResponse) / 1000)}s ago, skipping`);
+      return res.status(200).json({ status: 'already responded' });
+    }
+
+    // Mark that we're responding
+    finalSession.lastPhotoResponseAt = now;
+    await saveSession(phone, finalSession);
+
+    // Respond based on final count
+    if (finalCount < 3) {
+      await sendMessage(phone, `Got ${finalCount}/3 photos. Send ${3 - finalCount} more 📸`);
+      return res.status(200).json({ status: `photo ${finalCount}` });
     } else {
-      await sendButtons(phone, `Perfect! Got ${latestCount} photos.\n\nReady to submit?`, [
-        { id: 'submit', title: 'SUBMIT ✓' },
+      await sendButtons(phone, `Perfect! Got ${finalCount} photos.\n\nReady to continue?`, [
+        { id: 'submit', title: 'CONTINUE ›' },
         { id: 'add_more', title: 'ADD MORE' }
       ]);
       return res.status(200).json({ status: 'ready to submit' });
@@ -512,6 +726,110 @@ async function submitListing(phone, session, res) {
 
   try {
     console.log('📤 Submitting listing...');
+    console.log('📦 Session state:', {
+      hasPhotos: session.photos?.length || 0,
+      hasDraftId: !!session.shopify_product_id,
+      existingDraftId: session.shopify_product_id
+    });
+
+    // Check if we already created a draft (retry scenario)
+    if (session.shopify_product_id) {
+      console.log(`♻️  Reusing existing draft: ${session.shopify_product_id}`);
+
+      // Clean price for DB insert
+      let cleanPrice = listing.asking_price_usd;
+      if (typeof cleanPrice === 'string') {
+        const match = cleanPrice.match(/(\d+)/);
+        if (match) cleanPrice = parseFloat(match[1]);
+      }
+
+      // Skip to photo upload
+      const photoUrls = [];
+      if (session.photos?.length > 0) {
+        console.log(`📸 Uploading ${session.photos.length} photos to existing draft...`);
+        // Upload photos to existing draft
+        for (let i = 0; i < session.photos.length; i++) {
+          const photo = session.photos[i];
+          try {
+            const photoRes = await fetch(`${API_BASE}/api/product-image?action=add`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                productId: session.shopify_product_id,
+                base64: photo.base64,
+                filename: `photo_${i + 1}.jpg`
+              })
+            });
+
+            const photoData = await photoRes.json();
+            if (photoData.success && photoData.imageUrl) {
+              photoUrls.push(photoData.imageUrl);
+            }
+          } catch (e) {
+            console.error(`❌ Photo ${i + 1} error on retry:`, e.message);
+          }
+        }
+      }
+
+      // Save to DB
+      const { data: createdListing, error: listingError } = await supabase
+        .from('listings')
+        .insert({
+          seller_id: listing._seller_id,
+          conversation_id: null,
+          status: 'pending_approval',
+          input_method: 'whatsapp',
+          shopify_product_id: session.shopify_product_id,
+          designer: listing.designer,
+          item_type: listing.item_type,
+          size: listing.size,
+          condition: listing.condition,
+          pieces_included: listing.pieces_included,
+          asking_price_usd: cleanPrice || null,
+          details: listing.details,
+          additional_details: listing.additional_details || null,
+          photo_urls: photoUrls.length > 0 ? photoUrls : null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select('id')
+        .single();
+
+      if (listingError) {
+        throw new Error('Failed to save listing: ' + listingError.message);
+      }
+
+      // Success!
+      await sendMessage(phone,
+        `🎉 Submitted!\n\n` +
+        `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+        `📏 ${listing.size} • $${cleanPrice}\n\n` +
+        `We'll notify you when it's live.\nReply SELL to list another.`
+      );
+
+      session.state = 'submitted';
+      await saveSession(phone, session);
+      await resetSession(phone);
+
+      return res.status(200).json({ status: 'submitted (retry)', productId: session.shopify_product_id });
+    }
+
+    // Fresh submission - validate price first
+    let askingPrice = listing.asking_price_usd;
+    if (typeof askingPrice === 'string') {
+      const priceMatch = askingPrice.match(/(\d+)/);
+      if (priceMatch) {
+        askingPrice = parseFloat(priceMatch[1]);
+      } else {
+        askingPrice = null;
+      }
+    }
+
+    if (!askingPrice || askingPrice <= 0) {
+      throw new Error('Invalid price. Please provide a valid number.');
+    }
+
+    console.log('💰 Price validation: original=', listing.asking_price_usd, 'cleaned=', askingPrice);
 
     // 1. Create Shopify draft
     const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
@@ -529,7 +847,7 @@ async function submitListing(phone, session, res) {
           condition: listing.condition,
           color: listing.color,
           material: listing.material,
-          asking_price: listing.asking_price_usd
+          asking_price: askingPrice
         }
       })
     });
@@ -541,12 +859,21 @@ async function submitListing(phone, session, res) {
       throw new Error(draftData.error || 'Failed to create draft');
     }
 
+    // Save product ID to session immediately so we can retry without duplicates
+    session.shopify_product_id = draftData.productId;
+    await saveSession(phone, session);
+    console.log(`✅ Saved draft ID to session: ${draftData.productId}`);
+
     // 2. Upload photos
+    console.log(`📸 Uploading ${session.photos?.length || 0} photos to Shopify product ${draftData.productId}...`);
+    const photoUrls = [];
     if (session.photos?.length > 0) {
       for (let i = 0; i < session.photos.length; i++) {
         const photo = session.photos[i];
         try {
-          await fetch(`${API_BASE}/api/product-image?action=add`, {
+          console.log(`📸 Uploading photo ${i + 1}/${session.photos.length} (mediaId: ${photo.mediaId})...`);
+
+          const photoRes = await fetch(`${API_BASE}/api/product-image?action=add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -555,15 +882,33 @@ async function submitListing(phone, session, res) {
               filename: `photo_${i + 1}.jpg`
             })
           });
-          console.log(`✅ Photo ${i + 1} uploaded`);
+
+          console.log(`📸 Photo ${i + 1} response status: ${photoRes.status} ${photoRes.statusText}`);
+
+          if (!photoRes.ok) {
+            const errorText = await photoRes.text();
+            console.error(`❌ Photo ${i + 1} HTTP error: ${errorText}`);
+            continue;
+          }
+
+          const photoData = await photoRes.json();
+          console.log(`📸 Photo ${i + 1} response data:`, JSON.stringify(photoData));
+
+          if (photoData.success && photoData.imageUrl) {
+            console.log(`✅ Photo ${i + 1} uploaded successfully - URL: ${photoData.imageUrl}`);
+            photoUrls.push(photoData.imageUrl);
+          } else {
+            console.error(`❌ Photo ${i + 1} upload failed:`, photoData.error || 'Unknown error');
+          }
         } catch (e) {
-          console.error(`❌ Photo ${i + 1} failed:`, e);
+          console.error(`❌ Photo ${i + 1} exception:`, e.message, e.stack);
         }
       }
     }
+    console.log(`📸 Upload complete: ${photoUrls.length}/${session.photos?.length || 0} photos succeeded`);
 
     // 3. Create listings row
-    const { data: createdListing } = await supabase
+    const { data: createdListing, error: listingError } = await supabase
       .from('listings')
       .insert({
         seller_id: listing._seller_id,
@@ -578,11 +923,18 @@ async function submitListing(phone, session, res) {
         pieces_included: listing.pieces_included,
         asking_price_usd: parseFloat(listing.asking_price_usd) || null,
         details: listing.details,
+        additional_details: listing.additional_details || null,
+        photo_urls: photoUrls.length > 0 ? photoUrls : null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
       .select('id')
       .single();
+
+    if (listingError) {
+      console.error('❌ Failed to create listing in DB:', listingError);
+      throw new Error('Failed to save listing: ' + listingError.message);
+    }
 
     console.log('✅ Listing created in DB:', createdListing?.id);
 
@@ -602,7 +954,11 @@ async function submitListing(phone, session, res) {
     return res.status(200).json({ status: 'submitted', productId: draftData.productId });
 
   } catch (error) {
-    console.error('❌ Submit error:', error);
+    console.error('❌ Submit error:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Listing data:', JSON.stringify(listing));
+    console.error('❌ Session photos:', session.photos?.length || 0);
+
     await sendMessage(phone, "Oops, something went wrong.\n\nYour info is saved. Reply SUBMIT to try again, or CANCEL to start over.");
     return res.status(200).json({ status: 'error', error: error.message });
   }
