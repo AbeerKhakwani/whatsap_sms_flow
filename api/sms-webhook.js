@@ -128,14 +128,13 @@ export default async function handler(req, res) {
     }
 
     if (cmd === 'sell') {
-      // If mid-flow, warn them
-      if (session.state !== 'welcome' && session.state !== 'submitted') {
-        await sendMessage(phone, "We're still working on your listing.\nType CANCEL to start over.");
-        return res.status(200).json({ status: 'mid-flow' });
-      }
-      session.state = 'awaiting_email';
-      await saveSession(phone, session);
+      // ALWAYS reset and ask for email (even if we have it)
+      await resetSession(phone);
+      const freshSession = await getSession(phone);
+      freshSession.state = 'awaiting_email';
+      await saveSession(phone, freshSession);
       await sendMessage(phone, "What's your email?");
+      console.log(`✅ ${phone} starting fresh - asked for email`);
       return res.status(200).json({ status: 'asked email' });
     }
 
@@ -243,26 +242,34 @@ async function handleDescription(phone, text, session, res) {
   try {
     // Extract using AI
     const validation = await callValidateListing(normalized);
-    console.log('🤖 Extracted:', validation.extracted);
+    console.log('🤖 AI extracted:', JSON.stringify(validation.extracted));
 
     // Safe merge into session listing (never overwrites existing values)
+    const before = JSON.stringify(session.listing);
     session.listing = safeMerge(session.listing, validation.extracted);
     session.listing.details = normalized; // Store original description
+    console.log(`📦 Before: ${before}`);
+    console.log(`📦 After merge: ${JSON.stringify(session.listing)}`);
     await saveSession(phone, session);
 
     // DON'T create listings draft during chat - only on SUBMIT
 
-    // Show what we extracted (clearer feedback)
+    // Show what we have NOW (super clear)
     const l = session.listing;
-    let feedback = `Got it ✓\n\n`;
-    if (l.designer) feedback += `${l.designer}`;
-    if (l.item_type) feedback += ` ${l.item_type}`;
-    if (l.size) feedback += ` • Size ${l.size}`;
-    if (l.condition) feedback += `\n${l.condition}`;
-    if (l.asking_price_usd) feedback += ` • $${l.asking_price_usd}`;
-    if (l.pieces_included) feedback += `\n${l.pieces_included}`;
+    const parts = [];
+    if (l.designer) parts.push(`✓ Designer: ${l.designer}`);
+    if (l.item_type) parts.push(`✓ Type: ${l.item_type}`);
+    if (l.size) parts.push(`✓ Size: ${l.size}`);
+    if (l.condition) parts.push(`✓ Condition: ${l.condition}`);
+    if (l.pieces_included) parts.push(`✓ Pieces: ${l.pieces_included}`);
+    if (l.asking_price_usd) parts.push(`✓ Price: $${l.asking_price_usd}`);
+
+    const feedback = parts.length > 0
+      ? `Got it! Here's what I have:\n\n${parts.join('\n')}`
+      : `Got your message. Let me ask you one thing at a time.`;
 
     await sendMessage(phone, feedback);
+    console.log(`📤 Sent feedback: ${feedback}`);
 
     // Ask for next missing field or confirm
     return await askNextOrConfirm(phone, session, res);
@@ -296,24 +303,25 @@ async function handleFieldValue(phone, text, buttonId, session, res) {
   // Safe merge
   session.listing = safeMerge(session.listing, { [field]: value });
   session.current_field = null;
+  console.log(`📦 Added ${field}=${value}, listing now:`, JSON.stringify(session.listing));
   await saveSession(phone, session);
 
   // DON'T create listings draft during chat - only on SUBMIT
 
-  // Acknowledge what we got, show progress, and ask for next
+  // Show ALL fields we have so far (super clear)
   const l = session.listing;
-  const missing = getMissingFields(l);
+  const parts = [];
+  if (l.designer) parts.push(`✓ Designer: ${l.designer}`);
+  if (l.item_type) parts.push(`✓ Type: ${l.item_type}`);
+  if (l.size) parts.push(`✓ Size: ${l.size}`);
+  if (l.condition) parts.push(`✓ Condition: ${l.condition}`);
+  if (l.pieces_included) parts.push(`✓ Pieces: ${l.pieces_included}`);
+  if (l.asking_price_usd) parts.push(`✓ Price: $${l.asking_price_usd}`);
 
-  // Show what we have so far (clearer context)
-  let summary = `Got it ✓\n\n`;
-  if (l.designer) summary += `${l.designer}`;
-  if (l.item_type) summary += ` ${l.item_type}`;
-  if (l.size) summary += ` • Size ${l.size}`;
-  if (l.condition) summary += `\n${l.condition}`;
-  if (l.asking_price_usd) summary += ` • $${l.asking_price_usd}`;
-  if (l.pieces_included) summary += `\n${l.pieces_included}`;
-
+  const summary = `Got it! Here's what I have:\n\n${parts.join('\n')}`;
   await sendMessage(phone, summary);
+  console.log(`📤 Sent summary: ${summary}`);
+
   return await askNextOrConfirm(phone, session, res);
 }
 
@@ -455,6 +463,7 @@ async function handlePhoto(phone, mediaId, session, res) {
 
 async function askNextOrConfirm(phone, session, res) {
   const missing = getMissingFields(session.listing);
+  console.log(`🔍 Missing fields: ${JSON.stringify(missing)}`);
 
   if (missing.length === 0) {
     // All fields complete - show confirmation
@@ -463,26 +472,29 @@ async function askNextOrConfirm(phone, session, res) {
 
     const l = session.listing;
     const summary = `Perfect! Here's your listing:\n\n` +
-      `📦 ${l.designer} ${l.item_type || ''}\n` +
-      `📏 Size ${l.size}\n` +
-      `✨ ${l.condition}\n` +
-      `🧵 ${l.pieces_included}\n` +
-      `💰 $${l.asking_price_usd}`;
+      `✓ Designer: ${l.designer}\n` +
+      `✓ Type: ${l.item_type}\n` +
+      `✓ Size: ${l.size}\n` +
+      `✓ Condition: ${l.condition}\n` +
+      `✓ Pieces: ${l.pieces_included}\n` +
+      `✓ Price: $${l.asking_price_usd}`;
 
     await sendMessage(phone, summary);
     await sendButtons(phone, "Ready for photos?", [
       { id: 'yes', title: 'YES ✓' },
       { id: 'update', title: 'UPDATE' }
     ]);
+    console.log('📤 Sent confirmation with buttons');
     return res.status(200).json({ status: 'confirmation' });
   }
 
-  // Ask for next missing field (one at a time)
+  // Ask for next missing field (one at a time with buttons)
   const nextField = missing[0];
   session.current_field = nextField;
   session.state = 'awaiting_field_value';
   await saveSession(phone, session);
 
+  console.log(`❓ Asking for: ${nextField}`);
   await askForField(phone, nextField);
   return res.status(200).json({ status: `asked ${nextField}` });
 }
