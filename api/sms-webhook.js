@@ -239,7 +239,14 @@ export default async function handler(req, res) {
     }
 
     if (cmd === 'sell') {
-      // Check if they're mid-flow
+      // If previous listing was submitted, start completely fresh
+      if (session.state === 'submitted') {
+        console.log(`✅ ${phone} previous listing submitted - starting fresh`);
+        await resetSession(phone);
+        session = await getSession(phone); // Get clean session
+      }
+
+      // Check if they're mid-flow (but NOT submitted)
       const hasProgress = session.email || session.listing?.designer || session.photos?.length > 0;
       const isNotWelcome = session.state !== 'welcome';
 
