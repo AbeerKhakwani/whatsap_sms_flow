@@ -958,17 +958,26 @@ async function handlePhoto(phone, mediaId, session, res) {
     // Re-fetch session FIRST to get latest state (in case we just sent them back to collecting_photos)
     const latestSession = await getSession(phone);
 
-    // Check state AFTER re-fetching (not with stale passed-in session)
-    if (latestSession.state !== 'collecting_photos') {
-      await sendMessage(phone, "Send photos after describing your item.\n\nReply SELL to start.");
-      return res.status(200).json({ status: 'unexpected photo' });
+    // Check if already submitted - give helpful message
+    if (!latestSession || latestSession.state === 'submitted') {
+      console.log(`⏭️  Photo received after submission - directing to dashboard`);
+
+      const listing = latestSession.listing || {};
+      const designer = listing.designer || 'Your item';
+      const itemType = listing.item_type || '';
+
+      await sendMessage(phone,
+        `Your listing (${designer} ${itemType}) has been submitted! ✅\n\n` +
+        `To add this photo, please log into sell.thephirstory.com and edit your listing.`
+      );
+      return res.status(200).json({ status: 'already submitted' });
     }
 
-    // CRITICAL: Check if already submitted (race condition protection)
-    // User might have clicked SUBMIT while photos were still processing
-    if (!latestSession || latestSession.state === 'submitted') {
-      console.log(`⏭️  Skipping photo - listing already submitted`);
-      return res.status(200).json({ status: 'already submitted' });
+    // Check state AFTER re-fetching (not with stale passed-in session)
+    if (latestSession.state !== 'collecting_photos') {
+      console.log(`⏭️  Photo received during wrong state: ${latestSession.state}`);
+      await sendMessage(phone, "Thanks! I'll ask for photos when we're ready 📸");
+      return res.status(200).json({ status: 'photo queued for later' });
     }
 
     // Preserve freshest meta (processedMessages, created_at, etc.) from original session
