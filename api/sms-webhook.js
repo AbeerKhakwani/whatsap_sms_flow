@@ -918,12 +918,14 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
 
   // User says they're done sending photos
   if (userText === 'done' || userText === 'next' || userText === 'continue' || buttonId === 'done') {
-    const photoCount = (session.photos || []).filter(p => p.imageUrl).length;
-    console.log(`✅ User indicated done with photos. Count: ${photoCount}`);
+    // CRITICAL: Re-fetch session to get latest photos (photos were saved by separate webhook calls)
+    const freshSession = await getSession(phone);
+    const photoCount = (freshSession.photos || []).filter(p => p.imageUrl).length;
+    console.log(`✅ User indicated done with photos. Fresh fetch count: ${photoCount}`);
 
     // Move to additional details
-    session.state = 'awaiting_additional_details';
-    await saveSession(phone, session);
+    freshSession.state = 'awaiting_additional_details';
+    await saveSession(phone, freshSession);
 
     await sendButtons(phone,
       `Great! Got ${photoCount} photo${photoCount !== 1 ? 's' : ''} 📸\n\nAny flaws or special notes?`,
