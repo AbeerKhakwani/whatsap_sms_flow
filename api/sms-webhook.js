@@ -16,8 +16,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-// In-memory session store (will use Supabase later)
-const sessions = new Map();
+// Session store in Supabase (whatsapp_sessions table)
 
 export default async function handler(req, res) {
   // Webhook verification (GET)
@@ -44,7 +43,7 @@ export default async function handler(req, res) {
     }
 
     const phone = message.from;
-    const session = getSession(phone);
+    const session = await getSession(phone);
 
     // Get message content
     let text = '';
@@ -441,21 +440,58 @@ async function extractFields(text) {
   }
 }
 
-// ============ Session Management ============
+// ============ Session Management (Supabase) ============
 
-function getSession(phone) {
-  if (!sessions.has(phone)) {
-    sessions.set(phone, { state: 'welcome', listing: {}, photos: [] });
+async function getSession(phone) {
+  const { data } = await supabase
+    .from('whatsapp_sessions')
+    .select('*')
+    .eq('phone', phone)
+    .maybeSingle();
+
+  if (data) {
+    return {
+      state: data.state,
+      email: data.email,
+      listing: data.listing || {},
+      photos: data.photos || [],
+      earlyPhotos: data.early_photos || [],
+      currentField: data.current_field
+    };
   }
-  return sessions.get(phone);
+
+  // Create new session
+  return { state: 'welcome', listing: {}, photos: [] };
 }
 
-function saveSession(phone, session) {
-  sessions.set(phone, session);
+async function saveSession(phone, session) {
+  await supabase
+    .from('whatsapp_sessions')
+    .upsert({
+      phone,
+      state: session.state,
+      email: session.email || null,
+      listing: session.listing || {},
+      photos: session.photos || [],
+      early_photos: session.earlyPhotos || [],
+      current_field: session.currentField || null,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'phone' });
 }
 
-function resetSession(phone) {
-  sessions.set(phone, { state: 'welcome', listing: {}, photos: [] });
+async function resetSession(phone) {
+  await supabase
+    .from('whatsapp_sessions')
+    .upsert({
+      phone,
+      state: 'welcome',
+      email: null,
+      listing: {},
+      photos: [],
+      early_photos: [],
+      current_field: null,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'phone' });
 }
 
 // ============ WhatsApp API ============
