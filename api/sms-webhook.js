@@ -929,17 +929,18 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
 }
 
 async function handlePhoto(phone, mediaId, session, res) {
-  if (session.state !== 'collecting_photos') {
-    await sendMessage(phone, "Send photos after describing your item.\n\nReply SELL to start.");
-    return res.status(200).json({ status: 'unexpected photo' });
-  }
-
   try {
     // Small random delay to prevent concurrent updates from overwriting each other
     await new Promise(resolve => setTimeout(resolve, Math.random() * 300));
 
-    // Re-fetch session to get latest photo count
+    // Re-fetch session FIRST to get latest state (in case we just sent them back to collecting_photos)
     const latestSession = await getSession(phone);
+
+    // Check state AFTER re-fetching (not with stale passed-in session)
+    if (latestSession.state !== 'collecting_photos') {
+      await sendMessage(phone, "Send photos after describing your item.\n\nReply SELL to start.");
+      return res.status(200).json({ status: 'unexpected photo' });
+    }
 
     // CRITICAL: Check if already submitted (race condition protection)
     // User might have clicked SUBMIT while photos were still processing
