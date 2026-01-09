@@ -145,26 +145,51 @@ async function handleEmail(phone, text, session, res) {
     return res.status(200).json({ status: 'invalid email' });
   }
 
-  // Check if email is linked to different phone
+  // Check if email exists in database
   const { data: existingSeller } = await supabase
     .from('sellers')
-    .select('id, name, phone')
+    .select('id, name, email, phone')
     .ilike('email', email)
     .maybeSingle();
 
-  if (existingSeller?.phone && !phonesMatch(existingSeller.phone, phone)) {
-    await sendMessage(phone, "This email is linked to a different phone. Text from that phone or email admin@thephirstory.com");
-    return res.status(200).json({ status: 'email mismatch' });
+  let greeting;
+
+  if (existingSeller) {
+    // Email exists - check if phone matches
+    if (existingSeller.phone && !phonesMatch(existingSeller.phone, phone)) {
+      // Phone doesn't match - reject
+      await sendMessage(phone,
+        "This email is linked to a different phone number.\n\n" +
+        "Please text from that phone, or contact admin@thephirstory.com for help."
+      );
+      return res.status(200).json({ status: 'email mismatch' });
+    }
+
+    // Phone matches (or no phone on file) - welcome back
+    greeting = `Welcome back${existingSeller.name ? ', ' + existingSeller.name : ''}! ✓`;
+    session.sellerId = existingSeller.id;
+    session.sellerName = existingSeller.name;
+
+    // Update seller's phone if not set
+    if (!existingSeller.phone) {
+      await supabase
+        .from('sellers')
+        .update({ phone: phone })
+        .eq('id', existingSeller.id);
+    }
+  } else {
+    // New user - email doesn't exist in database
+    greeting = "Looks like you're new here! Welcome to The Phir Story ✨";
+    session.sellerId = null;
+    session.sellerName = null;
+    session.isNewSeller = true;
   }
 
   // Save email and move to description
   session.email = email;
-  session.sellerId = existingSeller?.id || null;
-  session.sellerName = existingSeller?.name || null;
   session.state = 'awaiting_description';
   await saveSession(phone, session);
 
-  const greeting = existingSeller ? `Welcome back${existingSeller.name ? ', ' + existingSeller.name : ''}! ✓` : 'Welcome! ✓';
   await sendMessage(phone,
     `${greeting}\n\n` +
     `Describe your item (text or voice):\n` +
@@ -174,7 +199,7 @@ async function handleEmail(phone, text, session, res) {
     `• Asking price\n\n` +
     `Example: "Sana Safinaz 3-piece, size M, like new, $80"`
   );
-  return res.status(200).json({ status: 'asked description' });
+  return res.status(200).json({ status: 'asked description', isNew: !existingSeller });
 }
 
 async function handleDescription(phone, text, session, res) {
