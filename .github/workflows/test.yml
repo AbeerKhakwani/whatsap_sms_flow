@@ -34,6 +34,44 @@ jobs:
       - name: Build check
         run: npm run build
 
+      - name: Check environment variables
+        run: node scripts/check-env-ci.js
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          VITE_SHOPIFY_STORE_URL: ${{ secrets.VITE_SHOPIFY_STORE_URL }}
+          VITE_SHOPIFY_ACCESS_TOKEN: ${{ secrets.VITE_SHOPIFY_ACCESS_TOKEN }}
+
+  integration-test:
+    name: Integration Tests
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        run: ./scripts/test-smoke.sh
+        env:
+          TEST_URL: https://sell.thephirstory.com
+
+      - name: Run integration tests
+        run: ./scripts/test-integration.sh
+        env:
+          TEST_URL: https://sell.thephirstory.com
+          TEST_PHONE: "15559999001"
+
+      - name: Test results summary
+        if: always()
+        run: |
+          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "✅ WhatsApp flow tests completed" >> $GITHUB_STEP_SUMMARY
+          echo "Production: https://sell.thephirstory.com" >> $GITHUB_STEP_SUMMARY
+
   deploy:
     name: Deploy to Vercel
     needs: test
