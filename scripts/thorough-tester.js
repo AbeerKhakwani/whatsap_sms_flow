@@ -12,7 +12,7 @@
 import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const API_URL = process.env.API_URL || 'https://phirstory-dashboard.vercel.app';
+const API_URL = process.env.API_URL || 'https://tps-portal.vercel.app';
 
 const args = process.argv.slice(2).reduce((acc, arg) => {
   const [key, val] = arg.replace('--', '').split('=');

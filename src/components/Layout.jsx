@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, DollarSign, Settings, Send, LogOut, Upload, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -14,7 +14,7 @@ export default function Layout({ children }) {
     const token = localStorage.getItem('admin_token');
 
     if (!token) {
-      navigate('/login');
+      navigate('/admin');
       return;
     }
 
@@ -45,28 +45,25 @@ export default function Layout({ children }) {
         // Token invalid
         localStorage.removeItem('admin_token');
         localStorage.removeItem('admin_email');
-        navigate('/login');
+        navigate('/admin');
       }
     } catch (err) {
       console.error('Auth error:', err);
-      navigate('/login');
+      navigate('/admin');
     }
   }
 
   const navigation = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Listings', path: '/listings', icon: Package },
-    { name: 'Sellers', path: '/sellers', icon: Users },
-    { name: 'Transactions', path: '/transactions', icon: DollarSign },
-    { name: 'Import', path: '/import', icon: Upload },
-    { name: 'Test SMS', path: '/test-sms', icon: Send },
-    { name: 'Settings', path: '/settings', icon: Settings },
+    { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
+    { name: 'Sellers', path: '/admin/sellers', icon: Users },
+    { name: 'Transactions', path: '/admin/transactions', icon: DollarSign },
+    { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 
   function handleLogout() {
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_email');
-    navigate('/login');
+    navigate('/admin');
   }
 
   // Show loading while verifying
@@ -79,15 +76,15 @@ export default function Layout({ children }) {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-stone-50">
       {/* Sidebar */}
-      <div className="w-64 bg-gradient-to-b from-primary-500 to-primary-600 text-white flex flex-col">
-        <div className="p-6 border-b border-primary-400">
-          <h1 className="text-2xl font-bold">The Phir Story</h1>
-          <p className="text-sm text-primary-100 mt-1">Admin Dashboard</p>
+      <div className="w-64 bg-stone-100 border-r border-stone-200 flex flex-col">
+        <div className="p-5 border-b border-stone-200">
+          <img src="/logo.svg" alt="The Phir Story" className="h-12" />
+          <p className="text-[10px] text-stone-400 mt-2 uppercase tracking-widest font-medium">Admin Dashboard</p>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 p-3 space-y-1">
           {navigation.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -95,34 +92,34 @@ export default function Layout({ children }) {
                 key={item.path}
                 to={item.path}
                 className={`
-                  flex items-center gap-3 px-4 py-3 rounded-lg transition-all
+                  flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all text-sm
                   ${isActive
-                    ? 'bg-primary-50 text-primary-700 border-l-4 border-primary-700'
-                    : 'text-white hover:bg-primary-400/50'
+                    ? 'bg-stone-800 text-white font-medium'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
                   }
                 `}
               >
-                <item.icon className="w-5 h-5" />
-                <span className="font-medium">{item.name}</span>
+                <item.icon className="w-4 h-4" />
+                <span>{item.name}</span>
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-primary-400">
+        <div className="p-3 border-t border-stone-200">
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-2 w-full text-left text-primary-100 hover:text-white transition"
+            className="flex items-center gap-3 px-4 py-2 w-full text-left text-stone-400 hover:text-stone-700 transition text-sm"
           >
-            <LogOut className="w-5 h-5" />
-            <span className="font-medium">Sign Out</span>
+            <LogOut className="w-4 h-4" />
+            <span>Sign Out</span>
           </button>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto">
-        <div className="p-8">
+        <div className="p-6">
           {children}
         </div>
       </div>

@@ -1,0 +1,254 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "OUTFIT": ["PRICE"],
+    "PRICE": ["DETAILS"],
+    "DETAILS": ["REVIEW"]
+  },
+  "screens": [
+    {
+      "id": "OUTFIT",
+      "title": "About Your Outfit",
+      "terminal": false,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextInput",
+            "name": "brand",
+            "label": "Brand",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Sana Safinaz, Maria B, Khaadi"
+          },
+          {
+            "type": "Dropdown",
+            "name": "pieces",
+            "label": "Pieces",
+            "required": true,
+            "data-source": [
+              {"id": "1-piece", "title": "1-piece (Kurta)"},
+              {"id": "2-piece", "title": "2-piece"},
+              {"id": "3-piece", "title": "3-piece"},
+              {"id": "Lehnga", "title": "Lehnga Set"},
+              {"id": "Saree", "title": "Saree"},
+              {"id": "Other", "title": "Other"}
+            ]
+          },
+          {
+            "type": "Dropdown",
+            "name": "size",
+            "label": "Size",
+            "required": true,
+            "data-source": [
+              {"id": "XS", "title": "XS"},
+              {"id": "S", "title": "S"},
+              {"id": "M", "title": "M"},
+              {"id": "L", "title": "L"},
+              {"id": "XL", "title": "XL"},
+              {"id": "Unstitched", "title": "Unstitched"}
+            ]
+          },
+          {
+            "type": "Footer",
+            "label": "Continue",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {"type": "screen", "name": "PRICE"},
+              "payload": {
+                "brand": "${form.brand}",
+                "pieces": "${form.pieces}",
+                "size": "${form.size}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "PRICE",
+      "title": "Condition & Price",
+      "terminal": false,
+      "data": {
+        "brand": {"type": "string", "__example__": "Sana Safinaz"},
+        "pieces": {"type": "string", "__example__": "3-piece"},
+        "size": {"type": "string", "__example__": "M"}
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Dropdown",
+            "name": "condition",
+            "label": "Condition",
+            "required": true,
+            "data-source": [
+              {"id": "New with tags", "title": "New with tags"},
+              {"id": "Like new", "title": "Like new"},
+              {"id": "Excellent", "title": "Excellent"},
+              {"id": "Good", "title": "Good"}
+            ]
+          },
+          {
+            "type": "TextInput",
+            "name": "price",
+            "label": "Price",
+            "input-type": "text",
+            "required": true,
+            "helper-text": "Your asking price in $"
+          },
+          {
+            "type": "TextInput",
+            "name": "paid",
+            "label": "Paid (optional)",
+            "input-type": "text",
+            "required": false,
+            "helper-text": "What you originally paid"
+          },
+          {
+            "type": "Footer",
+            "label": "Continue",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {"type": "screen", "name": "DETAILS"},
+              "payload": {
+                "brand": "${data.brand}",
+                "pieces": "${data.pieces}",
+                "size": "${data.size}",
+                "condition": "${form.condition}",
+                "price": "${form.price}",
+                "paid": "${form.paid}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "DETAILS",
+      "title": "Details",
+      "terminal": false,
+      "data": {
+        "brand": {"type": "string", "__example__": "Sana Safinaz"},
+        "pieces": {"type": "string", "__example__": "3-piece"},
+        "size": {"type": "string", "__example__": "M"},
+        "condition": {"type": "string", "__example__": "Like new"},
+        "price": {"type": "string", "__example__": "95"},
+        "paid": {"type": "string", "__example__": "200"}
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextInput",
+            "name": "color",
+            "label": "Color",
+            "input-type": "text",
+            "required": false,
+            "helper-text": "Maroon with gold embroidery"
+          },
+          {
+            "type": "TextInput",
+            "name": "fabric",
+            "label": "Fabric",
+            "input-type": "text",
+            "required": false,
+            "helper-text": "Chiffon, Silk, Lawn"
+          },
+          {
+            "type": "TextArea",
+            "name": "notes",
+            "label": "Notes",
+            "required": false,
+            "helper-text": "Any flaws or extras included"
+          },
+          {
+            "type": "Footer",
+            "label": "Review",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {"type": "screen", "name": "REVIEW"},
+              "payload": {
+                "brand": "${data.brand}",
+                "pieces": "${data.pieces}",
+                "size": "${data.size}",
+                "condition": "${data.condition}",
+                "price": "${data.price}",
+                "paid": "${data.paid}",
+                "color": "${form.color}",
+                "fabric": "${form.fabric}",
+                "notes": "${form.notes}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "REVIEW",
+      "title": "Review",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "brand": {"type": "string", "__example__": "Sana Safinaz"},
+        "pieces": {"type": "string", "__example__": "3-piece"},
+        "size": {"type": "string", "__example__": "M"},
+        "condition": {"type": "string", "__example__": "Like new"},
+        "price": {"type": "string", "__example__": "95"},
+        "paid": {"type": "string", "__example__": "200"},
+        "color": {"type": "string", "__example__": "Maroon"},
+        "fabric": {"type": "string", "__example__": "Chiffon"},
+        "notes": {"type": "string", "__example__": ""}
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Your Listing"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.brand}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.pieces}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.size}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.condition}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.price}"
+          },
+          {
+            "type": "Footer",
+            "label": "Submit Listing",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "brand": "${data.brand}",
+                "pieces": "${data.pieces}",
+                "size": "${data.size}",
+                "condition": "${data.condition}",
+                "price": "${data.price}",
+                "paid": "${data.paid}",
+                "color": "${data.color}",
+                "fabric": "${data.fabric}",
+                "notes": "${data.notes}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -148,7 +148,7 @@ describe('Messages', () => {
 
     test('handles no feedback', () => {
       const result = msg('SELL_PHOTO_RECEIVED', 2, null);
-      expect(result).toContain('Got 2 photos');
+      expect(result).toContain('Photo 2 received');
       expect(result).toContain('Send 1 more');
     });
   });

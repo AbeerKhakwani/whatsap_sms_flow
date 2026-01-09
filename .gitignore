@@ -12,6 +12,7 @@ dist-ssr
 
 # Environment
 .env
+.env.*
 .env.local
 .env.production
 
@@ -27,3 +28,7 @@ dist-ssr
 Thumbs.db
 .vercel
 .env*.local
+
+# Secrets and sensitive data
+config/keys/*.pem
+scripts/*-import.csv

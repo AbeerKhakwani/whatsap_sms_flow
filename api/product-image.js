@@ -31,7 +31,8 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         success: true,
-        imageId: image?.id
+        imageId: image?.id,
+        imageUrl: image?.src
       });
     }
 

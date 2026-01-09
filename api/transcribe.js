@@ -1,11 +1,21 @@
 // api/transcribe.js
 // Transcribe audio using OpenAI Whisper API
+// Optimized for Pakistani designer clothing descriptions
 
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
+
+// Context prompt to help Whisper understand Pakistani fashion terminology
+const PAKISTANI_FASHION_PROMPT = `This is a description of Pakistani designer clothing for resale.
+Common terms: kurta, kameez, shalwar, dupatta, gharara, sharara, lehenga, anarkali, peshwas, angrakha, choli.
+Pakistani designers: Sana Safinaz, Maria B, Khaadi, Gul Ahmed, Asim Jofa, Zara Shahjahan, Faraz Manan,
+Elan, Sobia Nazir, Baroque, Mushq, Afrozeh, Crimson, Cross Stitch, Saira Shakira, Ammara Khan,
+Misha Lakhani, Ali Xeeshan, HSY, Deepak Perwani, Nomi Ansari, Tena Durrani, Shehla Chatoor.
+Fabrics: lawn, chiffon, organza, silk, cotton, net, velvet, jamawar, karandi, khaddar, linen.
+Embroidery: thread work, mirror work, sequins, dabka, zardozi, gota, resham.`;
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -28,6 +38,8 @@ export default async function handler(req, res) {
         const transcription = await openai.audio.transcriptions.create({
             file: audioFile,
             model: 'whisper-1',
+            prompt: PAKISTANI_FASHION_PROMPT,
+            language: 'en' // Primarily English with Urdu/Pakistani terms
         });
 
         return res.status(200).json({

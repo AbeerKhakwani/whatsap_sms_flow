@@ -1,12 +1,15 @@
 // api/admin-auth.js
-// Admin authentication with bcrypt password and JWT tokens
+// Admin authentication with email verification code
 
 import {
-  verifyAdminPassword,
+  generateCode,
+  storeVerificationCode,
+  verifyCode,
   generateAdminToken,
   verifyToken,
   isAdminEmail
 } from '../lib/auth-utils.js';
+import { sendVerificationCode } from '../lib/email.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -24,29 +27,66 @@ export default async function handler(req, res) {
   const { action } = req.body;
 
   try {
-    // LOGIN - Verify password and return token
-    if (action === 'login') {
-      const { password, email } = req.body;
+    // SEND-CODE - Send verification code to admin email
+    if (action === 'send-code') {
+      const { email } = req.body;
 
-      if (!password) {
-        return res.status(400).json({ error: 'Password required' });
+      if (!email) {
+        return res.status(400).json({ error: 'Email required' });
       }
 
-      // Optionally check if email is in admin list
-      if (email && !isAdminEmail(email)) {
+      // Check if email is in admin list
+      if (!isAdminEmail(email)) {
         return res.status(401).json({ error: 'Not authorized' });
       }
 
-      const valid = await verifyAdminPassword(password);
-      if (!valid) {
-        return res.status(401).json({ error: 'Invalid password' });
+      const code = generateCode();
+
+      // Store code
+      const stored = await storeVerificationCode(email, code, 'email');
+      if (!stored) {
+        return res.status(500).json({ error: 'Failed to generate code' });
       }
 
-      const token = generateAdminToken(email || 'admin');
+      // Send code via email
+      const sent = await sendVerificationCode(email, code);
+      if (!sent?.success) {
+        console.error('Email send failed:', sent?.error);
+        return res.status(500).json({ error: 'Failed to send email' });
+      }
 
       return res.status(200).json({
         success: true,
-        token
+        message: 'Code sent to your email'
+      });
+    }
+
+    // VERIFY-CODE - Verify code and return token
+    if (action === 'verify-code') {
+      const { email, code } = req.body;
+
+      if (!email || !code) {
+        return res.status(400).json({ error: 'Email and code required' });
+      }
+
+      // Check if email is in admin list
+      if (!isAdminEmail(email)) {
+        return res.status(401).json({ error: 'Not authorized' });
+      }
+
+      // Verify the code
+      const result = await verifyCode(email, code);
+      if (!result.valid) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Generate token
+      const token = generateAdminToken(email);
+
+      return res.status(200).json({
+        success: true,
+        token,
+        admin: { email }
       });
     }
 
@@ -69,27 +109,6 @@ export default async function handler(req, res) {
         admin: {
           email: decoded.email
         }
-      });
-    }
-
-    // Legacy: no action = password check (backward compatibility)
-    if (!action) {
-      const { password } = req.body;
-
-      if (!password) {
-        return res.status(400).json({ error: 'Password required' });
-      }
-
-      const valid = await verifyAdminPassword(password);
-      if (!valid) {
-        return res.status(401).json({ error: 'Invalid password' });
-      }
-
-      const token = generateAdminToken('admin');
-
-      return res.status(200).json({
-        success: true,
-        token
       });
     }
 

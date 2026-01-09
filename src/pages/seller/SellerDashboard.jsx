@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2 } from 'lucide-react';
+import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User } from 'lucide-react';
+import { getThumbnail } from '../../utils/image';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -19,6 +20,7 @@ export default function SellerDashboard() {
   const [newPhotos, setNewPhotos] = useState([]);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
+  const [togglingStatus, setTogglingStatus] = useState(null); // productId being toggled
   const photoInputRef = useRef(null);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function SellerDashboard() {
 
     // If no token, redirect to login
     if (!token) {
-      navigate('/seller/login');
+      navigate('/login');
       return;
     }
 
@@ -53,7 +55,7 @@ export default function SellerDashboard() {
         // Token invalid - redirect to login
         localStorage.removeItem('seller_token');
         localStorage.removeItem('seller_email');
-        navigate('/seller/login');
+        navigate('/login');
         return;
       }
 
@@ -66,7 +68,7 @@ export default function SellerDashboard() {
       fetchListings(sellerEmail);
     } catch (error) {
       console.error('Auth error:', error);
-      navigate('/seller/login');
+      navigate('/login');
     }
   }
 
@@ -91,7 +93,7 @@ export default function SellerDashboard() {
   function handleLogout() {
     localStorage.removeItem('seller_token');
     localStorage.removeItem('seller_email');
-    navigate('/seller/login');
+    navigate('/login');
   }
 
   function openEditModal(listing) {
@@ -230,11 +232,61 @@ export default function SellerDashboard() {
     }
   }
 
+  async function toggleListingStatus(listing) {
+    const isDelisted = listing.tags?.includes('delisted');
+    const action = isDelisted ? 'relist' : 'delist';
+    setTogglingStatus(listing.id);
+
+    try {
+      const response = await fetch(`/api/seller?action=${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, productId: listing.id })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Update local state - update status and tags
+        setListings(prev =>
+          prev.map(l => {
+            if (l.id !== listing.id) return l;
+            const newTags = action === 'delist'
+              ? [...(l.tags || []), 'delisted']
+              : (l.tags || []).filter(t => t !== 'delisted');
+            return { ...l, status: data.status, tags: newTags };
+          })
+        );
+
+        // Update stats
+        if (action === 'delist') {
+          setStats(prev => ({ ...prev, active: prev.active - 1, draft: prev.draft + 1 }));
+        } else {
+          setStats(prev => ({ ...prev, active: prev.active + 1, draft: prev.draft - 1 }));
+        }
+      } else {
+        alert(`Failed to ${action}: ` + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      alert(`Failed to ${action}: ` + error.message);
+    } finally {
+      setTogglingStatus(null);
+    }
+  }
+
   function getStatusBadge(listing) {
     if (listing.isSold) {
       return (
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
           Sold
+        </span>
+      );
+    }
+    // Check if delisted (has delisted tag)
+    if (listing.tags?.includes('delisted')) {
+      return (
+        <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+          Delisted
         </span>
       );
     }
@@ -257,16 +309,25 @@ export default function SellerDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="w-full h-full object-cover"
+        >
+          <source src="/loading.mov" type="video/quicktime" />
+          <source src="/loading.mov" type="video/mp4" />
+        </video>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+    <div className="min-h-screen bg-gray-50 pb-20 md:pb-0">
+      {/* Header - Desktop */}
+      <header className="bg-white border-b border-gray-200 hidden md:block">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="The Phir Story" className="h-8" />
@@ -274,7 +335,7 @@ export default function SellerDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <Link
-              to="/seller/submit"
+              to="/submit"
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"
             >
               <Plus className="w-4 h-4" />
@@ -291,6 +352,37 @@ export default function SellerDashboard() {
           </div>
         </div>
       </header>
+
+      {/* Header - Mobile */}
+      <header className="bg-white border-b border-gray-200 md:hidden sticky top-0 z-40">
+        <div className="px-4 py-3 flex items-center justify-center">
+          <img src="/logo.svg" alt="The Phir Story" className="h-7" />
+        </div>
+      </header>
+
+      {/* Bottom Nav - Mobile */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 safe-area-pb">
+        <div className="flex items-center justify-around py-2">
+          <Link to="/" className="flex flex-col items-center py-2 px-4 text-[#C91A2B]">
+            <Home className="w-6 h-6" />
+            <span className="text-xs mt-1 font-medium">Home</span>
+          </Link>
+          <Link
+            to="/submit"
+            className="flex flex-col items-center py-2 px-6 -mt-4 bg-[#C91A2B] text-white rounded-full shadow-lg"
+          >
+            <Plus className="w-7 h-7" />
+            <span className="text-xs mt-0.5 font-medium">Sell</span>
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="flex flex-col items-center py-2 px-4 text-gray-500"
+          >
+            <LogOut className="w-6 h-6" />
+            <span className="text-xs mt-1">Logout</span>
+          </button>
+        </div>
+      </nav>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
         {/* Earnings Banner */}
@@ -374,7 +466,7 @@ export default function SellerDashboard() {
               <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
               <p className="text-gray-500 mb-4">No listings yet</p>
               <Link
-                to="/seller/submit"
+                to="/submit"
                 className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
               >
                 Submit your first listing
@@ -389,9 +481,10 @@ export default function SellerDashboard() {
                   <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
                     {listing.image ? (
                       <img
-                        src={listing.image}
+                        src={getThumbnail(listing.image)}
                         alt={listing.title}
                         className="w-full h-full object-cover"
+                        loading="lazy"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-400">
@@ -441,22 +534,75 @@ export default function SellerDashboard() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => openEditModal(listing)}
-                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-                      title="Edit"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <a
-                      href={listing.shopify_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-                      title="View in Shopify"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
+                    {/* Edit button - not for sold items */}
+                    {!listing.isSold && (
+                      <button
+                        onClick={() => openEditModal(listing)}
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                        title="Edit"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    )}
+                    {/* Delist button - only for active (live) items */}
+                    {!listing.isSold && listing.status === 'active' && !listing.tags?.includes('delisted') && (
+                      <div className="relative group">
+                        <button
+                          onClick={() => toggleListingStatus(listing)}
+                          disabled={togglingStatus === listing.id}
+                          className={`p-2 rounded-lg transition text-gray-400 hover:text-red-600 hover:bg-red-50 ${
+                            togglingStatus === listing.id ? 'opacity-50' : ''
+                          }`}
+                        >
+                          {togglingStatus === listing.id ? (
+                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <XCircle className="w-4 h-4" />
+                          )}
+                        </button>
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-10">
+                          <div className="font-medium">Delist Item</div>
+                          <div className="text-gray-300 mt-0.5">Remove from store temporarily.</div>
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Relist button - for delisted items, goes to pending review */}
+                    {!listing.isSold && listing.tags?.includes('delisted') && (
+                      <div className="relative group">
+                        <button
+                          onClick={() => toggleListingStatus(listing)}
+                          disabled={togglingStatus === listing.id}
+                          className={`p-2 rounded-lg transition text-gray-400 hover:text-green-600 hover:bg-green-50 ${
+                            togglingStatus === listing.id ? 'opacity-50' : ''
+                          }`}
+                        >
+                          {togglingStatus === listing.id ? (
+                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <RotateCcw className="w-4 h-4" />
+                          )}
+                        </button>
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-10">
+                          <div className="font-medium">Relist Item</div>
+                          <div className="text-gray-300 mt-0.5">Submit for review to go live again.</div>
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                        </div>
+                      </div>
+                    )}
+                    {listing.status === 'active' && listing.handle && (
+                      <a
+                        href={`https://thephirstory.com/products/${listing.handle}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
+                        title="View on store"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}
@@ -479,18 +625,35 @@ export default function SellerDashboard() {
                     <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
                       {item.brand && <span>{item.brand}</span>}
                       <span>Sold for ${item.retailPrice}</span>
-                      <span className="text-green-600">You earned ${item.earnings?.toFixed(0)}</span>
+                      <span className="text-green-600 font-medium">You earned ${item.earnings?.toFixed(0)}</span>
                     </div>
+                    {/* Show payment note under the item */}
+                    {item.status === 'SOLD_WITH_PAYOUT' && item.paymentNote && (
+                      <p className="text-xs text-green-600 mt-2">
+                        {item.paymentNote}
+                      </p>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                      item.status === 'SOLD_WITH_PAYOUT'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-amber-100 text-amber-800'
-                    }`}>
-                      {item.status === 'SOLD_WITH_PAYOUT' ? 'Paid' : 'Pending'}
+                  <div className="text-right flex flex-col items-end gap-1">
+                    {/* Always show Sold tag */}
+                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      Sold
                     </span>
-                    <p className="text-xs text-gray-400 mt-1">Your share: {item.splitPercent}%</p>
+                    {/* Show Paid Out or Pending Payout tag */}
+                    {item.status === 'SOLD_WITH_PAYOUT' ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        Paid Out
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                        Pending Payout
+                      </span>
+                    )}
+                    {item.status === 'SOLD_WITH_PAYOUT' && item.paidAt && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(item.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}

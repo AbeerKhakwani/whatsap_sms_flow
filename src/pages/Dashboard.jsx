@@ -1,39 +1,76 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote } from 'lucide-react';
+import { getThumbnail } from '../utils/image';
 
 export default function Dashboard() {
   const [listings, setListings] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+  const [totalPending, setTotalPending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
   const [approving, setApproving] = useState(null);
+  const [markingPaid, setMarkingPaid] = useState(null);
   const [stats, setStats] = useState({ pending: 0, approved: 0, sold: 0 });
 
   useEffect(() => {
-    fetchListings();
+    fetchData();
   }, []);
 
-  async function fetchListings() {
+  async function fetchData() {
     setLoading(true);
     try {
-      const response = await fetch('/api/get-pending-listings');
+      // Fetch both in parallel for speed
+      const [listingsRes, payoutsRes] = await Promise.all([
+        fetch('/api/admin-listings?action=pending'),
+        fetch('/api/admin-listings?action=payouts')
+      ]);
+
+      const listingsData = await listingsRes.json();
+      const payoutsData = await payoutsRes.json();
+
+      if (listingsData.success) {
+        setListings(listingsData.listings || []);
+        setStats(listingsData.stats || { pending: 0, approved: 0, sold: 0 });
+      }
+
+      if (payoutsData.success) {
+        setPayouts(payoutsData.payouts || []);
+        setTotalPending(payoutsData.totalPending || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+    setLoading(false);
+  }
+
+  async function markAsPaid(payout) {
+    setMarkingPaid(payout.id);
+    try {
+      const response = await fetch('/api/admin-listings?action=mark-paid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: payout.id })
+      });
+
       const data = await response.json();
 
       if (data.success) {
-        setListings(data.listings || []);
-        setStats(data.stats || { pending: 0, approved: 0, sold: 0 });
+        setPayouts(prev => prev.filter(p => p.id !== payout.id));
+        setTotalPending(prev => prev - (payout.seller_payout || 0));
+        setStats(prev => ({ ...prev, sold: prev.sold }));
       } else {
-        console.error('Error fetching listings:', data.error);
+        alert(`Error: ${data.error || 'Failed to mark as paid'}`);
       }
     } catch (error) {
-      console.error('Error fetching listings:', error);
+      alert(`Error: ${error.message}`);
     }
-    setLoading(false);
+    setMarkingPaid(null);
   }
 
   async function approveListing(listing) {
     setApproving(listing.id);
     try {
-      const response = await fetch('/api/approve-listing', {
+      const response = await fetch('/api/admin-listings?action=approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shopifyProductId: listing.shopify_product_id })
@@ -59,7 +96,7 @@ export default function Dashboard() {
 
     setApproving(listing.id);
     try {
-      const response = await fetch('/api/reject-listing', {
+      const response = await fetch('/api/admin-listings?action=reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shopifyProductId: listing.shopify_product_id })
@@ -87,51 +124,126 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-6 h-6 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-500 text-sm">Overview of listings and payouts</p>
+      </div>
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-yellow-500 to-orange-500 rounded-xl p-6 text-white shadow-lg">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-yellow-100 text-sm">Pending Approval</p>
-              <p className="text-3xl font-bold">{stats.pending}</p>
+              <p className="text-gray-500 text-xs uppercase tracking-wide">Pending</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.pending}</p>
             </div>
-            <Clock className="w-10 h-10 text-yellow-200" />
+            <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+              <Clock className="w-5 h-5 text-amber-600" />
+            </div>
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl p-6 text-white shadow-lg">
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-green-100 text-sm">Live on Shopify</p>
-              <p className="text-3xl font-bold">{stats.approved}</p>
+              <p className="text-gray-500 text-xs uppercase tracking-wide">Live</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.approved}</p>
             </div>
-            <Check className="w-10 h-10 text-green-200" />
+            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+              <Check className="w-5 h-5 text-green-600" />
+            </div>
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl p-6 text-white shadow-lg">
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-primary-100 text-sm">Sold</p>
-              <p className="text-3xl font-bold">{stats.sold}</p>
+              <p className="text-gray-500 text-xs uppercase tracking-wide">Sold</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.sold}</p>
             </div>
-            <DollarSign className="w-10 h-10 text-primary-200" />
+            <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+              <DollarSign className="w-5 h-5 text-gray-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-black rounded-xl p-5 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-400 text-xs uppercase tracking-wide">Payouts Due</p>
+              <p className="text-2xl font-bold mt-1">${totalPending.toFixed(0)}</p>
+            </div>
+            <Banknote className="w-8 h-8 text-gray-500" />
           </div>
         </div>
       </div>
 
+      {/* Pending Payouts Section */}
+      {payouts.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+              <Banknote className="w-4 h-4" />
+              Pending Payouts
+            </h2>
+            <span className="text-sm text-gray-500">{payouts.length} items · ${totalPending.toFixed(0)}</span>
+          </div>
+
+          <div className="divide-y divide-gray-100">
+            {payouts.map((payout) => (
+              <div key={payout.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900">{payout.product_title}</span>
+                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                      ${payout.sale_price?.toFixed(0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
+                    <span>{payout.seller?.name || payout.seller?.email || 'Unknown'}</span>
+                    <span>·</span>
+                    <span className="font-medium text-gray-900">${payout.seller_payout?.toFixed(0)} payout</span>
+                    <span>·</span>
+                    <span>{payout.order_name}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => markAsPaid(payout)}
+                  disabled={markingPaid === payout.id}
+                  className="ml-4 bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {markingPaid === payout.id ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Processing
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3 h-3" />
+                      Mark Paid
+                    </>
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Pending Listings */}
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="bg-gradient-to-r from-primary-600 to-primary-700 px-6 py-4">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <Clock className="w-5 h-5" />
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <Clock className="w-4 h-4" />
             Pending Approval ({listings.length})
           </h2>
         </div>
@@ -155,9 +267,10 @@ export default function Dashboard() {
                   <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
                     {listing.images && listing.images.length > 0 ? (
                       <img
-                        src={listing.images[0]}
+                        src={getThumbnail(listing.images[0])}
                         alt={listing.product_name}
                         className="w-full h-full object-cover"
+                        loading="lazy"
                         onError={(e) => e.target.src = 'https://via.placeholder.com/64?text=No+Image'}
                       />
                     ) : (
@@ -219,9 +332,10 @@ export default function Dashboard() {
                             className="aspect-square rounded-lg overflow-hidden bg-gray-200 hover:opacity-90 transition-opacity"
                           >
                             <img
-                              src={url}
+                              src={getThumbnail(url)}
                               alt={`Photo ${idx + 1}`}
                               className="w-full h-full object-cover"
+                              loading="lazy"
                               onError={(e) => e.target.src = 'https://via.placeholder.com/200?text=Error'}
                             />
                           </a>

@@ -9,7 +9,7 @@
  *   node scripts/e2e-test.js --phone=1234   # Use specific test phone
  */
 
-const API_URL = process.env.API_URL || 'https://phirstory-dashboard.vercel.app';
+const API_URL = process.env.API_URL || 'https://tps-portal.vercel.app';
 
 // Parse args
 const args = process.argv.slice(2).reduce((acc, arg) => {

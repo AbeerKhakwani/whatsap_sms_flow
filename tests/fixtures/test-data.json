@@ -1,0 +1,80 @@
+{
+  "validListing": {
+    "designer": "Sana Safinaz",
+    "pieces": "3-piece",
+    "style": "Formal",
+    "size": "M",
+    "condition": "Like new",
+    "asking_price": "95",
+    "color": "Maroon with gold embroidery",
+    "material": "Chiffon",
+    "original_price": "250",
+    "additional_details": "Worn once for a wedding, excellent condition"
+  },
+  "invalidListing": {
+    "designer": "",
+    "pieces": "INVALID",
+    "style": "Formal",
+    "size": "INVALID_SIZE",
+    "condition": "Like new",
+    "asking_price": "-10"
+  },
+  "whatsappMessages": {
+    "textMessage": {
+      "entry": [{
+        "changes": [{
+          "value": {
+            "messages": [{
+              "from": "15034423865",
+              "id": "wamid.test123",
+              "timestamp": 1234567890,
+              "type": "text",
+              "text": { "body": "Test message" }
+            }]
+          }
+        }]
+      }]
+    },
+    "imageMessage": {
+      "entry": [{
+        "changes": [{
+          "value": {
+            "messages": [{
+              "from": "15034423865",
+              "id": "wamid.test_image",
+              "timestamp": 1234567890,
+              "type": "image",
+              "image": {
+                "id": "test_image_id",
+                "mime_type": "image/jpeg",
+                "caption": "Front view"
+              }
+            }]
+          }
+        }]
+      }]
+    },
+    "flowCompletion": {
+      "entry": [{
+        "changes": [{
+          "value": {
+            "messages": [{
+              "from": "15034423865",
+              "id": "wamid.flow_complete",
+              "timestamp": 1234567890,
+              "type": "interactive",
+              "interactive": {
+                "type": "nfm_reply",
+                "nfm_reply": {
+                  "name": "flow",
+                  "body": "{\"designer\":\"Sana Safinaz\",\"pieces\":\"3-piece\",\"style\":\"Formal\",\"size\":\"M\",\"condition\":\"Like new\",\"asking_price\":\"95\"}",
+                  "response_json": "{\"designer\":\"Sana Safinaz\",\"pieces\":\"3-piece\",\"style\":\"Formal\",\"size\":\"M\",\"condition\":\"Like new\",\"asking_price\":\"95\"}"
+                }
+              }
+            }]
+          }
+        }]
+      }]
+    }
+  }
+}

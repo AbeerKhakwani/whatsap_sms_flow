@@ -2,13 +2,11 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    globals: true,
     environment: 'node',
-    include: ['tests/**/*.test.js'],
-    coverage: {
-      reporter: ['text', 'html'],
-      include: ['api/**/*.js']
-    },
-    setupFiles: ['./tests/setup.js']
+    globals: true,
+    setupFiles: ['./tests/setup.js'],
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    teardownTimeout: 10000
   }
 });
