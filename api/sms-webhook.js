@@ -95,8 +95,8 @@ export default async function handler(req, res) {
     const text = message.text?.body?.toLowerCase()?.trim() || '';
     console.log(`📱 From ${phone}: "${text}"`);
 
-    // "sell" → send Flow form
-    if (text === 'sell') {
+    // "sell" or "yes" → send Flow form
+    if (text === 'sell' || text === 'yes') {
       await sendFlow(phone);
       return res.status(200).json({ status: 'flow sent' });
     }
