@@ -65,8 +65,12 @@ export default async function handler(req, res) {
     const challenge = req.query['hub.challenge'];
 
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('✅ Webhook verified');
+      console.log('✅ Webhook verified - v2.0 deployed');
       return res.status(200).send(challenge);
+    }
+    // Version check endpoint
+    if (req.query.version === 'check') {
+      return res.status(200).json({ version: '2.0', updated: '2026-01-09 12:15 PM' });
     }
     return res.status(403).json({ error: 'Verification failed' });
   }
