@@ -149,7 +149,8 @@ export default async function handler(req, res) {
     if (message.type === 'text') {
       text = message.text?.body?.trim() || '';
     } else if (message.type === 'interactive') {
-      buttonId = message.interactive?.button_reply?.id;
+      // Handle both button replies and list replies
+      buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
       text = buttonId || '';
     } else if (message.type === 'audio') {
       // Transcribe voice
@@ -410,15 +411,15 @@ async function askForField(phone, field) {
     },
     pieces_included: {
       text: "What type of outfit?",
-      buttons: DROPDOWN_OPTIONS.pieces_included.map(o => ({ id: o.value, title: o.label })).filter(b => b.id)
+      list: DROPDOWN_OPTIONS.pieces_included.filter(o => o.value).slice(0, 10)
     },
     size: {
       text: "What size?",
-      buttons: DROPDOWN_OPTIONS.size.map(o => ({ id: o.value, title: o.label })).filter(b => b.id)
+      list: DROPDOWN_OPTIONS.size.filter(o => o.value).slice(0, 10)
     },
     condition: {
       text: "What condition?",
-      buttons: DROPDOWN_OPTIONS.condition.map(o => ({ id: o.value, title: o.label })).filter(b => b.id)
+      list: DROPDOWN_OPTIONS.condition.filter(o => o.value).slice(0, 10)
     },
     asking_price_usd: {
       text: "What price are you asking? (in USD)",
@@ -432,8 +433,9 @@ async function askForField(phone, field) {
     return;
   }
 
-  if (q.buttons) {
-    await sendButtons(phone, q.text + "\n\nOr type your answer", q.buttons.slice(0, 3));
+  if (q.list) {
+    // Use List Message for cleaner UI (like templates)
+    await sendListMessage(phone, q.text + "\n\nOr type your answer", q.list, field);
   } else {
     await sendMessage(phone, q.text + (q.note ? `\n${q.note}` : ''));
   }
@@ -474,16 +476,25 @@ async function handlePhoto(phone, mediaId, session, res) {
 
     session.photos = session.photos || [];
     session.photos.push({ base64, mediaId });
-    await saveSession(phone, session);
 
     const count = session.photos.length;
+
+    // Prevent race condition - only save and respond once per photo
+    await saveSession(phone, session);
     console.log(`📸 Photo ${count} saved`);
 
-    if (count < 3) {
-      await sendMessage(phone, `Got photo ${count}/3. Send ${3 - count} more 📸`);
-      return res.status(200).json({ status: `photo ${count}` });
+    // Wait a tiny bit to batch rapid uploads
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Reload session to get latest count (in case multiple photos came in)
+    const latestSession = await getSession(phone);
+    const latestCount = (latestSession.photos || []).length;
+
+    if (latestCount < 3) {
+      await sendMessage(phone, `Got ${latestCount}/3 photos. Send ${3 - latestCount} more 📸`);
+      return res.status(200).json({ status: `photo ${latestCount}` });
     } else {
-      await sendButtons(phone, `Perfect! Got ${count} photos.\n\nReady to submit?`, [
+      await sendButtons(phone, `Perfect! Got ${latestCount} photos.\n\nReady to submit?`, [
         { id: 'submit', title: 'SUBMIT ✓' },
         { id: 'add_more', title: 'ADD MORE' }
       ]);
@@ -740,6 +751,36 @@ async function sendButtons(phone, text, buttons) {
             type: 'reply',
             reply: { id: b.id, title: b.title }
           }))
+        }
+      }
+    })
+  });
+}
+
+async function sendListMessage(phone, text, options, sectionTitle) {
+  await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text },
+        action: {
+          button: 'Choose',
+          sections: [{
+            title: sectionTitle.replace(/_/g, ' ').toUpperCase(),
+            rows: options.map(o => ({
+              id: o.value,
+              title: o.label,
+              description: o.keywords[0] || ''
+            }))
+          }]
         }
       }
     })
