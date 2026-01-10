@@ -15,6 +15,7 @@ import crypto from 'crypto';
 import * as smsDb from '../lib/sms-db.js';
 import * as redisPhotos from '../lib/redis-photos.js';
 import * as shopifyGraphQL from '../lib/shopify-graphql.js';
+import { sendVerificationCode } from '../lib/email.js';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -138,7 +139,7 @@ async function compressImage(buffer) {
 // ============ AUTH CODE GENERATION ============
 
 /**
- * Generate and save 6-digit auth code
+ * Generate and save 6-digit auth code, then send via email
  */
 async function generateAuthCode(email, phone) {
   const code = crypto.randomInt(100000, 999999).toString();
@@ -158,6 +159,16 @@ async function generateAuthCode(email, phone) {
   }
 
   console.log(`✅ Generated auth code for ${email}`);
+
+  // Send code via email (same as admin login)
+  const emailResult = await sendVerificationCode(email, code);
+  if (!emailResult?.success) {
+    console.error('❌ Failed to send email:', emailResult?.error);
+    // Don't throw - code is still saved, user can contact support
+  } else {
+    console.log(`✅ Verification email sent to ${email}`);
+  }
+
   return code;
 }
 
@@ -519,7 +530,7 @@ async function handleEmail(phone, text, conv, res) {
   await smsDb.updateContext(phone, { email, pending_seller_id: sellerByEmail?.id || sellerByPhone?.id || null });
   await smsDb.setState(phone, 'awaiting_code');
 
-  await sendMessage(phone, `Check your email for your code.\n\nReply with the 6-digit code to verify.\n\nCode: ${code}`);
+  await sendMessage(phone, `✅ Code sent to ${email}\n\nCheck your email and reply with the 6-digit code to verify.`);
   return res.status(200).json({ status: 'sent code' });
 }
 
