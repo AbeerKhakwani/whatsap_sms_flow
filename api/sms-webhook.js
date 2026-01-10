@@ -307,101 +307,19 @@ async function downloadMedia(mediaId) {
 // ============ AI EXTRACTION ============
 
 async function extractListingData(description) {
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
-    console.warn('⚠️ No OpenAI key - using basic extraction');
-    return {};
-  }
-
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Use existing validate-listing API (same as V1)
+    const response = await fetch(`${API_BASE}/api/validate-listing`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You extract product details from descriptions of Pakistani designer clothing.
-
-CRITICAL RULES:
-- ONLY extract information that is EXPLICITLY stated in the description
-- DO NOT guess, infer, or assume missing information
-- If a field is not mentioned, DO NOT include it in the JSON
-- Return ONLY the fields that are clearly present in the text
-
-Extract these fields ONLY if explicitly mentioned:
-- designer: brand name (e.g., "Sana Safinaz", "Maria B", "Khaadi")
-- item_type: type of item (e.g., "Lawn", "Kurta", "Formal Dress")
-- pieces_included: ONLY if mentioned - must match: "Kurta", "2-piece", "3-piece", "2pc", "3pc"
-- size: ONLY if mentioned - must match: "XS", "S", "M", "L", "XL", "XXL", "One Size", "Unstitched"
-- condition: ONLY if mentioned - must match: "new with tags", "like new", "excellent", "good", "fair"
-- asking_price_usd: ONLY if a price is stated (extract number from $80, 80, etc.)
-
-Example 1:
-Input: "sana safinaz 2pc"
-Output: {"designer": "Sana Safinaz", "pieces_included": "2-piece"}
-
-Example 2:
-Input: "Maria B lawn 3pc, M, like new, $80"
-Output: {"designer": "Maria B", "item_type": "Lawn", "pieces_included": "3-piece", "size": "M", "condition": "Like new", "asking_price_usd": 80}
-
-DO NOT MAKE UP DATA. Only extract what is clearly stated.`
-          },
-          {
-            role: 'user',
-            content: description
-          }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description })
     });
 
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
-    }
-
     const data = await response.json();
-    const extracted = JSON.parse(data.choices[0].message.content);
+    console.log('🤖 AI extracted:', data.extracted);
 
-    // Normalize and validate
-    const result = {};
-
-    if (extracted.designer) result.designer = extracted.designer;
-    if (extracted.item_type) result.item_type = extracted.item_type;
-    if (extracted.description) result.description = extracted.description;
-
-    // Match dropdown fields
-    if (extracted.pieces_included) {
-      const matched = matchToDropdown(extracted.pieces_included, 'pieces_included');
-      if (matched) result.pieces_included = matched;
-    }
-
-    if (extracted.size) {
-      const matched = matchToDropdown(extracted.size, 'size');
-      if (matched) result.size = matched;
-    }
-
-    if (extracted.condition) {
-      const matched = matchToDropdown(extracted.condition, 'condition');
-      if (matched) result.condition = matched;
-    }
-
-    // Extract price
-    if (extracted.asking_price_usd || extracted.price) {
-      const price = extracted.asking_price_usd || extracted.price;
-      const numPrice = typeof price === 'number' ? price : parseInt(String(price).replace(/\D/g, ''));
-      if (!isNaN(numPrice) && numPrice > 0) {
-        result.asking_price_usd = numPrice;
-      }
-    }
-
-    console.log('🤖 AI extracted:', result);
-    return result;
+    // Return the extracted fields
+    return data.extracted || {};
 
   } catch (error) {
     console.error('❌ AI extraction error:', error);
@@ -481,11 +399,7 @@ export default async function handler(req, res) {
 
     // Global commands
     if (cmd === 'cancel') {
-      // Clean up Redis and Shopify files
-      const fileIds = conv.context?.shopify_file_ids || [];
-      if (fileIds.length > 0) {
-        await shopifyGraphQL.deleteFiles(fileIds);
-      }
+      // Clean up Redis photos
       await redisPhotos.clearPhotos(phone);
       await smsDb.resetConversation(phone);
       await sendMessage(phone, "Cancelled. Reply SELL to start over.");
@@ -553,16 +467,12 @@ async function handleSellCommand(phone, conv, res) {
     console.log(`✅ ${phone} already authorized - starting fresh sell flow`);
 
     // Clean up any previous flow
-    const oldFileIds = conv.context?.shopify_file_ids || [];
-    if (oldFileIds.length > 0) {
-      await shopifyGraphQL.deleteFiles(oldFileIds);
-    }
     await redisPhotos.clearPhotos(phone);
 
     // Reset to fresh sell flow
     await smsDb.updateContext(phone, {
       listing_data: {},
-      shopify_file_ids: [],
+      photo_base64_list: [],
       current_field: null
     });
     await smsDb.setState(phone, 'awaiting_description');
@@ -861,20 +771,18 @@ async function handlePhoto(phone, mediaId, conv, res) {
     const compressed = await compressImage(buffer);
     console.log(`✅ Compressed: ${compressed.length} bytes`);
 
-    // Upload to Shopify GraphQL (no productId needed!)
-    console.log(`📤 Uploading to Shopify...`);
-    const fileId = await shopifyGraphQL.uploadPhotoToShopify(compressed, `wa_${mediaId}.jpg`);
-    console.log(`✅ Shopify file ID: ${fileId}`);
+    // Convert to base64 for storage
+    const base64 = compressed.toString('base64');
 
-    // Add to Redis
-    const count = await redisPhotos.addPhoto(phone, fileId, mediaId);
+    // Add to Redis (store base64 instead of file IDs)
+    const count = await redisPhotos.addPhoto(phone, base64, mediaId);
 
     // Also backup to context
-    const currentFileIds = conv.context?.shopify_file_ids || [];
-    currentFileIds.push(fileId);
-    await smsDb.updateContext(phone, { shopify_file_ids: currentFileIds });
+    const currentPhotos = conv.context?.photo_base64_list || [];
+    currentPhotos.push(base64);
+    await smsDb.updateContext(phone, { photo_base64_list: currentPhotos });
 
-    console.log(`✅ Photo ${count} uploaded: ${fileId}`);
+    console.log(`✅ Photo ${count} stored (${base64.length} chars base64)`);
 
     // Send confirmation on first photo only
     if (count === 1) {
@@ -884,7 +792,7 @@ async function handlePhoto(phone, mediaId, conv, res) {
     return res.status(200).json({ status: 'photo saved', count });
 
   } catch (error) {
-    console.error('❌ Photo upload error:', error);
+    console.error('❌ Photo processing error:', error);
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
     await sendMessage(phone, "That photo didn't upload. Please resend it 📸");
@@ -896,9 +804,9 @@ async function handlePhotoState(phone, text, buttonId, conv, res) {
   const userText = (text || '').trim().toLowerCase();
 
   if (userText === 'done') {
-    // Get photos from Redis
-    const fileIds = await redisPhotos.getPhotos(phone);
-    const photoCount = fileIds.length;
+    // Get photos from Redis (now base64 strings, not file IDs)
+    const photoBase64List = await redisPhotos.getPhotos(phone);
+    const photoCount = photoBase64List.length;
 
     console.log(`✅ User done. Photos in Redis: ${photoCount}`);
 
@@ -908,7 +816,7 @@ async function handlePhotoState(phone, text, buttonId, conv, res) {
     }
 
     // Transfer to context (already backed up during upload, but ensure it's synced)
-    await smsDb.updateContext(phone, { shopify_file_ids: fileIds });
+    await smsDb.updateContext(phone, { photo_base64_list: photoBase64List });
 
     // Clear Redis
     await redisPhotos.clearPhotos(phone);
@@ -957,7 +865,7 @@ async function handleAdditionalDetailsText(phone, text, conv, res) {
 
 async function showSummary(phone, conv, res) {
   const listing = conv.context?.listing_data || {};
-  const photoCount = (conv.context?.shopify_file_ids || []).length;
+  const photoCount = (conv.context?.photo_base64_list || []).length;
 
   await smsDb.setState(phone, 'sell_confirming');
 
@@ -993,10 +901,6 @@ async function handleConfirmation(phone, text, buttonId, conv, res) {
   }
 
   if (response === 'cancel') {
-    const fileIds = conv.context?.shopify_file_ids || [];
-    if (fileIds.length > 0) {
-      await shopifyGraphQL.deleteFiles(fileIds);
-    }
     await smsDb.resetConversation(phone);
     await sendMessage(phone, "Cancelled. Reply SELL to start over.");
     return res.status(200).json({ status: 'cancelled' });
@@ -1120,27 +1024,77 @@ async function handleEditing(phone, text, buttonId, conv, res) {
 
 async function submitListing(phone, conv, res) {
   const listing = conv.context?.listing_data || {};
-  const fileIds = conv.context?.shopify_file_ids || [];
+  const photoBase64List = conv.context?.photo_base64_list || [];
 
-  if (fileIds.length < 3) {
-    await sendMessage(phone, `Need at least 3 photos. You have ${fileIds.length}.`);
+  if (photoBase64List.length < 3) {
+    await sendMessage(phone, `Need at least 3 photos. You have ${photoBase64List.length}.`);
     await smsDb.setState(phone, 'sell_photos');
     return res.status(200).json({ status: 'need more photos' });
   }
 
   try {
-    // Create Shopify product with media
-    const productData = {
-      title: `${listing.designer} ${listing.item_type || 'Item'}`,
-      description: listing.description || '',
-      designer: listing.designer,
-      item_type: listing.item_type,
-      size: listing.size,
-      condition: listing.condition,
-      asking_price_usd: listing.asking_price_usd
-    };
+    // Get seller info
+    const seller = await smsDb.findSellerByPhone(phone);
+    if (!seller) {
+      throw new Error('Seller not found');
+    }
 
-    const { productId, productUrl } = await shopifyGraphQL.createProductWithMedia(productData, fileIds);
+    console.log(`📦 Creating draft product for seller ${seller.id}...`);
+
+    // Step 1: Create draft product using existing API
+    const createDraftResponse = await fetch(`${API_BASE}/api/create-draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: seller.email,
+        phone: seller.phone,
+        description: listing.description || '',
+        extracted: {
+          designer: listing.designer,
+          item_type: listing.item_type,
+          size: listing.size,
+          condition: listing.condition,
+          asking_price: listing.asking_price_usd,
+          additional_details: listing.additional_details
+        }
+      })
+    });
+
+    const draftData = await createDraftResponse.json();
+
+    if (!draftData.success) {
+      throw new Error(draftData.error || 'Failed to create draft');
+    }
+
+    const productId = draftData.productId;
+    console.log(`✅ Draft created: ${productId}`);
+
+    // Step 2: Add photos to product using existing API
+    console.log(`📸 Adding ${photoBase64List.length} photos to product...`);
+    for (let i = 0; i < photoBase64List.length; i++) {
+      const base64 = photoBase64List[i];
+      console.log(`  Uploading photo ${i + 1}/${photoBase64List.length}...`);
+
+      const imageResponse = await fetch(`${API_BASE}/api/product-image?action=add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId,
+          base64,
+          filename: `photo_${i + 1}.jpg`
+        })
+      });
+
+      const imageData = await imageResponse.json();
+      if (!imageData.success) {
+        console.error(`⚠️ Photo ${i + 1} upload failed:`, imageData.error);
+        // Continue with other photos
+      } else {
+        console.log(`  ✅ Photo ${i + 1} uploaded`);
+      }
+    }
+
+    console.log(`✅ All photos uploaded`);
 
     // Insert into listings table
     const { data: listingRecord, error } = await supabase
@@ -1157,7 +1111,6 @@ async function submitListing(phone, conv, res) {
         asking_price_usd: listing.asking_price_usd,
         details: listing.additional_details || null,
         shopify_product_id: productId,
-        shopify_product_url: productUrl,
         input_method: 'whatsapp'
       })
       .select()
@@ -1182,6 +1135,7 @@ async function submitListing(phone, conv, res) {
 
   } catch (error) {
     console.error('❌ Submit error:', error);
+    console.error('Error details:', error.message);
     await sendMessage(phone, "Sorry, submission failed. Please try again or contact support.");
     return res.status(200).json({ status: 'submit failed', error: error.message });
   }
