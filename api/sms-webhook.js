@@ -771,6 +771,10 @@ async function handleMissingField(phone, text, buttonId, conv, res) {
 
   console.log(`✅ Saved ${field} = ${value}`);
 
+  // Show updated summary (like V1)
+  const summary = formatListingSummary(listing);
+  await sendMessage(phone, summary);
+
   // Ask next missing field
   return await askNextMissingField(phone, res);
 }
@@ -1114,6 +1118,22 @@ async function submitListing(phone, conv, res) {
     await sendMessage(phone, "Sorry, submission failed. Please try again or contact support.");
     return res.status(200).json({ status: 'submit failed', error: error.message });
   }
+}
+
+// ============ HELPERS ============
+
+function formatListingSummary(listing) {
+  const parts = ['Got it! Here\'s what I have:\n'];
+
+  if (listing.designer) parts.push(`✓ Designer: ${listing.designer}`);
+  if (listing.item_type) parts.push(`✓ Type: ${listing.item_type}`);
+  if (listing.pieces_included) parts.push(`✓ Pieces: ${listing.pieces_included}`);
+  if (listing.size) parts.push(`✓ Size: ${listing.size}`);
+  if (listing.condition) parts.push(`✓ Condition: ${listing.condition}`);
+  if (listing.asking_price_usd) parts.push(`✓ Price: $${listing.asking_price_usd}`);
+  if (listing.additional_details) parts.push(`✓ Notes: ${listing.additional_details}`);
+
+  return parts.join('\n');
 }
 
 // ============ VOICE TRANSCRIPTION HELPERS ============
