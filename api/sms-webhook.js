@@ -795,11 +795,18 @@ async function handlePhoto(phone, mediaId, conv, res) {
 
   try {
     // Download and compress
+    console.log(`📥 Downloading media: ${mediaId}`);
     const buffer = await downloadMedia(mediaId);
+    console.log(`✅ Downloaded: ${buffer.length} bytes`);
+
+    console.log(`🗜️ Compressing image...`);
     const compressed = await compressImage(buffer);
+    console.log(`✅ Compressed: ${compressed.length} bytes`);
 
     // Upload to Shopify GraphQL (no productId needed!)
+    console.log(`📤 Uploading to Shopify...`);
     const fileId = await shopifyGraphQL.uploadPhotoToShopify(compressed, `wa_${mediaId}.jpg`);
+    console.log(`✅ Shopify file ID: ${fileId}`);
 
     // Add to Redis
     const count = await redisPhotos.addPhoto(phone, fileId, mediaId);
@@ -820,8 +827,10 @@ async function handlePhoto(phone, mediaId, conv, res) {
 
   } catch (error) {
     console.error('❌ Photo upload error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
     await sendMessage(phone, "That photo didn't upload. Please resend it 📸");
-    return res.status(200).json({ status: 'upload failed' });
+    return res.status(200).json({ status: 'upload failed', error: error.message });
   }
 }
 
