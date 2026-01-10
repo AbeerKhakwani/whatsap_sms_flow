@@ -630,6 +630,18 @@ async function handleDescription(phone, text, conv, res) {
   // Move to collecting missing fields
   await smsDb.setState(phone, 'sell_collecting');
 
+  // Show what we extracted (like V1)
+  const confirmations = [];
+  if (extracted.designer) confirmations.push(`Designer: ${extracted.designer} ✓`);
+  if (extracted.pieces_included) confirmations.push(`Pieces: ${extracted.pieces_included} ✓`);
+  if (extracted.size) confirmations.push(`Size: ${extracted.size} ✓`);
+  if (extracted.condition) confirmations.push(`Condition: ${extracted.condition} ✓`);
+  if (extracted.asking_price_usd) confirmations.push(`Price: $${extracted.asking_price_usd} ✓`);
+
+  if (confirmations.length > 0) {
+    await sendMessage(phone, `Got it!\n\n${confirmations.join('\n')}`);
+  }
+
   // Ask for first missing field
   return await askNextMissingField(phone, res);
 }
