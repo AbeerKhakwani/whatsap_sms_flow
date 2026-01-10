@@ -685,17 +685,32 @@ async function handleDescription(phone, text, conv, res) {
     await sendMessage(phone, `Got it!\n\n${confirmations.join('\n')}`);
   }
 
+  console.log('📋 About to ask for next missing field...');
+
   // Ask for first missing field
-  return await askNextMissingField(phone, res);
+  try {
+    return await askNextMissingField(phone, res);
+  } catch (error) {
+    console.error('❌ Error in askNextMissingField:', error);
+    await sendMessage(phone, "Oops! Something went wrong. Reply SELL to start over.");
+    return res.status(200).json({ status: 'error asking next field', error: error.message });
+  }
 }
 
 async function askNextMissingField(phone, res) {
+  console.log('🔍 askNextMissingField called for:', phone);
+
   const conv = await smsDb.getConversation(phone);
   const listing = conv.context?.listing_data || {};
+
+  console.log('📦 Current listing data:', JSON.stringify(listing));
+
   const missing = getMissingFields(listing);
+  console.log('❓ Missing fields:', missing);
 
   if (missing.length === 0) {
     // All fields complete - move to photos
+    console.log('✅ All fields complete - asking for photos');
     await smsDb.setState(phone, 'sell_photos');
     await sendMessage(phone, "Great! 📸\n\nNow send at least 3 photos of your item.\n\nText DONE when finished.");
     return res.status(200).json({ status: 'asked photos' });
@@ -703,6 +718,7 @@ async function askNextMissingField(phone, res) {
 
   // Ask for next missing field
   const field = missing[0];
+  console.log(`❓ Asking for field: ${field}`);
   await smsDb.updateContext(phone, { current_field: field });
 
   const label = FIELD_LABELS[field] || field;
@@ -724,15 +740,28 @@ async function askNextMissingField(phone, res) {
       rows: rows
     }];
 
-    // Contextual button text (e.g., "Select Size", "Select Condition")
-    const buttonText = `Select ${label}`;
+    // Contextual button text (max 20 chars for WhatsApp)
+    const shortLabels = {
+      'Pieces included': 'Pieces',
+      'Designer': 'Designer',
+      'Size': 'Size',
+      'Condition': 'Condition',
+      'Price': 'Price'
+    };
+    const shortLabel = shortLabels[label] || label;
+    const buttonText = `Select ${shortLabel}`;
 
+    console.log(`📱 Sending list for ${field} with ${rows.length} options, button: "${buttonText}"`);
     await sendList(phone, prompt, buttonText, sections);
+    console.log(`✅ List sent for ${field}`);
   } else {
     // For text fields (designer, price)
+    console.log(`📱 Sending text prompt for ${field}`);
     await sendMessage(phone, prompt);
+    console.log(`✅ Text prompt sent for ${field}`);
   }
 
+  console.log(`✅ Completed askNextMissingField for ${field}`);
   return res.status(200).json({ status: `asked ${field}` });
 }
 
