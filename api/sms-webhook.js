@@ -415,6 +415,16 @@ export default async function handler(req, res) {
     } else if (message.type === 'interactive') {
       buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
       text = buttonId || '';
+    } else if (message.type === 'audio') {
+      // Transcribe voice message
+      try {
+        text = await transcribeAudio(message.audio.id);
+        await sendMessage(phone, `🎤 I heard: "${text}"`);
+      } catch (e) {
+        console.error('❌ Transcription error:', e);
+        await sendMessage(phone, "Couldn't transcribe. Please type instead.");
+        return res.status(200).json({ status: 'transcription failed' });
+      }
     } else if (message.type === 'image') {
       return await handlePhoto(phone, message.image.id, conv, res);
     }
@@ -641,15 +651,29 @@ async function askNextMissingField(phone, res) {
   await smsDb.updateContext(phone, { current_field: field });
 
   const label = FIELD_LABELS[field] || field;
-  let prompt = `What's the ${label}?`;
+  const prompt = `What's the ${label}?`;
 
-  // Add options for dropdown fields
+  // Show buttons for dropdown fields (pieces, size, condition)
   if (DROPDOWN_OPTIONS[field]) {
-    const options = DROPDOWN_OPTIONS[field].map(opt => opt.label).join(', ');
-    prompt += `\n\nOptions: ${options}`;
+    const options = DROPDOWN_OPTIONS[field];
+
+    // WhatsApp allows max 3 buttons, so if more than 3 options, use list or text
+    if (options.length <= 3) {
+      const buttons = options.map(opt => ({
+        id: `${field}_${opt.value.toLowerCase().replace(/\s+/g, '_')}`,
+        title: opt.label
+      }));
+      await sendButtons(phone, prompt, buttons);
+    } else {
+      // For fields with >3 options (like size), show as text list
+      const optionsList = options.map(opt => opt.label).join(', ');
+      await sendMessage(phone, `${prompt}\n\nOptions: ${optionsList}`);
+    }
+  } else {
+    // For text fields (designer, price)
+    await sendMessage(phone, prompt);
   }
 
-  await sendMessage(phone, prompt);
   return res.status(200).json({ status: `asked ${field}` });
 }
 
@@ -659,10 +683,24 @@ async function handleMissingField(phone, text, buttonId, conv, res) {
     return await askNextMissingField(phone, res);
   }
 
+  // Handle button clicks (buttonId format: "field_value")
+  if (buttonId && buttonId.startsWith(`${field}_`)) {
+    const buttonValue = buttonId.replace(`${field}_`, '').replace(/_/g, ' ');
+    // Match button value to dropdown option
+    const matched = matchToDropdown(buttonValue, field);
+    if (matched) {
+      const listing = conv.context?.listing_data || {};
+      listing[field] = matched;
+      await smsDb.updateContext(phone, { listing_data: listing });
+      console.log(`✅ Saved ${field} = ${matched} (via button)`);
+      return await askNextMissingField(phone, res);
+    }
+  }
+
   const normalized = normalizeInput(text);
   let value = normalized;
 
-  // Match dropdown fields
+  // Match dropdown fields (for text input)
   if (DROPDOWN_OPTIONS[field]) {
     const matched = matchToDropdown(normalized, field);
     if (!matched) {
@@ -1033,4 +1071,40 @@ async function submitListing(phone, conv, res) {
     await sendMessage(phone, "Sorry, submission failed. Please try again or contact support.");
     return res.status(200).json({ status: 'submit failed', error: error.message });
   }
+}
+
+// ============ VOICE TRANSCRIPTION HELPERS ============
+
+async function transcribeAudio(mediaId) {
+  const mediaUrl = await getMediaUrl(mediaId);
+  const audioBuffer = await downloadMediaBuffer(mediaUrl);
+  const base64Audio = audioBuffer.toString('base64');
+
+  const response = await fetch(`${API_BASE}/api/transcribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio: base64Audio })
+  });
+
+  const data = await response.json();
+  return data.text || '';
+}
+
+async function getMediaUrl(mediaId) {
+  const response = await fetch(
+    `https://graph.facebook.com/v21.0/${mediaId}`,
+    {
+      headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+    }
+  );
+  const data = await response.json();
+  return data.url;
+}
+
+async function downloadMediaBuffer(url) {
+  const response = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
