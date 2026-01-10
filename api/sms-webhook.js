@@ -711,7 +711,10 @@ async function askNextMissingField(phone, res) {
       rows: rows
     }];
 
-    await sendList(phone, prompt, 'Select', sections);
+    // Contextual button text (e.g., "Select Size", "Select Condition")
+    const buttonText = `Select ${label}`;
+
+    await sendList(phone, prompt, buttonText, sections);
   } else {
     // For text fields (designer, price)
     await sendMessage(phone, prompt);
@@ -736,6 +739,13 @@ async function handleMissingField(phone, text, buttonId, conv, res) {
       listing[field] = matched;
       await smsDb.updateContext(phone, { listing_data: listing });
       console.log(`✅ Saved ${field} = ${matched} (via button)`);
+
+      // Show progress
+      const totalFields = REQUIRED_FIELDS.length;
+      const filledCount = REQUIRED_FIELDS.filter(f => isNonEmpty(listing[f])).length;
+      const summary = formatListingSummary(listing);
+      await sendMessage(phone, `${summary}\n\n✅ Progress: ${filledCount}/${totalFields} fields complete`);
+
       return await askNextMissingField(phone, res);
     }
   }
@@ -771,9 +781,11 @@ async function handleMissingField(phone, text, buttonId, conv, res) {
 
   console.log(`✅ Saved ${field} = ${value}`);
 
-  // Show updated summary (like V1)
+  // Show updated summary with progress
+  const totalFields = REQUIRED_FIELDS.length;
+  const filledCount = REQUIRED_FIELDS.filter(f => isNonEmpty(listing[f])).length;
   const summary = formatListingSummary(listing);
-  await sendMessage(phone, summary);
+  await sendMessage(phone, `${summary}\n\n✅ Progress: ${filledCount}/${totalFields} fields complete`);
 
   // Ask next missing field
   return await askNextMissingField(phone, res);
