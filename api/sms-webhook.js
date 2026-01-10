@@ -325,27 +325,31 @@ async function extractListingData(description) {
         messages: [
           {
             role: 'system',
-            content: `You extract product details from descriptions of Pakistani designer clothing for a consignment marketplace.
+            content: `You extract product details from descriptions of Pakistani designer clothing.
 
-Extract these fields from the user's description:
-- designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan", "Maria B", "Khaadi", "Agha Noor")
-- item_type: type of item (e.g., "Lawn Suit", "Kurta", "Formal Dress", "Lehnga", "Lawn", "Chiffon Suit")
-- pieces_included: MUST be one of: "Kurta", "2-piece", "3-piece"
-- size: MUST be one of: "XS", "S", "M", "L", "XL", "XXL", "One Size", "Unstitched", "Measurements"
-- condition: MUST be one of: "New with tags", "Like new", "Excellent", "Good", "Fair"
-- color: main color(s)
-- material: fabric type (e.g., "Lawn", "Silk", "Chiffon", "Cotton", "Organza")
-- asking_price_usd: asking/selling price (number only, extract from $80, 80, etc.)
+CRITICAL RULES:
+- ONLY extract information that is EXPLICITLY stated in the description
+- DO NOT guess, infer, or assume missing information
+- If a field is not mentioned, DO NOT include it in the JSON
+- Return ONLY the fields that are clearly present in the text
 
-Return JSON with the fields you found. Example:
-{
-  "designer": "Maria B",
-  "item_type": "Lawn",
-  "pieces_included": "3-piece",
-  "size": "M",
-  "condition": "Like new",
-  "asking_price_usd": 80
-}`
+Extract these fields ONLY if explicitly mentioned:
+- designer: brand name (e.g., "Sana Safinaz", "Maria B", "Khaadi")
+- item_type: type of item (e.g., "Lawn", "Kurta", "Formal Dress")
+- pieces_included: ONLY if mentioned - must match: "Kurta", "2-piece", "3-piece", "2pc", "3pc"
+- size: ONLY if mentioned - must match: "XS", "S", "M", "L", "XL", "XXL", "One Size", "Unstitched"
+- condition: ONLY if mentioned - must match: "new with tags", "like new", "excellent", "good", "fair"
+- asking_price_usd: ONLY if a price is stated (extract number from $80, 80, etc.)
+
+Example 1:
+Input: "sana safinaz 2pc"
+Output: {"designer": "Sana Safinaz", "pieces_included": "2-piece"}
+
+Example 2:
+Input: "Maria B lawn 3pc, M, like new, $80"
+Output: {"designer": "Maria B", "item_type": "Lawn", "pieces_included": "3-piece", "size": "M", "condition": "Like new", "asking_price_usd": 80}
+
+DO NOT MAKE UP DATA. Only extract what is clearly stated.`
           },
           {
             role: 'user',
