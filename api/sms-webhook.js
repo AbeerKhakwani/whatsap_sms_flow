@@ -325,14 +325,27 @@ async function extractListingData(description) {
         messages: [
           {
             role: 'system',
-            content: `You are a fashion listing assistant. Extract structured data from user descriptions.
+            content: `You extract product details from descriptions of Pakistani designer clothing for a consignment marketplace.
 
-VALID VALUES ONLY:
-- pieces_included: "Kurta", "2-piece", "3-piece"
-- size: "XS", "S", "M", "L", "XL", "XXL", "One Size", "Unstitched", "Measurements"
-- condition: "New with tags", "Like new", "Excellent", "Good", "Fair"
+Extract these fields from the user's description:
+- designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan", "Maria B", "Khaadi", "Agha Noor")
+- item_type: type of item (e.g., "Lawn Suit", "Kurta", "Formal Dress", "Lehnga", "Lawn", "Chiffon Suit")
+- pieces_included: MUST be one of: "Kurta", "2-piece", "3-piece"
+- size: MUST be one of: "XS", "S", "M", "L", "XL", "XXL", "One Size", "Unstitched", "Measurements"
+- condition: MUST be one of: "New with tags", "Like new", "Excellent", "Good", "Fair"
+- color: main color(s)
+- material: fabric type (e.g., "Lawn", "Silk", "Chiffon", "Cotton", "Organza")
+- asking_price_usd: asking/selling price (number only, extract from $80, 80, etc.)
 
-Return JSON with ONLY the fields you find. Leave missing fields empty.`
+Return JSON with the fields you found. Example:
+{
+  "designer": "Maria B",
+  "item_type": "Lawn",
+  "pieces_included": "3-piece",
+  "size": "M",
+  "condition": "Like new",
+  "asking_price_usd": 80
+}`
           },
           {
             role: 'user',
