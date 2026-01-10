@@ -26,6 +26,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.86.2",
     "@vercel/kv": "^3.0.0",
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.3",
     "csv-parse": "^6.1.0",
     "date-fns": "^4.1.0",
