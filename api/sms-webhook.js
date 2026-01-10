@@ -249,6 +249,36 @@ async function sendButtons(phone, text, buttons) {
   return response.json();
 }
 
+async function sendList(phone, text, buttonText, sections) {
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text },
+        action: {
+          button: buttonText,
+          sections: sections
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`WhatsApp API error: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
 async function downloadMedia(mediaId) {
   // Get media URL
   const urlResponse = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
@@ -665,41 +695,23 @@ async function askNextMissingField(phone, res) {
   const label = FIELD_LABELS[field] || field;
   const prompt = `What's the ${label}?`;
 
-  // Show buttons for dropdown fields
+  // Show list/buttons for dropdown fields
   if (DROPDOWN_OPTIONS[field]) {
     const options = DROPDOWN_OPTIONS[field];
 
-    // For condition: show top 3 most common as buttons
-    if (field === 'condition') {
-      const topButtons = [
-        { id: 'condition_like_new', title: 'Like new' },
-        { id: 'condition_excellent', title: 'Excellent' },
-        { id: 'condition_good', title: 'Good' }
-      ];
-      await sendButtons(phone, `${prompt}\n\n(Or type: New with tags, Fair)`, topButtons);
-    }
-    // For size: show common sizes as buttons
-    else if (field === 'size') {
-      const commonSizes = [
-        { id: 'size_s', title: 'S' },
-        { id: 'size_m', title: 'M' },
-        { id: 'size_l', title: 'L' }
-      ];
-      await sendButtons(phone, `${prompt}\n\n(Or type: XS, XL, XXL, One Size, Unstitched, Measurements)`, commonSizes);
-    }
-    // For pieces_included: show all 3 as buttons
-    else if (options.length <= 3) {
-      const buttons = options.map(opt => ({
-        id: `${field}_${opt.value.toLowerCase().replace(/\s+/g, '_')}`,
-        title: opt.label
-      }));
-      await sendButtons(phone, prompt, buttons);
-    }
-    // Fallback for other dropdown fields
-    else {
-      const optionsList = options.map(opt => opt.label).join(', ');
-      await sendMessage(phone, `${prompt}\n\nOptions: ${optionsList}`);
-    }
+    // Use WhatsApp List for all dropdown fields
+    const rows = options.map(opt => ({
+      id: `${field}_${opt.value.toLowerCase().replace(/\s+/g, '_')}`,
+      title: opt.label,
+      description: '' // Optional
+    }));
+
+    const sections = [{
+      title: label,
+      rows: rows
+    }];
+
+    await sendList(phone, prompt, 'Select', sections);
   } else {
     // For text fields (designer, price)
     await sendMessage(phone, prompt);
