@@ -1,10 +1,20 @@
 /**
- * WhatsApp Webhook - Clean MVP for Sunday Demo
- * Flow: SELL → email auth → description → missing fields → photos → submit
+ * WhatsApp Webhook V2 - With Redis, Shopify GraphQL, and Enhanced Auth
+ *
+ * Key improvements:
+ * - Email verification with codes
+ * - Redis for atomic photo operations (no race conditions)
+ * - Shopify GraphQL for uploads (no productId needed upfront)
+ * - sms_conversations table for state management
+ * - sell_editing state for field corrections
  */
 
 import { createClient } from '@supabase/supabase-js';
 import sharp from 'sharp';
+import crypto from 'crypto';
+import * as smsDb from '../lib/sms-db.js';
+import * as redisPhotos from '../lib/redis-photos.js';
+import * as shopifyGraphQL from '../lib/shopify-graphql.js';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
@@ -21,7 +31,16 @@ const supabase = createClient(
 // Required fields (in order)
 const REQUIRED_FIELDS = ['designer', 'pieces_included', 'size', 'condition', 'asking_price_usd'];
 
-// Dropdown options with keywords for smart matching (from SellerSubmit.jsx)
+// Field labels for user-facing messages
+const FIELD_LABELS = {
+  designer: 'Designer',
+  pieces_included: 'Pieces included',
+  size: 'Size',
+  condition: 'Condition',
+  asking_price_usd: 'Price'
+};
+
+// Dropdown options with keywords for smart matching
 const DROPDOWN_OPTIONS = {
   pieces_included: [
     { value: 'Kurta', label: 'Kurta only', keywords: ['kurta', 'kameez', 'single', '1 piece', '1-piece', 'one piece'] },
@@ -88,32 +107,14 @@ function isNonEmpty(v) {
   return true;
 }
 
-function safeMerge(existing, incoming) {
-  const merged = { ...(existing || {}) };
-  for (const key of Object.keys(incoming || {})) {
-    const val = incoming[key];
-    if (isNonEmpty(val) && !isNonEmpty(merged[key])) {
-      merged[key] = val;
-    }
-  }
-  return merged;
-}
-
 function getMissingFields(listing) {
   return REQUIRED_FIELDS.filter(f => !isNonEmpty(listing?.[f]));
 }
 
-function phonesMatch(p1, p2) {
-  const clean1 = p1.replace(/\D/g, '').slice(-10);
-  const clean2 = p2.replace(/\D/g, '').slice(-10);
-  return clean1 === clean2;
-}
-
 /**
- * Compress and resize image buffer to optimized JPEG base64
- * Reduces file size significantly before uploading to Shopify
+ * Compress and resize image buffer to optimized JPEG
  */
-async function bufferToOptimizedJpegBase64(buffer) {
+async function compressImage(buffer) {
   try {
     const out = await sharp(buffer)
       .rotate() // Auto-rotate based on EXIF
@@ -127,11 +128,237 @@ async function bufferToOptimizedJpegBase64(buffer) {
       .toBuffer();
 
     console.log(`📸 Compressed: ${buffer.length} bytes → ${out.length} bytes (${Math.round(out.length / buffer.length * 100)}%)`);
-    return out.toString('base64');
+    return out;
   } catch (error) {
     console.error('❌ Image compression error:', error);
-    // Fallback to uncompressed if sharp fails
-    return buffer.toString('base64');
+    return buffer; // Fallback to original
+  }
+}
+
+// ============ AUTH CODE GENERATION ============
+
+/**
+ * Generate and save 6-digit auth code
+ */
+async function generateAuthCode(email, phone) {
+  const code = crypto.randomInt(100000, 999999).toString();
+
+  const { error } = await supabase
+    .from('auth_codes')
+    .insert({
+      identifier: email.toLowerCase(),
+      code,
+      channel: 'whatsapp',
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 minutes
+    });
+
+  if (error) {
+    console.error('❌ Error saving auth code:', error);
+    throw error;
+  }
+
+  console.log(`✅ Generated auth code for ${email}`);
+  return code;
+}
+
+/**
+ * Verify auth code
+ */
+async function verifyAuthCode(email, code) {
+  const { data, error } = await supabase
+    .from('auth_codes')
+    .select('*')
+    .eq('identifier', email.toLowerCase())
+    .eq('code', code)
+    .eq('used', false)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) {
+    return false;
+  }
+
+  // Mark as used
+  await supabase
+    .from('auth_codes')
+    .update({ used: true })
+    .eq('id', data.id);
+
+  return true;
+}
+
+// ============ WHATSAPP API HELPERS ============
+
+async function sendMessage(phone, text) {
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'text',
+      text: { body: text }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`WhatsApp API error: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
+async function sendButtons(phone, text, buttons) {
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text },
+        action: {
+          buttons: buttons.map(btn => ({
+            type: 'reply',
+            reply: {
+              id: btn.id,
+              title: btn.title.substring(0, 20) // WhatsApp limit
+            }
+          }))
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`WhatsApp API error: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
+}
+
+async function downloadMedia(mediaId) {
+  // Get media URL
+  const urlResponse = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+
+  if (!urlResponse.ok) {
+    throw new Error('Failed to get media URL');
+  }
+
+  const { url } = await urlResponse.json();
+
+  // Download media
+  const mediaResponse = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
+  });
+
+  if (!mediaResponse.ok) {
+    throw new Error('Failed to download media');
+  }
+
+  const arrayBuffer = await mediaResponse.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
+// ============ AI EXTRACTION ============
+
+async function extractListingData(description) {
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) {
+    console.warn('⚠️ No OpenAI key - using basic extraction');
+    return {};
+  }
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a fashion listing assistant. Extract structured data from user descriptions.
+
+VALID VALUES ONLY:
+- pieces_included: "Kurta", "2-piece", "3-piece"
+- size: "XS", "S", "M", "L", "XL", "XXL", "One Size", "Unstitched", "Measurements"
+- condition: "New with tags", "Like new", "Excellent", "Good", "Fair"
+
+Return JSON with ONLY the fields you find. Leave missing fields empty.`
+          },
+          {
+            role: 'user',
+            content: description
+          }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.3
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const extracted = JSON.parse(data.choices[0].message.content);
+
+    // Normalize and validate
+    const result = {};
+
+    if (extracted.designer) result.designer = extracted.designer;
+    if (extracted.item_type) result.item_type = extracted.item_type;
+    if (extracted.description) result.description = extracted.description;
+
+    // Match dropdown fields
+    if (extracted.pieces_included) {
+      const matched = matchToDropdown(extracted.pieces_included, 'pieces_included');
+      if (matched) result.pieces_included = matched;
+    }
+
+    if (extracted.size) {
+      const matched = matchToDropdown(extracted.size, 'size');
+      if (matched) result.size = matched;
+    }
+
+    if (extracted.condition) {
+      const matched = matchToDropdown(extracted.condition, 'condition');
+      if (matched) result.condition = matched;
+    }
+
+    // Extract price
+    if (extracted.asking_price_usd || extracted.price) {
+      const price = extracted.asking_price_usd || extracted.price;
+      const numPrice = typeof price === 'number' ? price : parseInt(String(price).replace(/\D/g, ''));
+      if (!isNaN(numPrice) && numPrice > 0) {
+        result.asking_price_usd = numPrice;
+      }
+    }
+
+    console.log('🤖 AI extracted:', result);
+    return result;
+
+  } catch (error) {
+    console.error('❌ AI extraction error:', error);
+    return {};
   }
 }
 
@@ -145,11 +372,11 @@ export default async function handler(req, res) {
     const challenge = req.query['hub.challenge'];
 
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('✅ Webhook verified - MVP v3.0');
+      console.log('✅ Webhook verified - V2');
       return res.status(200).send(challenge);
     }
     if (req.query.version === 'check') {
-      return res.status(200).json({ version: '3.0', updated: '2026-01-09 MVP' });
+      return res.status(200).json({ version: '2.0', updated: '2026-01-09 V2' });
     }
     return res.status(403).json({ error: 'Verification failed' });
   }
@@ -166,22 +393,18 @@ export default async function handler(req, res) {
 
     const phone = message.from;
     const messageId = message.id;
-    const session = await getSession(phone);
+
+    // Get or create conversation
+    const conv = await smsDb.findOrCreateConversation(phone);
 
     // Idempotency: Skip if we've already processed this message
-    if (session.processedMessages?.includes(messageId)) {
+    if (await smsDb.isMessageProcessed(phone, messageId)) {
       console.log(`⏭️  Skipping duplicate message ${messageId}`);
       return res.status(200).json({ status: 'duplicate' });
     }
 
-    // Mark as processed and save immediately to prevent race conditions
-    session.processedMessages = session.processedMessages || [];
-    session.processedMessages.push(messageId);
-    // Keep only last 20 message IDs to prevent unbounded growth
-    if (session.processedMessages.length > 20) {
-      session.processedMessages = session.processedMessages.slice(-20);
-    }
-    await saveSession(phone, session);
+    // Mark as processed immediately
+    await smsDb.markMessageProcessed(phone, messageId);
 
     // Parse message
     let text = '';
@@ -190,179 +413,65 @@ export default async function handler(req, res) {
     if (message.type === 'text') {
       text = message.text?.body?.trim() || '';
     } else if (message.type === 'interactive') {
-      // Handle both button replies and list replies
       buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
       text = buttonId || '';
-    } else if (message.type === 'audio') {
-      // Transcribe voice
-      try {
-        text = await transcribeAudio(message.audio.id);
-        await sendMessage(phone, `🎤 I heard: "${text}"`);
-      } catch (e) {
-        console.error('Transcription error:', e);
-        await sendMessage(phone, "Couldn't transcribe. Please type instead.");
-        return res.status(200).json({ status: 'transcription failed' });
-      }
     } else if (message.type === 'image') {
-      return await handlePhoto(phone, message.image.id, session, res);
+      return await handlePhoto(phone, message.image.id, conv, res);
     }
 
     const cmd = text.toLowerCase();
-    console.log(`📱 ${phone} [${session.state}]: "${text}"`);
+    console.log(`📱 ${phone} [${conv.state}]: "${text}"`);
 
     // Global commands
     if (cmd === 'cancel') {
-      await resetSession(phone);
+      // Clean up Redis and Shopify files
+      const fileIds = conv.context?.shopify_file_ids || [];
+      if (fileIds.length > 0) {
+        await shopifyGraphQL.deleteFiles(fileIds);
+      }
+      await redisPhotos.clearPhotos(phone);
+      await smsDb.resetConversation(phone);
       await sendMessage(phone, "Cancelled. Reply SELL to start over.");
       return res.status(200).json({ status: 'cancelled' });
     }
 
-    if (cmd === 'submit') {
-      const photoCount = (session.photos || []).length;
-      const missing = getMissingFields(session.listing);
-
-      // Ready to submit: has all fields + 3+ photos (regardless of state)
-      if (photoCount >= 3 && missing.length === 0) {
-        return await submitListing(phone, session, res);
-      }
-
-      // Has fields but needs more photos
-      if (photoCount < 3 && missing.length === 0) {
-        await sendMessage(phone, `You can submit after 3 photos. Need ${3 - photoCount} more 📸`);
-        return res.status(200).json({ status: 'need more photos' });
-      }
-
-      // Missing required fields - resume automatically
-      session.state = 'awaiting_missing_field';
-      await saveSession(phone, session);
-      return await askNextMissingField(phone, session, res);
-    }
-
     if (cmd === 'sell') {
-      // If previous listing was submitted, start completely fresh
-      if (session.state === 'submitted') {
-        console.log(`✅ ${phone} previous listing submitted - starting fresh`);
-        await resetSession(phone);
-        session = await getSession(phone); // Get clean session
-      }
-
-      // Check if they're mid-flow (but NOT submitted)
-      const hasProgress = session.email || session.listing?.designer || session.photos?.length > 0;
-      const isNotWelcome = session.state !== 'welcome';
-
-      if (hasProgress && isNotWelcome) {
-        // Mid-flow - offer resume or restart
-        console.log(`⏸️  ${phone} mid-flow (state: ${session.state}) - offering resume/restart`);
-        // Store previous state before overwriting
-        session.prev_state = session.state;
-        session.state = 'awaiting_resume_choice';
-        await saveSession(phone, session);
-
-        await sendButtons(phone, "You're already listing an item. Continue where you left off?", [
-          { id: 'resume', title: 'CONTINUE' },
-          { id: 'restart', title: 'RESTART' }
-        ]);
-        return res.status(200).json({ status: 'offered resume' });
-      }
-
-      // Check if they have a valid recent session (within 7 days)
-      const hasValidEmail = session.email && session.email.includes('@');
-      const hasSeller = session.listing?._seller_id;
-      const sessionAge = session.created_at ? Date.now() - new Date(session.created_at).getTime() : Infinity;
-      const sevenDays = 7 * 24 * 60 * 60 * 1000;
-
-      if (hasValidEmail && hasSeller && sessionAge < sevenDays) {
-        // Session is still valid - go straight to description
-        console.log(`✅ ${phone} has valid session (${Math.round(sessionAge / (24 * 60 * 60 * 1000))} days old) - skip email`);
-        session.state = 'awaiting_description';
-        // Preserve _meta when resetting listing
-        const meta = session.listing?._meta;
-        session.listing = { _seller_id: session.listing._seller_id, _meta: meta };
-        session.photos = [];
-        session.shopify_product_id = null; // Clear any old draft ID
-        await saveSession(phone, session);
-
-        await sendMessage(phone, `Welcome back! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
-        return res.status(200).json({ status: 'returning user - asked description' });
-      } else {
-        // Session expired or invalid - reset and ask for email
-        console.log(`✅ ${phone} session expired or invalid - asking for email`);
-        await resetSession(phone);
-        const freshSession = await getSession(phone);
-        freshSession.state = 'awaiting_email';
-        freshSession.created_at = new Date().toISOString();
-        await saveSession(phone, freshSession);
-        await sendMessage(phone, "What's your email?");
-        return res.status(200).json({ status: 'asked email' });
-      }
+      return await handleSellCommand(phone, conv, res);
     }
 
     // State machine
-    switch (session.state) {
+    switch (conv.state) {
+      case 'new':
       case 'welcome':
         await sendWelcome(phone);
         return res.status(200).json({ status: 'welcome' });
 
-      case 'awaiting_resume_choice':
-        return await handleResumeChoice(phone, text, buttonId, session, res);
-
       case 'awaiting_email':
-        return await handleEmail(phone, text, session, res);
+        return await handleEmail(phone, text, conv, res);
 
-      case 'awaiting_account_confirmation':
-        return await handleAccountConfirmation(phone, text, buttonId, session, res);
+      case 'awaiting_code':
+        return await handleCode(phone, text, conv, res);
 
       case 'awaiting_description':
-        return await handleDescription(phone, text, session, res);
+        return await handleDescription(phone, text, conv, res);
 
-      case 'awaiting_missing_field':
-        return await handleMissingField(phone, text, buttonId, session, res);
+      case 'sell_collecting':
+        return await handleMissingField(phone, text, buttonId, conv, res);
+
+      case 'sell_photos':
+        return await handlePhotoState(phone, text, buttonId, conv, res);
 
       case 'awaiting_additional_details':
-        return await handleAdditionalDetails(phone, text, buttonId, session, res);
+        return await handleAdditionalDetails(phone, text, buttonId, conv, res);
 
       case 'awaiting_additional_details_text':
-        return await handleAdditionalDetailsText(phone, text, session, res);
+        return await handleAdditionalDetailsText(phone, text, conv, res);
 
-      case 'collecting_photos':
-        return await handlePhotoState(phone, text, buttonId, session, res);
+      case 'sell_confirming':
+        return await handleConfirmation(phone, text, buttonId, conv, res);
 
-      case 'ready_to_submit':
-        // Handle final submit confirmation
-        const submitResponse = (buttonId || text).toLowerCase();
-        if (submitResponse === 'submit' || submitResponse === 'yes') {
-          return await submitListing(phone, session, res);
-        } else if (submitResponse === 'cancel') {
-          await resetSession(phone);
-          await sendMessage(phone, "Listing cancelled. Reply SELL to start over.");
-          return res.status(200).json({ status: 'cancelled' });
-        } else {
-          // Show summary again
-          const listing = session.listing;
-          const photoCount = (session.photos || []).filter(url => url).length;
-
-          const summary =
-            `📋 *Ready to submit!*\n\n` +
-            `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-            `📏 Size: ${listing.size}\n` +
-            `✨ Condition: ${listing.condition}\n` +
-            `💰 Price: $${listing.asking_price_usd}\n` +
-            `📸 Photos: ${photoCount}\n\n` +
-            `Click SUBMIT to confirm`;
-
-          await sendButtons(phone, summary, [
-            { id: 'submit', title: 'YES, SUBMIT ✓' },
-            { id: 'cancel', title: 'CANCEL' }
-          ]);
-
-          return res.status(200).json({ status: 'waiting for submit' });
-        }
-
-      case 'submitted':
-        // Reset session for new listing
-        await resetSession(phone);
-        await sendWelcome(phone);
-        return res.status(200).json({ status: 'welcome' });
+      case 'sell_editing':
+        return await handleEditing(phone, text, buttonId, conv, res);
 
       default:
         await sendWelcome(phone);
@@ -381,7 +490,37 @@ async function sendWelcome(phone) {
   await sendMessage(phone, `Hi! 👋 Welcome to The Phir Story.\n\n• Reply SELL to list an item\n• Visit thephirstory.com to shop`);
 }
 
-async function handleEmail(phone, text, session, res) {
+async function handleSellCommand(phone, conv, res) {
+  // Check if already authorized
+  if (conv.is_authorized && conv.seller_id) {
+    console.log(`✅ ${phone} already authorized - starting fresh sell flow`);
+
+    // Clean up any previous flow
+    const oldFileIds = conv.context?.shopify_file_ids || [];
+    if (oldFileIds.length > 0) {
+      await shopifyGraphQL.deleteFiles(oldFileIds);
+    }
+    await redisPhotos.clearPhotos(phone);
+
+    // Reset to fresh sell flow
+    await smsDb.updateContext(phone, {
+      listing_data: {},
+      shopify_file_ids: [],
+      current_field: null
+    });
+    await smsDb.setState(phone, 'awaiting_description');
+
+    await sendMessage(phone, `Welcome back! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
+    return res.status(200).json({ status: 'asked description' });
+  }
+
+  // Not authorized - ask for email
+  await smsDb.setState(phone, 'awaiting_email');
+  await sendMessage(phone, "What's your email?");
+  return res.status(200).json({ status: 'asked email' });
+}
+
+async function handleEmail(phone, text, conv, res) {
   const email = text.toLowerCase().trim();
 
   // Validate email format
@@ -391,555 +530,239 @@ async function handleEmail(phone, text, session, res) {
   }
 
   // Check if seller exists
-  const { data: seller } = await supabase
-    .from('sellers')
-    .select('id, name, phone')
-    .ilike('email', email)
-    .maybeSingle();
+  const sellerByEmail = await smsDb.findSellerByEmail(email);
+  const sellerByPhone = await smsDb.findSellerByPhone(phone);
 
-  if (seller) {
-    // Existing seller - check phone match
-    if (seller.phone && !phonesMatch(seller.phone, phone)) {
-      await sendMessage(phone, "This email is linked to another phone.\nText from that phone or email admin@thephirstory.com");
-      return res.status(200).json({ status: 'phone mismatch' });
+  // Case 1: Email exists but phone doesn't match
+  if (sellerByEmail && !smsDb.normalizePhone(sellerByEmail.phone).endsWith(smsDb.normalizePhone(phone).slice(-10))) {
+    await sendMessage(phone, `That email is registered to a different number.\n\nPlease use your registered number or contact support.`);
+    return res.status(200).json({ status: 'email mismatch' });
+  }
+
+  // Case 2: Phone exists but email doesn't match
+  if (sellerByPhone && sellerByPhone.email && sellerByPhone.email.toLowerCase() !== email) {
+    await sendMessage(phone, `This number is registered with ${sellerByPhone.email}.\n\nPlease use that email or contact support.`);
+    return res.status(200).json({ status: 'phone mismatch' });
+  }
+
+  // Generate and send code
+  const code = await generateAuthCode(email, phone);
+
+  // Save email to context
+  await smsDb.updateContext(phone, { email, pending_seller_id: sellerByEmail?.id || sellerByPhone?.id || null });
+  await smsDb.setState(phone, 'awaiting_code');
+
+  await sendMessage(phone, `Check your email for your code.\n\nReply with the 6-digit code to verify.\n\nCode: ${code}`);
+  return res.status(200).json({ status: 'sent code' });
+}
+
+async function handleCode(phone, text, conv, res) {
+  const code = text.trim();
+  const email = conv.context?.email;
+
+  if (!email) {
+    await sendMessage(phone, "Error: Email not found. Reply SELL to start over.");
+    return res.status(200).json({ status: 'no email' });
+  }
+
+  // Verify code
+  const valid = await verifyAuthCode(email, code);
+
+  if (!valid) {
+    const attempts = await smsDb.incrementAuthAttempts(phone);
+
+    if (attempts >= 3) {
+      await smsDb.setState(phone, 'new');
+      await sendMessage(phone, "Too many failed attempts. Reply SELL to try again.");
+      return res.status(200).json({ status: 'too many attempts' });
     }
 
-    // Update phone if missing
-    if (!seller.phone) {
-      await supabase.from('sellers').update({ phone }).eq('id', seller.id);
+    await sendMessage(phone, `Invalid code. ${3 - attempts} attempts remaining.\n\nTry again or reply SELL to restart.`);
+    return res.status(200).json({ status: 'invalid code' });
+  }
+
+  // Code valid! Find or create seller
+  let seller = await smsDb.findSellerByEmail(email);
+
+  if (!seller) {
+    seller = await smsDb.createSeller({ phone, email });
+  }
+
+  // Authorize conversation
+  await smsDb.authorize(phone, seller.id, email);
+
+  // Start sell flow
+  await smsDb.setState(phone, 'awaiting_description');
+
+  const greeting = seller.name ? `Welcome back, ${seller.name}! ✓` : `Welcome! ✓`;
+  await sendMessage(phone, `${greeting}\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
+
+  return res.status(200).json({ status: 'authorized' });
+}
+
+async function handleDescription(phone, text, conv, res) {
+  if (!text || text.trim().length < 5) {
+    await sendMessage(phone, "Please describe your item:\nDesigner, size, condition, price");
+    return res.status(200).json({ status: 'description too short' });
+  }
+
+  // Extract with AI
+  const extracted = await extractListingData(text);
+
+  // Save to context
+  await smsDb.updateContext(phone, {
+    listing_data: {
+      ...extracted,
+      description: text
     }
+  });
 
-    // Welcome back - COMPLETE RESET for new listing
-    console.log(`✅ Existing seller: ${seller.id}, resetting session for new listing`);
+  // Move to collecting missing fields
+  await smsDb.setState(phone, 'sell_collecting');
 
-    session.email = email;
-    session.listing = { _seller_id: seller.id, _seller_name: seller.name };  // Start fresh, no old data
-    session.photos = [];  // Clear old photos
-    session.shopify_product_id = null;  // Clear old draft
-    session.state = 'awaiting_description';
-    session.current_field = null;
-    session.prev_state = null;
-    session.created_at = new Date().toISOString();  // New timestamp
-    await saveSession(phone, session);
-
-    console.log(`📝 Session reset - state: awaiting_description, listing fields: ${Object.keys(session.listing).length}`);
-
-    const greeting = `Welcome back${seller.name ? ', ' + seller.name : ''}! ✓`;
-    await sendMessage(phone, `${greeting}\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
-    return res.status(200).json({ status: 'asked description' });
-  } else {
-    // New seller - confirm account creation
-    session.email = email;
-    session.state = 'awaiting_account_confirmation';
-    session.created_at = session.created_at || new Date().toISOString();
-    await saveSession(phone, session);
-
-    await sendMessage(phone, `New here? Let's create your account!`);
-    await sendButtons(phone, `Create account for ${email} and start selling?`, [
-      { id: 'create_yes', title: 'YES ✓' },
-      { id: 'create_no', title: 'CANCEL' }
-    ]);
-    return res.status(200).json({ status: 'asked confirmation' });
-  }
+  // Ask for first missing field
+  return await askNextMissingField(phone, res);
 }
 
-async function handleAccountConfirmation(phone, text, buttonId, session, res) {
-  const response = (buttonId || text).toLowerCase();
-
-  if (response === 'create_yes' || response === 'yes') {
-    // Create new seller
-    const { data: newSeller } = await supabase
-      .from('sellers')
-      .insert({ email: session.email, phone })
-      .select('id')
-      .single();
-
-    console.log(`✅ New seller created: ${newSeller.id}, resetting session for first listing`);
-
-    // COMPLETE RESET for new listing
-    session.listing = { _seller_id: newSeller.id };  // Start fresh, no old data
-    session.photos = [];  // Clear old photos
-    session.shopify_product_id = null;  // No draft yet
-    session.state = 'awaiting_description';
-    session.current_field = null;
-    session.prev_state = null;
-    session.created_at = new Date().toISOString();  // New timestamp
-    await saveSession(phone, session);
-
-    console.log(`📝 Session reset - state: awaiting_description, listing fields: ${Object.keys(session.listing).length}`);
-
-    await sendMessage(phone, `Account created! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
-    return res.status(200).json({ status: 'asked description' });
-  } else {
-    await resetSession(phone);
-    await sendMessage(phone, "Cancelled. Reply SELL when ready.");
-    return res.status(200).json({ status: 'cancelled' });
-  }
-}
-
-async function handleResumeChoice(phone, text, buttonId, session, res) {
-  const response = (buttonId || text).toLowerCase();
-
-  if (response === 'resume' || response === 'continue') {
-    // Resume where they left off using prev_state
-    const prevState = session.prev_state || 'awaiting_description';
-    console.log(`▶️  Resuming from prev_state: ${prevState}`);
-
-    // Determine where to resume based on previous state and data
-    if (prevState === 'collecting_photos' || session.photos?.length > 0) {
-      const photoCount = (session.photos || []).filter(url => url).length;
-      session.state = 'collecting_photos';
-      session.prev_state = null; // Clear prev_state
-      await saveSession(phone, session);
-
-      // Just remind them to send photos - don't nag about count
-      await sendMessage(phone, `You have ${photoCount} photo(s).\n\nSend more or continue to submit! 📸`);
-      return res.status(200).json({ status: 'resumed photos' });
-    } else {
-      // Resume asking for missing fields
-      session.state = 'awaiting_missing_field';
-      session.prev_state = null; // Clear prev_state
-      await saveSession(phone, session);
-      return await askNextMissingField(phone, session, res);
-    }
-  } else {
-    // Restart fresh
-    console.log(`🔄 Restarting fresh`);
-    await resetSession(phone);
-    const freshSession = await getSession(phone);
-    freshSession.state = 'awaiting_email';
-    freshSession.created_at = new Date().toISOString();
-    await saveSession(phone, freshSession);
-    await sendMessage(phone, "What's your email?");
-    return res.status(200).json({ status: 'restarted' });
-  }
-}
-
-async function handleDescription(phone, text, session, res) {
-  const normalized = normalizeInput(text);
-  if (!normalized) {
-    await sendMessage(phone, "Tell me about your item:\nDesigner, size, condition, price");
-    return res.status(200).json({ status: 'no description' });
-  }
-
-  try {
-    // AI extraction (silent)
-    const validation = await callValidateListing(normalized);
-    console.log('🤖 Extracted:', JSON.stringify(validation.extracted));
-
-    // Smart match dropdowns
-    const extracted = validation.extracted || {};
-
-    // Extract embellishment/detail keywords from description
-    const embellishmentKeywords = ['beadwork', 'beaded', 'embroidery', 'embroidered', 'sequin', 'sequins',
-                                   'stone', 'stones', 'mirror', 'mirrors', 'lace', 'pearl', 'pearls',
-                                   'threadwork', 'handwork', 'zari', 'gota', 'tilla'];
-    const foundEmbellishments = embellishmentKeywords.filter(keyword =>
-      normalized.toLowerCase().includes(keyword)
-    );
-
-    const matched = {
-      designer: extracted.designer || '',
-      item_type: extracted.item_type || extracted.pieces || '',
-      pieces_included: matchToDropdown(extracted.pieces || extracted.item_type || text, 'pieces_included'),
-      size: matchToDropdown(extracted.size, 'size'),
-      condition: matchToDropdown(extracted.condition, 'condition'),
-      asking_price_usd: extracted.asking_price || extracted.asking_price_usd || '',
-      color: extracted.color || '',
-      material: extracted.material || '',
-      additional_details: foundEmbellishments.length > 0 ? foundEmbellishments.join(', ') : '',
-      details: normalized
-    };
-
-    // Safe merge
-    session.listing = safeMerge(session.listing, matched);
-    console.log('📦 After merge:', JSON.stringify(session.listing));
-    await saveSession(phone, session);
-
-    // Show what we got
-    const summary = formatListingSummary(session.listing);
-    await sendMessage(phone, summary);
-
-    // Ask for missing fields
-    return await askNextMissingField(phone, session, res);
-
-  } catch (error) {
-    console.error('❌ AI extraction error:', error);
-    await sendMessage(phone, "Couldn't understand that. Try again:\nExample: 'Maria B lawn 3pc, M, like new, $80'");
-    return res.status(200).json({ status: 'extraction error' });
-  }
-}
-
-async function handleMissingField(phone, text, buttonId, session, res) {
-  const currentField = session.current_field;
-  if (!currentField) {
-    return await askNextMissingField(phone, session, res);
-  }
-
-  let value = buttonId || text.trim();
-
-  // Handle price validation
-  if (currentField === 'asking_price_usd') {
-    const priceMatch = value.match(/(\d+)/);
-    if (!priceMatch) {
-      await sendMessage(phone, "Please enter a number for the price.\ne.g., 80");
-      return res.status(200).json({ status: 'invalid price' });
-    }
-    value = priceMatch[1];
-  }
-
-  // Smart match for dropdowns
-  if (['pieces_included', 'size', 'condition'].includes(currentField)) {
-    const matched = matchToDropdown(value, currentField);
-    if (matched) value = matched;
-  }
-
-  // Check if "Measurements" - need details
-  if (value === 'Measurements' && currentField === 'size') {
-    session.current_field = 'size_measurements';
-    await saveSession(phone, session);
-    await sendMessage(phone, "Enter measurements here:\n(e.g., Bust 36\", Waist 28\", Length 42\")");
-    return res.status(200).json({ status: 'asked measurements' });
-  }
-
-  // Handle size measurements details response
-  if (currentField === 'size_measurements') {
-    session.listing.size = `Measurements: ${value}`;
-    session.current_field = null;
-  } else {
-    // Normal field
-    session.listing[currentField] = value;
-    session.current_field = null;
-  }
-
-  console.log(`📦 Added ${currentField}=${value}`);
-  await saveSession(phone, session);
-
-  // Show updated summary
-  const summary = formatListingSummary(session.listing);
-  await sendMessage(phone, summary);
-
-  // Ask next or move to photos
-  return await askNextMissingField(phone, session, res);
-}
-
-/**
- * Create Shopify draft product for this session
- * Called BEFORE asking for photos (so we have a productId to upload to)
- */
-async function createDraftForSession(phone, session) {
-  // Skip if draft already exists
-  if (session.shopify_product_id) {
-    console.log(`✅ Draft already exists: ${session.shopify_product_id}`);
-    return true;
-  }
-
-  const listing = session.listing;
-
-  // Validate price
-  let askingPrice = listing.asking_price_usd;
-  if (typeof askingPrice === 'string') {
-    const priceMatch = askingPrice.match(/(\d+)/);
-    if (priceMatch) {
-      askingPrice = parseFloat(priceMatch[1]);
-    } else {
-      askingPrice = null;
-    }
-  }
-
-  if (!askingPrice || askingPrice <= 0) {
-    console.error('❌ Invalid price:', listing.asking_price_usd);
-    return false;
-  }
-
-  try {
-    console.log(`📦 Creating Shopify draft BEFORE photos... (phone: ${phone})`);
-
-    const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: session.email,
-        phone: phone,
-        description: listing.details || '',
-        extracted: {
-          designer: listing.designer,
-          item_type: listing.item_type,
-          pieces: listing.pieces_included,
-          size: listing.size,
-          condition: listing.condition,
-          color: listing.color,
-          material: listing.material,
-          asking_price: askingPrice
-        },
-        source: 'whatsapp'  // Track WhatsApp-created drafts
-      })
-    });
-
-    const draftData = await draftRes.json();
-
-    if (!draftData.success || !draftData.productId) {
-      console.error('❌ Draft creation failed:', draftData.error);
-      return false;
-    }
-
-    // Save product ID to session
-    session.shopify_product_id = draftData.productId;
-    await saveSession(phone, session);
-
-    console.log(`✅ Created draft: ${draftData.productId}`);
-    return true;
-
-  } catch (error) {
-    console.error('❌ Error creating draft:', error.message);
-    return false;
-  }
-}
-
-async function handleAdditionalDetails(phone, text, buttonId, session, res) {
-  const response = (buttonId || text).toLowerCase();
-
-  if (response === 'skip_details' || response === 'no' || response === 'skip') {
-    // Skip additional details - show summary and ask for final confirmation
-    console.log('📝 Skipping additional details - showing summary');
-
-    session.state = 'ready_to_submit';
-    await saveSession(phone, session);
-
-    // Re-fetch session to ensure we have latest photos
-    const freshSession = await getSession(phone);
-    const listing = freshSession.listing;
-    const photoCount = (freshSession.photos || []).filter(url => url).length;
-
-    console.log(`📊 Summary - Total photos in session: ${freshSession.photos?.length || 0}, with URLs: ${photoCount}`);
-    if (freshSession.photos?.length > 0) {
-      console.log(`📸 First photo URL:`, freshSession.photos[0]);
-    }
-
-    const summary =
-      `📋 *Ready to submit!*\n\n` +
-      `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-      `📏 Size: ${listing.size}\n` +
-      `✨ Condition: ${listing.condition}\n` +
-      `💰 Price: $${listing.asking_price_usd}\n` +
-      `📸 Photos: ${photoCount}\n\n` +
-      `Look good?`;
-
-    await sendButtons(phone, summary, [
-      { id: 'submit', title: 'YES, SUBMIT ✓' },
-      { id: 'cancel', title: 'CANCEL' }
-    ]);
-
-    return res.status(200).json({ status: 'ready to submit' });
-  }
-
-  if (response === 'add_details' || response === 'yes') {
-    // Ask them to type details
-    await sendMessage(phone, `Great! Tell me about any flaws or special details:\n\n(e.g., "slight stain on sleeve", "missing belt", "beautiful beadwork")`);
-    session.state = 'awaiting_additional_details_text';
-    await saveSession(phone, session);
-    return res.status(200).json({ status: 'waiting for details text' });
-  }
-
-  // They typed details directly
-  if (text && text.trim().length > 0) {
-    const existingDetails = session.listing.additional_details || '';
-    const newDetails = existingDetails ? `${existingDetails}. ${text.trim()}` : text.trim();
-
-    session.listing.additional_details = newDetails;
-    console.log(`📝 Added additional details: ${newDetails}`);
-
-    session.state = 'ready_to_submit';
-    await saveSession(phone, session);
-
-    // Show summary
-    const listing = session.listing;
-    const photoCount = (session.photos || []).filter(url => url).length;
-
-    const summary =
-      `📋 *Ready to submit!*\n\n` +
-      `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-      `📏 Size: ${listing.size}\n` +
-      `✨ Condition: ${listing.condition}\n` +
-      `💰 Price: $${listing.asking_price_usd}\n` +
-      `📸 Photos: ${photoCount}\n` +
-      `📝 Notes: ${newDetails.substring(0, 50)}${newDetails.length > 50 ? '...' : ''}\n\n` +
-      `Look good?`;
-
-    await sendButtons(phone, summary, [
-      { id: 'submit', title: 'YES, SUBMIT ✓' },
-      { id: 'cancel', title: 'CANCEL' }
-    ]);
-
-    return res.status(200).json({ status: 'ready to submit' });
-  }
-
-  // Fallback - show summary
-  session.state = 'ready_to_submit';
-  await saveSession(phone, session);
-
-  const listing = session.listing;
-  const photoCount = (session.photos || []).filter(url => url).length;
-
-  const summary =
-    `📋 *Ready to submit!*\n\n` +
-    `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-    `📏 Size: ${listing.size}\n` +
-    `✨ Condition: ${listing.condition}\n` +
-    `💰 Price: $${listing.asking_price_usd}\n` +
-    `📸 Photos: ${photoCount}\n\n` +
-    `Look good?`;
-
-  await sendButtons(phone, summary, [
-    { id: 'submit', title: 'YES, SUBMIT ✓' },
-    { id: 'cancel', title: 'CANCEL' }
-  ]);
-
-  return res.status(200).json({ status: 'ready to submit' });
-}
-
-async function handleAdditionalDetailsText(phone, text, session, res) {
-  if (!text || text.trim().length === 0) {
-    await sendMessage(phone, "Please type any flaws or special details, or reply SKIP to continue.");
-    return res.status(200).json({ status: 'waiting for details' });
-  }
-
-  const existingDetails = session.listing.additional_details || '';
-  const newDetails = existingDetails ? `${existingDetails}. ${text.trim()}` : text.trim();
-
-  session.listing.additional_details = newDetails;
-  console.log(`📝 Added additional details: ${newDetails}`);
-
-  session.state = 'ready_to_submit';
-  await saveSession(phone, session);
-
-  // Show summary
-  const listing = session.listing;
-  const photoCount = (session.photos || []).filter(url => url).length;
-
-  const summary =
-    `📋 *Ready to submit!*\n\n` +
-    `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-    `📏 Size: ${listing.size}\n` +
-    `✨ Condition: ${listing.condition}\n` +
-    `💰 Price: $${listing.asking_price_usd}\n` +
-    `📸 Photos: ${photoCount}\n` +
-    `📝 Notes: ${newDetails.substring(0, 50)}${newDetails.length > 50 ? '...' : ''}\n\n` +
-    `Look good?`;
-
-  await sendButtons(phone, summary, [
-    { id: 'submit', title: 'YES, SUBMIT ✓' },
-    { id: 'cancel', title: 'CANCEL' }
-  ]);
-
-  return res.status(200).json({ status: 'ready to submit' });
-}
-
-async function askNextMissingField(phone, session, res) {
-  const missing = getMissingFields(session.listing);
-  console.log(`🔍 Missing fields: ${JSON.stringify(missing)}`);
+async function askNextMissingField(phone, res) {
+  const conv = await smsDb.getConversation(phone);
+  const listing = conv.context?.listing_data || {};
+  const missing = getMissingFields(listing);
 
   if (missing.length === 0) {
-    // All required fields complete - ask for PHOTOS FIRST (gives Shopify time to process)
-    console.log('✅ All fields complete - asking for photos first');
-
-    // Create Shopify draft NOW (before photos)
-    const draftCreated = await createDraftForSession(phone, session);
-    if (!draftCreated) {
-      await sendMessage(phone, "Oops, couldn't create draft. Reply SUBMIT to try again.");
-      return res.status(200).json({ status: 'error creating draft' });
-    }
-
-    session.state = 'collecting_photos';
-    session.photos = session.photos || [];
-    await saveSession(phone, session);
-
-    await sendMessage(phone, `Perfect! 🎉\n\nNow send at least 3 photos:\n\n1️⃣ Front view\n2️⃣ Back view\n3️⃣ Designer tag\n\nJust send them! 📸`);
+    // All fields complete - move to photos
+    await smsDb.setState(phone, 'sell_photos');
+    await sendMessage(phone, "Great! 📸\n\nNow send at least 3 photos of your item.\n\nText DONE when finished.");
     return res.status(200).json({ status: 'asked photos' });
   }
 
-  // Ask for next field
-  const nextField = missing[0];
-  session.current_field = nextField;
-  session.state = 'awaiting_missing_field';
-  await saveSession(phone, session);
+  // Ask for next missing field
+  const field = missing[0];
+  await smsDb.updateContext(phone, { current_field: field });
 
-  console.log(`❓ Asking for: ${nextField}`);
-  await askForField(phone, nextField);
-  return res.status(200).json({ status: `asked ${nextField}` });
+  const label = FIELD_LABELS[field] || field;
+  let prompt = `What's the ${label}?`;
+
+  // Add options for dropdown fields
+  if (DROPDOWN_OPTIONS[field]) {
+    const options = DROPDOWN_OPTIONS[field].map(opt => opt.label).join(', ');
+    prompt += `\n\nOptions: ${options}`;
+  }
+
+  await sendMessage(phone, prompt);
+  return res.status(200).json({ status: `asked ${field}` });
 }
 
-async function askForField(phone, field) {
-  const questions = {
-    designer: {
-      text: "What designer/brand?",
-      note: "e.g., Maria B, Sana Safinaz, Khaadi"
-    },
-    pieces_included: {
-      text: "How many pieces?",
-      buttons: [
-        { id: 'Kurta', title: 'Kurta only' },
-        { id: '2-piece', title: '2-piece' },
-        { id: '3-piece', title: '3-piece' }
-      ]
-    },
-    size: {
-      text: "What size?",
-      list: DROPDOWN_OPTIONS.size.filter(o => o.value).slice(0, 10)
-    },
-    condition: {
-      text: "What condition?",
-      list: DROPDOWN_OPTIONS.condition.filter(o => o.value).slice(0, 10)
-    },
-    asking_price_usd: {
-      text: "What price are you asking? (in USD)",
-      note: "e.g., 80"
+async function handleMissingField(phone, text, buttonId, conv, res) {
+  const field = conv.context?.current_field;
+  if (!field) {
+    return await askNextMissingField(phone, res);
+  }
+
+  const normalized = normalizeInput(text);
+  let value = normalized;
+
+  // Match dropdown fields
+  if (DROPDOWN_OPTIONS[field]) {
+    const matched = matchToDropdown(normalized, field);
+    if (!matched) {
+      const options = DROPDOWN_OPTIONS[field].map(opt => opt.label).join(', ');
+      await sendMessage(phone, `Please choose from: ${options}`);
+      return res.status(200).json({ status: 'invalid option' });
     }
-  };
-
-  const q = questions[field];
-  if (!q) {
-    await sendMessage(phone, `What's the ${field}?`);
-    return;
+    value = matched;
   }
 
-  if (q.buttons) {
-    // Use buttons for quick selections
-    await sendButtons(phone, q.text, q.buttons);
-  } else if (q.list) {
-    // Use List Message for cleaner UI (like templates)
-    await sendListMessage(phone, q.text, q.list, field);
-  } else {
-    await sendMessage(phone, q.text + (q.note ? `\n${q.note}` : ''));
+  // Validate price
+  if (field === 'asking_price_usd') {
+    const price = parseInt(value.replace(/\D/g, ''));
+    if (isNaN(price) || price <= 0) {
+      await sendMessage(phone, "Please enter a valid price (e.g., 50 or $50)");
+      return res.status(200).json({ status: 'invalid price' });
+    }
+    value = price;
+  }
+
+  // Save field
+  const listing = conv.context?.listing_data || {};
+  listing[field] = value;
+  await smsDb.updateContext(phone, { listing_data: listing });
+
+  console.log(`✅ Saved ${field} = ${value}`);
+
+  // Ask next missing field
+  return await askNextMissingField(phone, res);
+}
+
+async function handlePhoto(phone, mediaId, conv, res) {
+  // Check state
+  if (conv.state !== 'sell_photos') {
+    console.log(`⚠️  Photo received in wrong state: ${conv.state}`);
+    return res.status(200).json({ status: 'wrong state' });
+  }
+
+  // Redis deduplication
+  const claimed = await redisPhotos.claimPhoto(phone, mediaId);
+  if (!claimed) {
+    console.log(`⏭️  Duplicate photo: ${mediaId}`);
+    return res.status(200).json({ status: 'duplicate photo' });
+  }
+
+  try {
+    // Download and compress
+    const buffer = await downloadMedia(mediaId);
+    const compressed = await compressImage(buffer);
+
+    // Upload to Shopify GraphQL (no productId needed!)
+    const fileId = await shopifyGraphQL.uploadPhotoToShopify(compressed, `wa_${mediaId}.jpg`);
+
+    // Add to Redis
+    const count = await redisPhotos.addPhoto(phone, fileId, mediaId);
+
+    // Also backup to context
+    const currentFileIds = conv.context?.shopify_file_ids || [];
+    currentFileIds.push(fileId);
+    await smsDb.updateContext(phone, { shopify_file_ids: currentFileIds });
+
+    console.log(`✅ Photo ${count} uploaded: ${fileId}`);
+
+    // Send confirmation on first photo only
+    if (count === 1) {
+      await sendMessage(phone, "Got it! 📸\n\nKeep sending. Text DONE when finished.");
+    }
+
+    return res.status(200).json({ status: 'photo saved', count });
+
+  } catch (error) {
+    console.error('❌ Photo upload error:', error);
+    await sendMessage(phone, "That photo didn't upload. Please resend it 📸");
+    return res.status(200).json({ status: 'upload failed' });
   }
 }
 
-async function handlePhotoState(phone, text, buttonId, session, res) {
-  // Check if already submitted (race condition protection)
-  if (session.state === 'submitted') {
-    console.log('⏭️  Already submitted - ignoring photo state message');
-    return res.status(200).json({ status: 'already submitted' });
-  }
-
+async function handlePhotoState(phone, text, buttonId, conv, res) {
   const userText = (text || '').trim().toLowerCase();
 
-  // User says they're done sending photos
-  if (userText === 'done' || userText === 'next' || userText === 'continue' || buttonId === 'done') {
-    console.log(`📸 User said DONE - waiting 2s for any in-flight photo uploads to complete...`);
+  if (userText === 'done') {
+    // Get photos from Redis
+    const fileIds = await redisPhotos.getPhotos(phone);
+    const photoCount = fileIds.length;
 
-    // CRITICAL: Wait a moment for any in-flight photo uploads to finish saving
-    // Photos can take 3-5 seconds to upload+process, so if user says DONE quickly,
-    // we need to wait for the last photo webhook to complete
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log(`✅ User done. Photos in Redis: ${photoCount}`);
 
-    // CRITICAL: Re-fetch session to get latest photos (photos were saved by separate webhook calls)
-    const freshSession = await getSession(phone);
-    const photoCount = (freshSession.photos || []).filter(url => url).length;
-    console.log(`✅ After 2s wait, photo count: ${photoCount}`);
+    if (photoCount < 3) {
+      await sendMessage(phone, `Need at least 3 photos. You have ${photoCount}. Send ${3 - photoCount} more 📸`);
+      return res.status(200).json({ status: 'need more photos' });
+    }
 
-    // Move to additional details
-    freshSession.state = 'awaiting_additional_details';
-    await saveSession(phone, freshSession);
+    // Transfer to context (already backed up during upload, but ensure it's synced)
+    await smsDb.updateContext(phone, { shopify_file_ids: fileIds });
+
+    // Clear Redis
+    await redisPhotos.clearPhotos(phone);
+
+    // Move to next state
+    await smsDb.setState(phone, 'awaiting_additional_details');
 
     await sendButtons(phone,
       `Great! Got ${photoCount} photo${photoCount !== 1 ? 's' : ''} 📸\n\nAny flaws or special notes?`,
@@ -948,588 +771,266 @@ async function handlePhotoState(phone, text, buttonId, session, res) {
         { id: 'add_details', title: 'YES, ADD' }
       ]
     );
-    return res.status(200).json({ status: 'asked additional details' });
+
+    return res.status(200).json({ status: 'asked details' });
   }
 
-  // Any other text - just remind them to send photos or say DONE
-  // Don't show count here because session might be stale (photos still uploading)
-  await sendMessage(phone, `Send photos or text DONE when finished! 📸`);
-  return res.status(200).json({ status: 'waiting for photos or done' });
+  // Any other text
+  await sendMessage(phone, "Send photos or text DONE when finished! 📸");
+  return res.status(200).json({ status: 'waiting' });
 }
 
-async function handlePhoto(phone, mediaId, session, res) {
-  try {
-    // Small random delay to prevent concurrent updates from overwriting each other
-    await new Promise(resolve => setTimeout(resolve, Math.random() * 300));
+async function handleAdditionalDetails(phone, text, buttonId, conv, res) {
+  if (buttonId === 'skip_details' || text.toLowerCase() === 'skip') {
+    return await showSummary(phone, conv, res);
+  }
 
-    // Re-fetch session FIRST to get latest state (in case we just sent them back to collecting_photos)
-    const latestSession = await getSession(phone);
+  if (buttonId === 'add_details' || text.toLowerCase().includes('yes')) {
+    await smsDb.setState(phone, 'awaiting_additional_details_text');
+    await sendMessage(phone, "What should buyers know? (flaws, measurements, notes)");
+    return res.status(200).json({ status: 'asked details text' });
+  }
 
-    // Check if already submitted - give helpful message
-    if (!latestSession || latestSession.state === 'submitted') {
-      console.log(`⏭️  Photo received after submission - directing to dashboard`);
+  return await showSummary(phone, conv, res);
+}
 
-      const listing = latestSession.listing || {};
-      const designer = listing.designer || 'Your item';
-      const itemType = listing.item_type || '';
+async function handleAdditionalDetailsText(phone, text, conv, res) {
+  // Save additional details
+  const listing = conv.context?.listing_data || {};
+  listing.additional_details = text.trim();
+  await smsDb.updateContext(phone, { listing_data: listing });
 
-      await sendMessage(phone,
-        `Your listing (${designer} ${itemType}) has been submitted! ✅\n\n` +
-        `To add this photo, please log into sell.thephirstory.com and edit your listing.`
-      );
-      return res.status(200).json({ status: 'already submitted' });
+  return await showSummary(phone, conv, res);
+}
+
+async function showSummary(phone, conv, res) {
+  const listing = conv.context?.listing_data || {};
+  const photoCount = (conv.context?.shopify_file_ids || []).length;
+
+  await smsDb.setState(phone, 'sell_confirming');
+
+  const summary =
+    `📋 *Ready to submit!*\n\n` +
+    `📦 ${listing.designer} ${listing.item_type || ''}\n` +
+    `📏 Size: ${listing.size}\n` +
+    `🎨 Pieces: ${listing.pieces_included}\n` +
+    `✨ Condition: ${listing.condition}\n` +
+    `💰 Price: $${listing.asking_price_usd}\n` +
+    `📸 Photos: ${photoCount}\n` +
+    (listing.additional_details ? `📝 Notes: ${listing.additional_details}\n` : '') +
+    `\nLook good?`;
+
+  await sendButtons(phone, summary, [
+    { id: 'submit', title: 'YES, SUBMIT ✓' },
+    { id: 'edit_fields', title: 'EDIT' },
+    { id: 'cancel', title: 'CANCEL' }
+  ]);
+
+  return res.status(200).json({ status: 'showed summary' });
+}
+
+async function handleConfirmation(phone, text, buttonId, conv, res) {
+  const response = (buttonId || text).toLowerCase();
+
+  if (response === 'submit' || response === 'yes') {
+    return await submitListing(phone, conv, res);
+  }
+
+  if (response === 'edit_fields' || response === 'edit') {
+    return await showEditMenu(phone, conv, res);
+  }
+
+  if (response === 'cancel') {
+    const fileIds = conv.context?.shopify_file_ids || [];
+    if (fileIds.length > 0) {
+      await shopifyGraphQL.deleteFiles(fileIds);
+    }
+    await smsDb.resetConversation(phone);
+    await sendMessage(phone, "Cancelled. Reply SELL to start over.");
+    return res.status(200).json({ status: 'cancelled' });
+  }
+
+  // Unknown response - show summary again
+  return await showSummary(phone, conv, res);
+}
+
+async function showEditMenu(phone, conv, res) {
+  const listing = conv.context?.listing_data || {};
+
+  await smsDb.setState(phone, 'sell_editing');
+
+  const menu =
+    `What would you like to edit?\n\n` +
+    `1️⃣ Designer: ${listing.designer}\n` +
+    `2️⃣ Pieces: ${listing.pieces_included}\n` +
+    `3️⃣ Size: ${listing.size}\n` +
+    `4️⃣ Condition: ${listing.condition}\n` +
+    `5️⃣ Price: $${listing.asking_price_usd}\n` +
+    `6️⃣ Notes: ${listing.additional_details || 'None'}\n\n` +
+    `Reply with the number (1-6) or BACK to return.`;
+
+  await sendMessage(phone, menu);
+  return res.status(200).json({ status: 'showed edit menu' });
+}
+
+async function handleEditing(phone, text, buttonId, conv, res) {
+  const input = text.trim();
+
+  // Check if we're waiting for a new value
+  if (conv.context?.sub_state === 'awaiting_edit_value') {
+    const field = conv.context?.editing_field;
+    if (!field) {
+      return await showEditMenu(phone, conv, res);
     }
 
-    // Check state AFTER re-fetching (not with stale passed-in session)
-    if (latestSession.state !== 'collecting_photos') {
-      console.log(`⏭️  Photo received during wrong state: ${latestSession.state}`);
-      await sendMessage(phone, "Thanks! I'll ask for photos when we're ready 📸");
-      return res.status(200).json({ status: 'photo queued for later' });
-    }
+    const normalized = normalizeInput(input);
+    let value = normalized;
 
-    // Preserve freshest meta (processedMessages, created_at, etc.) from original session
-    // This prevents photo uploads from rolling back idempotency tracking
-    latestSession.processedMessages = session.processedMessages || latestSession.processedMessages;
-    latestSession.processedMediaIds = session.processedMediaIds || latestSession.processedMediaIds;
-    latestSession.created_at = session.created_at || latestSession.created_at;
-    latestSession.prev_state = session.prev_state || latestSession.prev_state;
-    latestSession.shopify_product_id = session.shopify_product_id || latestSession.shopify_product_id;
-
-    // Check if draft exists (should have been created before photos)
-    if (!latestSession.shopify_product_id) {
-      console.error('❌ No Shopify product ID - draft should have been created first!');
-      await sendMessage(phone, "Oops, something went wrong. Reply SUBMIT to try again.");
-      return res.status(200).json({ status: 'no product id' });
-    }
-
-    // Check if this photo already exists (by mediaId)
-    // Track processed mediaIds in session metadata
-    latestSession.photos = latestSession.photos || [];
-    latestSession.processedMediaIds = latestSession.processedMediaIds || [];
-    if (latestSession.processedMediaIds.includes(mediaId)) {
-      console.log(`⏭️  Photo ${mediaId} already uploaded, skipping`);
-      return res.status(200).json({ status: 'duplicate photo' });
-    }
-
-    // Download and compress photo
-    let base64;
-    if (process.env.TEST_MODE === 'true') {
-      // Dummy 1x1 red pixel PNG for testing
-      base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
-      console.log(`🧪 TEST_MODE: Using dummy photo for ${mediaId}`);
-    } else {
-      // Download, compress, and convert to base64
-      const mediaUrl = await getMediaUrl(mediaId);
-      const mediaBuffer = await downloadMedia(mediaUrl);
-      base64 = await bufferToOptimizedJpegBase64(mediaBuffer);
-    }
-
-    // Initialize photos array if needed
-    if (!latestSession.photos) {
-      latestSession.photos = [];
-    }
-
-    // Send acknowledgment ONLY for the very first photo (gives user clear instruction)
-    const isFirstPhoto = latestSession.photos.length === 0;
-    if (isFirstPhoto) {
-      await sendMessage(phone, `Got it! 📸\n\nKeep sending photos. Text DONE when finished.`);
-    }
-
-    // Upload directly to Shopify (NEW - use Shopify as CDN)
-    // Use mediaId-based filename to avoid race conditions
-    console.log(`📸 Uploading photo ${latestSession.photos.length + 1} to Shopify product ${latestSession.shopify_product_id}... (mediaId: ${mediaId})`);
-
-    const uploadPhoto = async (retryCount = 0) => {
-      try {
-        const photoRes = await fetch(`${API_BASE}/api/wa-product-image?action=add`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productId: latestSession.shopify_product_id,
-            base64: base64,
-            filename: `wa_${mediaId}.jpg`  // MediaId-based to avoid race conditions
-          })
-        });
-
-        const photoData = await photoRes.json();
-
-        // Strict validation: only accept if we got a valid URL
-        if (!photoData.success || !photoData.imageUrl) {
-          if (retryCount === 0) {
-            // Retry once after short delay (transient Shopify errors)
-            console.log(`⚠️ Photo upload failed, retrying once... (${photoData.error || 'No URL returned'})`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return uploadPhoto(1);
-          }
-          throw new Error(photoData.error || 'No URL returned');
-        }
-
-        return photoData;
-      } catch (error) {
-        if (retryCount === 0) {
-          console.log(`⚠️ Photo upload error, retrying once... (${error.message})`);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          return uploadPhoto(1);
-        }
-        throw error;
+    // Match dropdown fields
+    if (DROPDOWN_OPTIONS[field]) {
+      const matched = matchToDropdown(normalized, field);
+      if (!matched) {
+        const options = DROPDOWN_OPTIONS[field].map(opt => opt.label).join(', ');
+        await sendMessage(phone, `Please choose from: ${options}`);
+        return res.status(200).json({ status: 'invalid option' });
       }
-    };
-
-    let photoData;
-    try {
-      photoData = await uploadPhoto();
-    } catch (error) {
-      console.error(`❌ Photo upload to Shopify failed after retry:`, error.message);
-      await sendMessage(phone, "That photo didn't upload—please resend it 📸");
-      return res.status(200).json({ status: 'upload failed', error: error.message });
+      value = matched;
     }
 
-    // Strict validation: must have valid CDN URL (prevents phantom photos)
-    const hasValidUrl = photoData.imageUrl &&
-                       typeof photoData.imageUrl === 'string' &&
-                       photoData.imageUrl.length > 10 &&
-                       (photoData.imageUrl.startsWith('http://') || photoData.imageUrl.startsWith('https://'));
-
-    if (!hasValidUrl) {
-      console.error(`❌ Photo uploaded but no valid URL - skipping. Got: ${JSON.stringify(photoData.imageUrl)}`);
-      await sendMessage(phone, "That photo didn't upload—please resend it 📸");
-      return res.status(200).json({ status: 'no url', receivedUrl: photoData.imageUrl });
+    // Validate price
+    if (field === 'asking_price_usd') {
+      const price = parseInt(value.replace(/\D/g, ''));
+      if (isNaN(price) || price <= 0) {
+        await sendMessage(phone, "Please enter a valid price (e.g., 50 or $50)");
+        return res.status(200).json({ status: 'invalid price' });
+      }
+      value = price;
     }
 
-    console.log(`✅ Validated photo URL: ${photoData.imageUrl}`);
-
-    // Save only the URL string (photos column is TEXT[], not JSONB)
-    latestSession.photos.push(photoData.imageUrl);
-
-    // Track this mediaId to prevent duplicates
-    latestSession.processedMediaIds.push(mediaId);
-
-    console.log(`💾 Saving session: phone=${phone}, photos.length=${latestSession.photos.length}, state=${latestSession.state}`);
-    await saveSession(phone, latestSession);
-
-    // Verify it saved by re-fetching
-    const verifySession = await getSession(phone);
-    const savedCount = (verifySession.photos || []).filter(url => url).length;
-    const latestPhotoUrl = verifySession.photos?.[verifySession.photos.length - 1] || '';
-    console.log(`✅ Photo saved! Verified count: ${savedCount}, Latest photo: ${latestPhotoUrl.substring(0, 50)}...`);
-
-    // Use .filter to count only photos with valid URLs (prevents counting phantom photos)
-    const count = (latestSession.photos || []).filter(url => url).length;
-    console.log(`📸 Photo ${count} uploaded to Shopify: ${photoData.imageUrl}`);
-
-    // Done! No batching, no delays, no automatic transitions
-    // User will text "DONE" when ready to continue
-    return res.status(200).json({ status: 'photo uploaded', count });
-  } catch (error) {
-    console.error('❌ Photo error:', error);
-    await sendMessage(phone, "Photo upload failed. Try again.");
-    return res.status(200).json({ status: 'photo error' });
-  }
-}
-
-async function submitListing(phone, session, res) {
-  const listing = session.listing;
-
-  try {
-    // Count only photos with valid URLs
-    const photoCount = (session.photos || []).filter(url => url).length;
-
-    console.log('📤 Submitting listing...');
-    console.log('📦 Session state:', {
-      phone: phone,
-      photoCount: photoCount,
-      totalPhotos: session.photos?.length || 0,
-      hasDraftId: !!session.shopify_product_id,
-      productId: session.shopify_product_id
+    // Update field
+    const listing = conv.context?.listing_data || {};
+    listing[field] = value;
+    await smsDb.updateContext(phone, {
+      listing_data: listing,
+      editing_field: null,
+      sub_state: null
     });
 
-    // Check if we already created a draft (should ALWAYS exist now)
-    if (session.shopify_product_id) {
-      console.log(`✅ Draft exists: ${session.shopify_product_id}`);
+    console.log(`✅ Updated ${field} = ${value}`);
 
-      // Clean price for DB insert
-      let cleanPrice = listing.asking_price_usd;
-      if (typeof cleanPrice === 'string') {
-        const match = cleanPrice.match(/(\d+)/);
-        if (match) cleanPrice = parseFloat(match[1]);
-      }
+    await sendMessage(phone, `✓ Updated!\n\nAnything else to edit?`);
 
-      // Extract photo URLs (photos are already URL strings)
-      const photoUrls = (session.photos || [])
-        .filter(url => url); // Filter out any nulls
+    // Show edit menu again
+    return await showEditMenu(phone, conv, res);
+  }
 
-      console.log(`📸 Photos already in Shopify: ${photoUrls.length} valid URLs (${session.photos?.length || 0} total entries)`);
+  const inputLower = input.toLowerCase();
 
-      // Require at least 3 photos
-      if (photoUrls.length < 3) {
-        console.error(`❌ Not enough photos: ${photoUrls.length}/3. Phone: ${phone}, ProductId: ${session.shopify_product_id}`);
+  if (inputLower === 'back' || inputLower === 'cancel') {
+    return await showSummary(phone, conv, res);
+  }
 
-        // Send them back to photo collection
-        session.state = 'collecting_photos';
-        await saveSession(phone, session);
+  // Map number to field
+  const fieldMap = {
+    '1': 'designer',
+    '2': 'pieces_included',
+    '3': 'size',
+    '4': 'condition',
+    '5': 'asking_price_usd',
+    '6': 'additional_details'
+  };
 
-        await sendMessage(phone,
-          `⚠️ Need at least 3 photos (you have ${photoUrls.length}).\n\n` +
-          `Send ${3 - photoUrls.length} more photos now! 📸`
-        );
-        return res.status(200).json({
-          status: 'need more photos',
-          current: photoUrls.length,
-          needed: 3 - photoUrls.length
-        });
-      }
+  const field = fieldMap[inputLower];
 
-      // Check if listing already exists (idempotency for retry)
-      const { data: existing } = await supabase
-        .from('listings')
-        .select('id')
-        .eq('shopify_product_id', session.shopify_product_id)
-        .maybeSingle();
+  if (!field) {
+    await sendMessage(phone, "Reply with a number (1-6) or BACK");
+    return res.status(200).json({ status: 'invalid choice' });
+  }
 
-      if (existing?.id) {
-        console.log(`✅ Listing already exists in DB: ${existing.id}`);
-        // Already submitted - just send success message
-        await sendMessage(phone,
-          `🎉 Already submitted!\n\n` +
-          `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-          `📏 ${listing.size} • $${cleanPrice}\n\n` +
-          `We'll notify you when it's live.\nReply SELL to list another.`
-        );
+  // Save which field they're editing
+  await smsDb.updateContext(phone, { editing_field: field });
 
-        session.state = 'submitted';
-        await saveSession(phone, session);
-        await resetSession(phone);
+  const label = FIELD_LABELS[field] || field === 'additional_details' ? 'Notes' : field;
+  let prompt = `Enter new ${label}:`;
 
-        return res.status(200).json({ status: 'already_submitted', listingId: existing.id });
-      }
+  if (DROPDOWN_OPTIONS[field]) {
+    const options = DROPDOWN_OPTIONS[field].map(opt => opt.label).join(', ');
+    prompt += `\n\nOptions: ${options}`;
+  }
 
-      // Save to DB (first time)
-      console.log(`💾 Inserting listing to DB: phone=${phone}, productId=${session.shopify_product_id}, photoCount=${photoUrls.length}`);
+  await sendMessage(phone, prompt);
 
-      const { data: createdListing, error: listingError } = await supabase
-        .from('listings')
-        .insert({
-          seller_id: listing._seller_id,
-          conversation_id: null,
-          status: 'pending_approval',
-          input_method: 'whatsapp',
-          shopify_product_id: session.shopify_product_id,
-          designer: listing.designer,
-          item_type: listing.item_type,
-          size: listing.size,
-          condition: listing.condition,
-          pieces_included: listing.pieces_included,
-          asking_price_usd: cleanPrice || null,
-          details: listing.details,
-          additional_details: listing.additional_details || null,
-          photo_urls: photoUrls.length > 0 ? photoUrls : null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .select('id')
-        .single();
+  // Set a sub-state to handle the response
+  await smsDb.updateContext(phone, { sub_state: 'awaiting_edit_value' });
 
-      if (listingError) {
-        console.error(`❌ DB insert failed: phone=${phone}, error=${listingError.message}`);
-        throw new Error('Failed to save listing: ' + listingError.message);
-      }
+  return res.status(200).json({ status: 'asked edit value' });
+}
 
-      console.log(`✅ DB insert successful: listingId=${createdListing.id}, phone=${phone}, productId=${session.shopify_product_id}`);
+async function submitListing(phone, conv, res) {
+  const listing = conv.context?.listing_data || {};
+  const fileIds = conv.context?.shopify_file_ids || [];
 
-      // Mark session as submitted BEFORE sending message (prevents race conditions)
-      session.state = 'submitted';
-      session.submitted_at = new Date().toISOString();
-      await saveSession(phone, session);
+  if (fileIds.length < 3) {
+    await sendMessage(phone, `Need at least 3 photos. You have ${fileIds.length}.`);
+    await smsDb.setState(phone, 'sell_photos');
+    return res.status(200).json({ status: 'need more photos' });
+  }
 
-      // Success! Send confirmation message
-      try {
-        console.log(`📤 Sending success message to ${phone}...`);
-        await sendMessage(phone,
-          `🎉 Submitted!\n\n` +
-          `📦 ${listing.designer} ${listing.item_type || ''}\n` +
-          `📏 ${listing.size} • $${cleanPrice}\n\n` +
-          `We'll notify you when it's live.\nReply SELL to list another.`
-        );
-        console.log(`✅ Success message sent!`);
-      } catch (messageError) {
-        // Log but don't fail - listing is already created
-        console.error(`⚠️  Success message failed to send (listing still created):`, messageError.message);
-      }
+  try {
+    // Create Shopify product with media
+    const productData = {
+      title: `${listing.designer} ${listing.item_type || 'Item'}`,
+      description: listing.description || '',
+      designer: listing.designer,
+      item_type: listing.item_type,
+      size: listing.size,
+      condition: listing.condition,
+      asking_price_usd: listing.asking_price_usd
+    };
 
-      // Note: We DON'T delete the session here to prevent race conditions with photo processing
-      // The 'submitted' state handler will reset on next message
+    const { productId, productUrl } = await shopifyGraphQL.createProductWithMedia(productData, fileIds);
 
-      return res.status(200).json({ status: 'submitted', productId: session.shopify_product_id, listingId: createdListing.id });
+    // Insert into listings table
+    const { data: listingRecord, error } = await supabase
+      .from('listings')
+      .insert({
+        conversation_id: conv.id,
+        seller_id: conv.seller_id,
+        status: 'draft',
+        designer: listing.designer,
+        item_type: listing.item_type,
+        pieces_included: listing.pieces_included,
+        size: listing.size,
+        condition: listing.condition,
+        asking_price_usd: listing.asking_price_usd,
+        details: listing.additional_details || null,
+        shopify_product_id: productId,
+        shopify_product_url: productUrl,
+        input_method: 'whatsapp'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ Database insert error:', error);
+      throw error;
     }
 
-    // This should never happen - draft should always be created before photos now
-    console.error('❌ CRITICAL: No Shopify product ID during SUBMIT! Draft should have been created before photos.');
+    // Reset conversation
+    await smsDb.resetConversation(phone);
+
     await sendMessage(phone,
-      `⚠️ Something went wrong.\n\n` +
-      `Your listing info is saved. Please reply SUBMIT to try again.\n\n` +
-      `Or reply CANCEL to start over.`
+      `✅ Success!\n\n` +
+      `Your ${listing.designer} listing is now in review.\n\n` +
+      `We'll notify you when it's approved.\n\n` +
+      `Reply SELL to list another item.`
     );
-    return res.status(200).json({
-      status: 'error',
-      error: 'No product ID - draft should have been created before photos'
-    });
+
+    return res.status(200).json({ status: 'submitted', listing_id: listingRecord.id });
 
   } catch (error) {
-    console.error('❌ Submit error:', error.message);
-    console.error('❌ Error stack:', error.stack);
-    console.error('❌ Listing data:', JSON.stringify(listing));
-    console.error('❌ Session photos:', session.photos?.length || 0);
-
-    await sendMessage(phone, "Oops, something went wrong.\n\nYour info is saved. Reply SUBMIT to try again, or CANCEL to start over.");
-    return res.status(200).json({ status: 'error', error: error.message });
+    console.error('❌ Submit error:', error);
+    await sendMessage(phone, "Sorry, submission failed. Please try again or contact support.");
+    return res.status(200).json({ status: 'submit failed', error: error.message });
   }
-}
-
-// ============ HELPERS ============
-
-function formatListingSummary(listing) {
-  const parts = ['Got it! Here\'s what I have:\n'];
-
-  if (listing.designer) parts.push(`✓ Designer: ${listing.designer}`);
-  if (listing.item_type) parts.push(`✓ Type: ${listing.item_type}`);
-  if (listing.pieces_included) parts.push(`✓ Pieces: ${listing.pieces_included}`);
-  if (listing.size) parts.push(`✓ Size: ${listing.size}`);
-  if (listing.condition) parts.push(`✓ Condition: ${listing.condition}`);
-  if (listing.asking_price_usd) parts.push(`✓ Price: $${listing.asking_price_usd}`);
-  if (listing.color) parts.push(`✓ Color: ${listing.color}`);
-  if (listing.material) parts.push(`✓ Material: ${listing.material}`);
-  if (listing.additional_details) parts.push(`✓ Notes: ${listing.additional_details}`);
-
-  return parts.join('\n');
-}
-
-// ============ API CALLS ============
-
-async function callValidateListing(description) {
-  const response = await fetch(`${API_BASE}/api/validate-listing`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ description })
-  });
-  return await response.json();
-}
-
-async function transcribeAudio(mediaId) {
-  const mediaUrl = await getMediaUrl(mediaId);
-  const audioBuffer = await downloadMedia(mediaUrl);
-  const base64Audio = audioBuffer.toString('base64');
-
-  const response = await fetch(`${API_BASE}/api/transcribe`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio: base64Audio })
-  });
-
-  const data = await response.json();
-  return data.text || '';
-}
-
-async function getMediaUrl(mediaId) {
-  const response = await fetch(
-    `https://graph.facebook.com/v18.0/${mediaId}`,
-    {
-      headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
-    }
-  );
-  const data = await response.json();
-  return data.url;
-}
-
-async function downloadMedia(url) {
-  const response = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
-  });
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
-// ============ SESSION MANAGEMENT ============
-
-async function getSession(phone) {
-  const { data } = await supabase
-    .from('whatsapp_sessions')
-    .select('*')
-    .eq('phone', phone)
-    .maybeSingle();
-
-  if (data) {
-    const listing = data.listing || {};
-    const meta = listing._meta || {};
-
-    return {
-      state: data.state || 'welcome',
-      email: data.email,
-      listing: listing,
-      photos: data.photos || [],
-      current_field: data.current_field,
-      // Extract metadata from listing._meta
-      created_at: meta.created_at || null, // Don't fallback to updated_at - only use true created_at
-      processedMessages: meta.processedMessages || [],
-      processedMediaIds: meta.processedMediaIds || [],
-      lastPhotoResponseAt: meta.lastPhotoResponseAt || null,
-      shopify_product_id: meta.shopify_product_id || null,
-      prev_state: meta.prev_state || null
-    };
-  }
-
-  return {
-    state: 'welcome',
-    listing: {},
-    photos: [],
-    created_at: null, // Will be set on first save
-    processedMessages: [],
-    processedMediaIds: [],
-    lastPhotoResponseAt: null,
-    shopify_product_id: null,
-    prev_state: null
-  };
-}
-
-async function saveSession(phone, session) {
-  // Store metadata in listing._meta to persist across sessions
-  const listing = session.listing || {};
-
-  // Preserve existing created_at if it exists, otherwise set it now (only once)
-  const existingCreatedAt = listing._meta?.created_at;
-
-  listing._meta = {
-    created_at: existingCreatedAt || session.created_at || new Date().toISOString(),
-    processedMessages: session.processedMessages || [],
-    processedMediaIds: session.processedMediaIds || [],
-    lastPhotoResponseAt: session.lastPhotoResponseAt || null,
-    shopify_product_id: session.shopify_product_id || null,
-    prev_state: session.prev_state || null
-  };
-
-  await supabase
-    .from('whatsapp_sessions')
-    .upsert({
-      phone,
-      state: session.state,
-      email: session.email,
-      listing: listing,
-      photos: session.photos || [],
-      current_field: session.current_field,
-      updated_at: new Date().toISOString()
-    });
-}
-
-async function resetSession(phone) {
-  await supabase
-    .from('whatsapp_sessions')
-    .delete()
-    .eq('phone', phone);
-}
-
-// ============ MESSAGING ============
-
-async function sendMessage(phone, text) {
-  try {
-    const response = await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: phone,
-        type: 'text',
-        text: { body: text }
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error(`❌ WhatsApp message send failed (HTTP ${response.status}):`, JSON.stringify(data));
-      throw new Error(`WhatsApp API error: ${data.error?.message || response.statusText}`);
-    }
-
-    console.log(`✅ Message sent to ${phone}: "${text.substring(0, 50)}..."`);
-    return data;
-  } catch (error) {
-    console.error(`❌ Failed to send message to ${phone}:`, error.message);
-    throw error;
-  }
-}
-
-async function sendButtons(phone, text, buttons) {
-  try {
-    const response = await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: phone,
-        type: 'interactive',
-        interactive: {
-          type: 'button',
-          body: { text },
-          action: {
-            buttons: buttons.map(b => ({
-              type: 'reply',
-              reply: { id: b.id, title: b.title }
-            }))
-          }
-        }
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error(`❌ WhatsApp buttons send failed (HTTP ${response.status}):`, JSON.stringify(data));
-      throw new Error(`WhatsApp API error: ${data.error?.message || response.statusText}`);
-    }
-
-    console.log(`✅ Buttons sent to ${phone}`);
-    return data;
-  } catch (error) {
-    console.error(`❌ Failed to send buttons to ${phone}:`, error.message);
-    throw error;
-  }
-}
-
-async function sendListMessage(phone, text, options, sectionTitle) {
-  // Generate descriptive button text based on field
-  const buttonText = sectionTitle === 'size' ? 'Select size' :
-                     sectionTitle === 'condition' ? 'Select condition' :
-                     'Select';
-
-  await fetch(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: phone,
-      type: 'interactive',
-      interactive: {
-        type: 'list',
-        body: { text },
-        action: {
-          button: buttonText,
-          sections: [{
-            title: sectionTitle.replace(/_/g, ' ').toUpperCase(),
-            rows: options.map(o => ({
-              id: o.value,
-              title: o.label,
-              description: o.keywords[0] || ''
-            }))
-          }]
-        }
-      }
-    })
-  });
 }
