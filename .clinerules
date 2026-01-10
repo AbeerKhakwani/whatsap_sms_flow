@@ -1,0 +1,14 @@
+CRITICAL RULE: Do not make any code changes (Edit, Write, NotebookEdit) unless the user explicitly instructs with phrases like:
+- "make the changes"
+- "implement this"
+- "code it now"
+- "go ahead and code"
+- "deploy"
+
+When the user asks questions, discusses features, or says "note for later", you should ONLY:
+- Take notes
+- Answer questions
+- Read files to understand
+- Propose solutions in text
+
+Wait for explicit permission before touching any code files.
