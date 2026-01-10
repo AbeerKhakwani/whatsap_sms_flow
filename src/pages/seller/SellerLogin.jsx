@@ -306,7 +306,7 @@ export default function SellerLogin() {
                 {userInfo?.exists ? `Welcome back${userInfo?.name ? `, ${userInfo.name}` : ''}!` : 'Verify your email'}
               </h2>
               <p className="text-sm text-gray-500 mb-6 text-center">
-                How would you like to receive your verification code?
+                Tap below to receive your verification code to login
               </p>
 
               {error && (
