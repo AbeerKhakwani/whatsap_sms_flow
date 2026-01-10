@@ -665,19 +665,38 @@ async function askNextMissingField(phone, res) {
   const label = FIELD_LABELS[field] || field;
   const prompt = `What's the ${label}?`;
 
-  // Show buttons for dropdown fields (pieces, size, condition)
+  // Show buttons for dropdown fields
   if (DROPDOWN_OPTIONS[field]) {
     const options = DROPDOWN_OPTIONS[field];
 
-    // WhatsApp allows max 3 buttons, so if more than 3 options, use list or text
-    if (options.length <= 3) {
+    // For condition: show top 3 most common as buttons
+    if (field === 'condition') {
+      const topButtons = [
+        { id: 'condition_like_new', title: 'Like new' },
+        { id: 'condition_excellent', title: 'Excellent' },
+        { id: 'condition_good', title: 'Good' }
+      ];
+      await sendButtons(phone, `${prompt}\n\n(Or type: New with tags, Fair)`, topButtons);
+    }
+    // For size: show common sizes as buttons
+    else if (field === 'size') {
+      const commonSizes = [
+        { id: 'size_s', title: 'S' },
+        { id: 'size_m', title: 'M' },
+        { id: 'size_l', title: 'L' }
+      ];
+      await sendButtons(phone, `${prompt}\n\n(Or type: XS, XL, XXL, One Size, Unstitched, Measurements)`, commonSizes);
+    }
+    // For pieces_included: show all 3 as buttons
+    else if (options.length <= 3) {
       const buttons = options.map(opt => ({
         id: `${field}_${opt.value.toLowerCase().replace(/\s+/g, '_')}`,
         title: opt.label
       }));
       await sendButtons(phone, prompt, buttons);
-    } else {
-      // For fields with >3 options (like size), show as text list
+    }
+    // Fallback for other dropdown fields
+    else {
       const optionsList = options.map(opt => opt.label).join(', ');
       await sendMessage(phone, `${prompt}\n\nOptions: ${optionsList}`);
     }
