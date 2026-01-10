@@ -613,7 +613,7 @@ async function handleDescription(phone, text, conv, res) {
   if (extracted.asking_price_usd) confirmations.push(`Price: $${extracted.asking_price_usd} ✓`);
 
   if (confirmations.length > 0) {
-    await sendMessage(phone, `Got it!\n\n${confirmations.join('\n')}`);
+    await sendMessage(phone, `Got it!\n\n${confirmations.join('\n')}\n\nDon't worry - you'll get a chance to review everything at the end.`);
   }
 
   console.log('📋 About to ask for next missing field...');
@@ -1150,10 +1150,10 @@ async function submitListing(phone, conv, res) {
     await smsDb.resetConversation(phone);
 
     await sendMessage(phone,
-      `✅ Success!\n\n` +
-      `Your ${listing.designer} listing is now in review.\n\n` +
+      `✅ Success! Your ${listing.designer} listing is now in review.\n\n` +
       `We'll notify you when it's approved.\n\n` +
-      `Reply SELL to list another item.`
+      `Reply SELL to list another item.\n` +
+      `View and edit your listings at sell.thephirstory.com`
     );
 
     return res.status(200).json({ status: 'submitted', listing_id: listingRecord.id });
