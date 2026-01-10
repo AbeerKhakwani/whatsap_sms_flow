@@ -497,7 +497,7 @@ async function handleSellCommand(phone, conv, res) {
 
   // Not authorized - ask for email
   await smsDb.setState(phone, 'awaiting_email');
-  await sendMessage(phone, "What's your email?");
+  await sendMessage(phone, "What's your email?\n\nIf you have an account with us already, please use that email.");
   return res.status(200).json({ status: 'asked email' });
 }
 
@@ -529,7 +529,7 @@ async function handleEmail(phone, text, conv, res) {
   await smsDb.updateContext(phone, { email, pending_seller_id: sellerByEmail?.id || sellerByPhone?.id || null });
   await smsDb.setState(phone, 'awaiting_code');
 
-  await sendMessage(phone, `✅ Code sent to ${email}\n\nCheck your email and reply with the 6-digit code to verify.`);
+  await sendMessage(phone, `✅ Code sent to ${email}\n\nCheck your email (and junk/spam folder) and reply with the 6-digit code to verify.`);
   return res.status(200).json({ status: 'sent code' });
 }
 

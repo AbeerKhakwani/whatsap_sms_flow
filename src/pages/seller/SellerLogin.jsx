@@ -334,8 +334,8 @@ export default function SellerLogin() {
                   )}
                 </button>
 
-                {/* WhatsApp Button */}
-                <button
+                {/* WhatsApp Button - COMMENTED OUT - Will add back later as feature */}
+                {/* <button
                   onClick={() => handleSendCode('whatsapp')}
                   disabled={loading}
                   className="w-full border-2 border-gray-200 hover:border-green-500 hover:bg-green-50 p-4 rounded-lg flex items-center gap-4 transition disabled:opacity-50"
@@ -354,7 +354,7 @@ export default function SellerLogin() {
                   ) : (
                     <ArrowRight className="w-5 h-5 text-gray-400" />
                   )}
-                </button>
+                </button> */}
               </div>
             </>
           )}
