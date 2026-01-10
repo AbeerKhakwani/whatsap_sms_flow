@@ -469,7 +469,10 @@ export default async function handler(req, res) {
 // ============ STATE HANDLERS ============
 
 async function sendWelcome(phone) {
-  await sendMessage(phone, `Hi! 👋 Welcome to The Phir Story.\n\n• Reply SELL to list an item\n• Visit thephirstory.com to shop`);
+  await sendButtons(phone,
+    `Hi! 👋 Welcome to The Phir Story.\n\n• Visit thephirstory.com to shop`,
+    [{ id: 'sell', title: 'SELL' }]
+  );
 }
 
 async function handleSellCommand(phone, conv, res) {
@@ -488,7 +491,7 @@ async function handleSellCommand(phone, conv, res) {
     });
     await smsDb.setState(phone, 'awaiting_description');
 
-    await sendMessage(phone, `Welcome back! ✓\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
+    await sendMessage(phone, `Let's list your item\n\nDescribe your item (send a voice message or text):\n\nExample: "Maria B lawn 3pc, M, like new, $80"\n\nType CANCEL at anytime to exit flow.`);
     return res.status(200).json({ status: 'asked description' });
   }
 
@@ -622,7 +625,7 @@ async function handleDescription(phone, text, conv, res) {
   }
 }
 
-async function askNextMissingField(phone, res) {
+async function askNextMissingField(phone, res, summaryPrefix = null) {
   console.log('🔍 askNextMissingField called for:', phone);
 
   const conv = await smsDb.getConversation(phone);
@@ -647,7 +650,12 @@ async function askNextMissingField(phone, res) {
   await smsDb.updateContext(phone, { current_field: field });
 
   const label = FIELD_LABELS[field] || field;
-  const prompt = `What's the ${label}?`;
+  let prompt = `What's the ${label}?`;
+
+  // Combine with summary if provided
+  if (summaryPrefix) {
+    prompt = `${summaryPrefix}\n\n${prompt}`;
+  }
 
   // Show list/buttons for dropdown fields
   if (DROPDOWN_OPTIONS[field]) {
@@ -707,13 +715,13 @@ async function handleMissingField(phone, text, buttonId, conv, res) {
       await smsDb.updateContext(phone, { listing_data: listing });
       console.log(`✅ Saved ${field} = ${matched} (via button)`);
 
-      // Show progress
+      // Prepare progress summary
       const totalFields = REQUIRED_FIELDS.length;
       const filledCount = REQUIRED_FIELDS.filter(f => isNonEmpty(listing[f])).length;
       const summary = formatListingSummary(listing);
-      await sendMessage(phone, `${summary}\n\n✅ Progress: ${filledCount}/${totalFields} fields complete`);
+      const progressSummary = `${summary}\n\n✅ Progress: ${filledCount}/${totalFields} fields complete`;
 
-      return await askNextMissingField(phone, res);
+      return await askNextMissingField(phone, res, progressSummary);
     }
   }
 
@@ -748,14 +756,14 @@ async function handleMissingField(phone, text, buttonId, conv, res) {
 
   console.log(`✅ Saved ${field} = ${value}`);
 
-  // Show updated summary with progress
+  // Prepare progress summary
   const totalFields = REQUIRED_FIELDS.length;
   const filledCount = REQUIRED_FIELDS.filter(f => isNonEmpty(listing[f])).length;
   const summary = formatListingSummary(listing);
-  await sendMessage(phone, `${summary}\n\n✅ Progress: ${filledCount}/${totalFields} fields complete`);
+  const progressSummary = `${summary}\n\n✅ Progress: ${filledCount}/${totalFields} fields complete`;
 
-  // Ask next missing field
-  return await askNextMissingField(phone, res);
+  // Ask next missing field with combined message
+  return await askNextMissingField(phone, res, progressSummary);
 }
 
 async function handlePhoto(phone, mediaId, conv, res) {
@@ -934,9 +942,11 @@ async function showEditMenu(phone, conv, res) {
     `4️⃣ Condition: ${listing.condition}\n` +
     `5️⃣ Price: $${listing.asking_price_usd}\n` +
     `6️⃣ Notes: ${listing.additional_details || 'None'}\n\n` +
-    `Reply with the number (1-6) or BACK to return.`;
+    `Reply with the number (1-6)`;
 
-  await sendMessage(phone, menu);
+  await sendButtons(phone, menu, [
+    { id: 'back_to_summary', title: 'BACK' }
+  ]);
   return res.status(200).json({ status: 'showed edit menu' });
 }
 
@@ -993,7 +1003,8 @@ async function handleEditing(phone, text, buttonId, conv, res) {
 
   const inputLower = input.toLowerCase();
 
-  if (inputLower === 'back' || inputLower === 'cancel') {
+  // Handle BACK button
+  if (buttonId === 'back_to_summary' || inputLower === 'back' || inputLower === 'cancel') {
     return await showSummary(phone, conv, res);
   }
 

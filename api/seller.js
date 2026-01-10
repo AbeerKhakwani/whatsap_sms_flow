@@ -372,10 +372,10 @@ export default async function handler(req, res) {
 
       const errors = [];
 
-      // Get seller's phone first
+      // Get seller's phone and email
       const { data: seller } = await supabase
         .from('sellers')
-        .select('phone')
+        .select('phone, email')
         .eq('id', sellerId)
         .single();
 
@@ -402,6 +402,19 @@ export default async function handler(req, res) {
         if (convError) {
           console.error('Delete conversations error:', convError);
           errors.push(`sms_conversations: ${convError.message}`);
+        }
+      }
+
+      // Delete auth codes for this email
+      if (seller?.email) {
+        const { error: authError } = await supabase
+          .from('auth_codes')
+          .delete()
+          .eq('identifier', seller.email.toLowerCase());
+
+        if (authError) {
+          console.error('Delete auth codes error:', authError);
+          errors.push(`auth_codes: ${authError.message}`);
         }
       }
 
