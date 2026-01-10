@@ -392,16 +392,17 @@ export default async function handler(req, res) {
         }
       }
 
-      // Delete old SMS conversations (legacy cleanup)
-      const { error: convError } = await supabase
-        .from('sms_conversations')
-        .delete()
-        .eq('seller_id', sellerId);
+      // Delete SMS conversation for this phone
+      if (seller?.phone) {
+        const { error: convError } = await supabase
+          .from('sms_conversations')
+          .delete()
+          .eq('phone_number', seller.phone);
 
-      if (convError && convError.code !== '42P01') {
-        // Ignore if table doesn't exist (42P01)
-        console.error('Delete conversations error:', convError);
-        errors.push(`sms_conversations: ${convError.message}`);
+        if (convError) {
+          console.error('Delete conversations error:', convError);
+          errors.push(`sms_conversations: ${convError.message}`);
+        }
       }
 
       // Clear phone from seller so findSellerByPhone won't find them
