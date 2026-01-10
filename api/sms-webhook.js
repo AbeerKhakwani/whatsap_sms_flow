@@ -514,17 +514,13 @@ async function handleEmail(phone, text, conv, res) {
   const sellerByEmail = await smsDb.findSellerByEmail(email);
   const sellerByPhone = await smsDb.findSellerByPhone(phone);
 
-  // Case 1: Email exists but phone doesn't match
-  if (sellerByEmail && !smsDb.normalizePhone(sellerByEmail.phone).endsWith(smsDb.normalizePhone(phone).slice(-10))) {
-    await sendMessage(phone, `That email is registered to a different number.\n\nPlease use your registered number or contact support.`);
-    return res.status(200).json({ status: 'email mismatch' });
-  }
-
-  // Case 2: Phone exists but email doesn't match
+  // Only block if phone exists with different email
   if (sellerByPhone && sellerByPhone.email && sellerByPhone.email.toLowerCase() !== email) {
     await sendMessage(phone, `This number is registered with ${sellerByPhone.email}.\n\nPlease use that email or contact support.`);
     return res.status(200).json({ status: 'phone mismatch' });
   }
+
+  // Note: If email exists with different phone, we'll update phone after verification
 
   // Generate and send code
   const code = await generateAuthCode(email, phone);
@@ -567,6 +563,13 @@ async function handleCode(phone, text, conv, res) {
 
   if (!seller) {
     seller = await smsDb.createSeller({ phone, email });
+  } else {
+    // Update phone if changed (user verified email, so they own this account)
+    if (seller.phone !== phone) {
+      console.log(`📱 Updating phone for ${email}: ${seller.phone} → ${phone}`);
+      await smsDb.updateSellerPhone(seller.id, phone);
+      seller.phone = phone; // Update local copy
+    }
   }
 
   // Authorize conversation
