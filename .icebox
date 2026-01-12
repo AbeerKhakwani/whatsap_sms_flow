@@ -103,6 +103,54 @@ This file tracks features to implement later. Add ideas here so they're never fo
 
 ---
 
+## 🗄️ Rejected/Archived Listings
+
+### Rejected Listings Archive
+**Priority:** Medium
+**Description:**
+- Currently rejected listings are deleted from Shopify immediately
+- Create a database table or archive to keep rejected listings
+- Admin page to view rejection history with reasons
+- Helpful for:
+  - Tracking rejection patterns by seller
+  - Understanding common issues
+  - Seller can see their rejection history
+  - Admin can reference past rejections
+  - Analytics on rejection reasons
+
+**Possible Implementations:**
+
+**Option A: Database Table (Recommended)**
+- Create `rejected_listings` table in Supabase
+- Store: product_id, seller_id, product_data (JSON), rejection_reason, rejection_note, rejected_by, rejected_at
+- Before deleting from Shopify, save full product data
+- New admin page: /admin/rejected-listings
+- Filter by seller, date, reason
+
+**Option B: Shopify Archive Tag**
+- Don't delete - just add "archived-rejected" tag
+- Change status to draft
+- Keeps in Shopify but hidden
+- Can still view in Shopify Admin
+- Cons: clutters Shopify, counts toward product limit
+
+**Option C: Hybrid Approach**
+- Save metadata to database (reason, seller, timestamps)
+- Delete from Shopify to keep it clean
+- Store product snapshot as JSON in database
+- Best of both worlds
+
+**Features to Include:**
+- View all rejected listings with filters
+- Search by seller, designer, or product name
+- Show rejection reason and admin note
+- Show who rejected it and when
+- Seller can view their rejection history in seller portal
+- Analytics dashboard: most common rejection reasons
+- Option to "reconsider" - creates new draft from archived data
+
+---
+
 ## 📝 Notes
 
 Add new ideas below as they come up:
