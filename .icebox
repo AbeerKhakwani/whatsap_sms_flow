@@ -1,0 +1,120 @@
+# 🧊 ICEBOX - Future Features & Ideas
+
+This file tracks features to implement later. Add ideas here so they're never forgotten!
+
+---
+
+## 📋 Admin Dashboard Improvements
+
+### Daily Listing Review Page
+**Priority:** Medium
+**Description:**
+- New admin page that shows ONE listing per day
+- Admin can edit, update, or reject
+- Helps maintain quality of existing listings over time
+- Could catch pricing errors, bad photos, outdated info
+
+---
+
+## 📸 Seller Features
+
+### Send Photos First Flow
+**Priority:** High
+**Description:**
+- Allow sellers to upload photos BEFORE starting full listing
+- Admin can review photos and pre-approve quality
+- Reduces rejections due to bad photos
+- Faster approval process
+
+---
+
+## 📦 Shipping Integration
+
+### EasyPost Label Generation
+**Priority:** High
+**Description:**
+- Integrate EasyPost API for shipping labels
+- Send labels via email and SMS to sellers
+- Track shipment status
+- Auto-update order status when shipped
+
+**API:** https://www.easypost.com/
+**Requires:** EasyPost account + API key
+
+---
+
+## 💰 Payout Integrations
+
+### PayPal Payout Integration
+**Priority:** High
+**Description:**
+- Integrate PayPal Payouts API
+- Send seller earnings directly to PayPal
+- Track payout status
+- Handle fees automatically
+
+**API:** https://developer.paypal.com/docs/payouts/
+**Requires:** PayPal Business account
+
+### Zelle Payout Integration
+**Priority:** Medium
+**Description:**
+- Integrate Zelle for instant payouts
+- Alternative to PayPal
+- Research feasibility (Zelle has limited business API)
+
+**Note:** Zelle API may not be publicly available - need to verify
+
+---
+
+## 🤖 AI Features
+
+### AI Listing Inspector
+**Priority:** Medium
+**Description:**
+- Run AI analysis at end of listing submission
+- Check pricing against market rates
+- Suggest improvements to description
+- Flag potential issues (wrong size, missing info)
+- Give seller instant feedback before admin review
+
+**Possible APIs:**
+- OpenAI GPT-4 for analysis
+- Compare prices with similar sold items
+- Check photo quality
+
+---
+
+## 🎯 Quick Wins (from today's discussion)
+
+### Seller Approval History
+- Show seller's past approval/rejection rate
+- Flag first-time sellers
+
+### Bulk Actions
+- Approve/reject multiple listings at once
+
+### Smart Tag Suggestions
+- Auto-suggest tags based on designer/category
+
+### Rejection Reasons Dropdown
+- Quick reject with predefined reasons
+- Auto-send email to seller with reason
+
+---
+
+## 📝 Notes
+
+Add new ideas below as they come up:
+
+-
+-
+-
+
+---
+
+**How to use this file:**
+1. Add new ideas anytime
+2. Update priority as needs change
+3. Move items to active development when ready
+4. Mark completed items with ✅
