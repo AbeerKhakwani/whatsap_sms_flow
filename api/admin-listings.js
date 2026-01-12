@@ -2,8 +2,9 @@
 // Consolidated admin listing actions: get-pending, approve, reject
 
 import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts } from '../lib/shopify.js';
-import { sendListingApproved, sendPayoutNotification } from '../lib/email.js';
+import { sendListingApproved, sendPayoutNotification, sendListingRejected } from '../lib/email.js';
 import { logMessage } from '../lib/messages.js';
+import { getSellerEmail, getSellerPayout } from '../lib/metafield-helpers.js';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -37,9 +38,35 @@ export default async function handler(req, res) {
         .from('transactions')
         .select('*', { count: 'exact', head: true });
 
-      const listings = products.map(product => {
+      // Fetch metafields for all products to get seller info
+      const listingsWithSeller = await Promise.all(products.map(async (product) => {
         const variant = product.variants?.[0] || {};
         const tags = product.tags?.split(', ') || [];
+
+        // Fetch metafields to get seller email
+        const productWithMetafields = await getProduct(product.id, true);
+        const sellerEmail = getSellerEmail(productWithMetafields);
+        const sellerPayout = getSellerPayout(productWithMetafields) || 0;
+
+        let seller = null;
+        if (sellerEmail) {
+          const { data } = await supabase
+            .from('sellers')
+            .select('id, name, email, phone')
+            .ilike('email', sellerEmail.toLowerCase())
+            .maybeSingle();
+          seller = data;
+        }
+
+        // Fallback: find seller who has this product in their shopify_product_ids
+        if (!seller) {
+          const { data } = await supabase
+            .from('sellers')
+            .select('id, name, email, phone')
+            .contains('shopify_product_ids', [product.id.toString()])
+            .maybeSingle();
+          seller = data;
+        }
 
         return {
           id: product.id,
@@ -49,19 +76,26 @@ export default async function handler(req, res) {
           size: variant.option1 || 'One Size',
           condition: variant.option3 || 'Good',
           asking_price_usd: parseFloat(variant.price) || 0,
+          seller_payout: sellerPayout,
           description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
           images: product.images?.map(img => img.src) || [],
           created_at: product.created_at,
           shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
-          tags
+          tags,
+          seller: seller ? {
+            id: seller.id,
+            name: seller.name,
+            email: seller.email,
+            phone: seller.phone
+          } : null
         };
-      });
+      }));
 
       return res.status(200).json({
         success: true,
-        listings,
+        listings: listingsWithSeller,
         stats: {
-          pending: listings.length,
+          pending: listingsWithSeller.length,
           approved: counts.active || 0,
           sold: soldCount || 0
         }
@@ -80,8 +114,8 @@ export default async function handler(req, res) {
       const product = await approveDraft(shopifyProductId);
 
       // Try metafield first, then fall back to Supabase lookup
-      let sellerEmail = getMetafieldValue(productBefore, 'seller', 'email');
-      const sellerPayout = parseFloat(getMetafieldValue(productBefore, 'pricing', 'seller_payout')) || 0;
+      let sellerEmail = getSellerEmail(productBefore);
+      const sellerPayout = getSellerPayout(productBefore) || 0;
       const productUrl = `https://${STORE_URL}.com/products/${product.handle}`;
 
       let seller = null;
@@ -154,17 +188,114 @@ export default async function handler(req, res) {
 
     // REJECT LISTING
     if (action === 'reject' && req.method === 'POST') {
-      const { shopifyProductId } = req.body;
+      const { shopifyProductId, reason, note, skipNotification } = req.body;
 
       if (!shopifyProductId) {
         return res.status(400).json({ error: 'Please provide shopifyProductId' });
       }
 
+      // Get product info before deleting
+      const productBefore = await getProduct(shopifyProductId);
+      const productTitle = productBefore.title;
+
+      // Try metafield first, then fall back to Supabase lookup
+      let sellerEmail = getSellerEmail(productBefore);
+      let seller = null;
+
+      // First try: lookup by metafield email
+      if (sellerEmail) {
+        const { data } = await supabase
+          .from('sellers')
+          .select('*')
+          .ilike('email', sellerEmail.toLowerCase())
+          .maybeSingle();
+        seller = data;
+      }
+
+      // Fallback: find seller who has this product in their shopify_product_ids
+      if (!seller) {
+        const { data } = await supabase
+          .from('sellers')
+          .select('*')
+          .contains('shopify_product_ids', [shopifyProductId.toString()])
+          .maybeSingle();
+        seller = data;
+        if (seller) {
+          sellerEmail = seller.email;
+          console.log(`📧 Found seller via product ID lookup: ${seller.email}`);
+        }
+      }
+
+      // Delete the draft
       await deleteProduct(shopifyProductId);
+
+      // Send notifications if we found the seller
+      if (!skipNotification && seller && reason) {
+        // Send email
+        try {
+          const emailSent = await sendListingRejected(
+            seller.email,
+            seller.name,
+            productTitle,
+            reason,
+            note || null
+          );
+
+          if (emailSent) {
+            await logMessage({
+              sellerId: seller.id,
+              type: 'email',
+              recipient: seller.email,
+              subject: 'Update on your listing',
+              content: `Listing "${productTitle}" was not approved. Reason: ${reason}${note ? ` - ${note}` : ''}`,
+              context: 'listing_rejected',
+              metadata: { productId: shopifyProductId, productTitle, reason, note }
+            });
+          }
+        } catch (e) {
+          console.error('Rejection email error:', e);
+        }
+
+        // Send WhatsApp if seller has phone
+        if (seller.phone && !seller.phone.startsWith('NOPHONE') && !seller.phone.startsWith('RESET_') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
+          try {
+            const to = seller.phone.replace(/\D/g, '');
+            const waMessage = `Hi${seller.name ? ` ${seller.name}` : ''}! We reviewed your listing "${productTitle}" but can't approve it at this time.\n\nReason: ${reason}${note ? `\n${note}` : ''}\n\nYou're welcome to submit a new listing addressing these concerns. Questions? Just reply here!`;
+
+            const waRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to,
+                type: 'text',
+                text: { body: waMessage }
+              })
+            });
+
+            if (waRes.ok) {
+              await logMessage({
+                sellerId: seller.id,
+                type: 'whatsapp',
+                recipient: seller.phone,
+                content: waMessage,
+                context: 'listing_rejected',
+                metadata: { productId: shopifyProductId, productTitle, reason, note }
+              });
+            }
+          } catch (e) {
+            console.error('WhatsApp rejection error:', e);
+          }
+        }
+      }
 
       return res.status(200).json({
         success: true,
-        message: 'Listing rejected and Shopify draft deleted'
+        message: 'Listing rejected and notifications sent',
+        notificationSent: !skipNotification && !!seller
       });
     }
 
@@ -558,11 +689,6 @@ export default async function handler(req, res) {
     console.error('Admin listings error:', error);
     return res.status(500).json({ error: error.message });
   }
-}
-
-function getMetafieldValue(product, namespace, key) {
-  const metafield = product.metafields?.find(m => m.namespace === namespace && m.key === key);
-  return metafield?.value || null;
 }
 
 async function sendWhatsAppApproval(phone, name, title, url, payout) {

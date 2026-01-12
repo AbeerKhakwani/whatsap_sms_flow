@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
+
+const REJECTION_REASONS = [
+  { value: 'poor_photos', label: 'Poor Photo Quality' },
+  { value: 'missing_info', label: 'Missing Information' },
+  { value: 'wrong_designer', label: 'Not Pakistani Designer' },
+  { value: 'condition_issues', label: 'Condition Issues' },
+  { value: 'pricing_too_high', label: 'Pricing Too High' },
+  { value: 'duplicate', label: 'Duplicate Listing' },
+  { value: 'not_resale', label: 'Not Eligible for Resale' },
+  { value: 'other', label: 'Other' }
+];
 
 export default function Dashboard() {
   const [listings, setListings] = useState([]);
@@ -11,6 +22,9 @@ export default function Dashboard() {
   const [approving, setApproving] = useState(null);
   const [markingPaid, setMarkingPaid] = useState(null);
   const [stats, setStats] = useState({ pending: 0, approved: 0, sold: 0 });
+  const [rejectModal, setRejectModal] = useState({ open: false, listing: null });
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectNote, setRejectNote] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -91,15 +105,38 @@ export default function Dashboard() {
     setApproving(null);
   }
 
-  async function rejectListing(listing) {
-    if (!confirm('Are you sure you want to reject this listing? This will delete the Shopify draft.')) return;
+  function openRejectModal(listing) {
+    setRejectModal({ open: true, listing });
+    setRejectReason('');
+    setRejectNote('');
+  }
+
+  function closeRejectModal() {
+    setRejectModal({ open: false, listing: null });
+    setRejectReason('');
+    setRejectNote('');
+  }
+
+  async function submitRejection() {
+    const { listing } = rejectModal;
+
+    if (!rejectReason) {
+      alert('Please select a rejection reason');
+      return;
+    }
 
     setApproving(listing.id);
     try {
+      const reasonLabel = REJECTION_REASONS.find(r => r.value === rejectReason)?.label || rejectReason;
+
       const response = await fetch('/api/admin-listings?action=reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopifyProductId: listing.shopify_product_id })
+        body: JSON.stringify({
+          shopifyProductId: listing.shopify_product_id,
+          reason: reasonLabel,
+          note: rejectNote.trim() || null
+        })
       });
 
       const data = await response.json();
@@ -108,6 +145,7 @@ export default function Dashboard() {
         setListings(prev => prev.filter(l => l.id !== listing.id));
         setStats(prev => ({ ...prev, pending: prev.pending - 1 }));
         setExpandedId(null);
+        closeRejectModal();
       } else {
         alert(`Error: ${data.error || 'Failed to reject'}`);
       }
@@ -316,8 +354,35 @@ export default function Dashboard() {
                 {/* Expanded Details */}
                 {expandedId === listing.id && (
                   <div className="px-4 pb-4 space-y-4 bg-gray-50 border-t border-gray-100">
+                    {/* Seller Info */}
+                    {listing.seller && (
+                      <div className="pt-4">
+                        <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                          <User className="w-4 h-4" />
+                          Seller
+                        </h4>
+                        <div className="bg-white p-3 rounded-lg shadow-sm space-y-1">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-medium text-gray-900">{listing.seller.name || 'Unknown'}</p>
+                              <p className="text-sm text-gray-600">{listing.seller.email}</p>
+                              {listing.seller.phone && !listing.seller.phone.startsWith('NOPHONE') && !listing.seller.phone.startsWith('RESET_') && (
+                                <p className="text-sm text-gray-600">{listing.seller.phone}</p>
+                              )}
+                            </div>
+                            {listing.seller_payout > 0 && (
+                              <div className="text-right">
+                                <p className="text-xs text-gray-500">Payout if sold</p>
+                                <p className="text-lg font-bold text-green-600">${listing.seller_payout.toFixed(2)}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Photo Gallery */}
-                    <div className="pt-4">
+                    <div className={listing.seller ? '' : 'pt-4'}>
                       <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
                         <Image className="w-4 h-4" />
                         Photos ({listing.images?.length || 0})
@@ -348,7 +413,7 @@ export default function Dashboard() {
                     </div>
 
                     {/* Details Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div className="bg-white p-3 rounded-lg shadow-sm">
                         <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
                           <Tag className="w-3 h-3" />
@@ -381,6 +446,20 @@ export default function Dashboard() {
                         <p className="font-medium text-green-600">${listing.asking_price_usd || 0}</p>
                       </div>
                     </div>
+
+                    {/* Tags */}
+                    {listing.tags && listing.tags.length > 0 && (
+                      <div className="bg-white p-3 rounded-lg shadow-sm">
+                        <div className="text-gray-500 text-xs mb-2">Tags</div>
+                        <div className="flex flex-wrap gap-1">
+                          {listing.tags.map((tag, idx) => (
+                            <span key={idx} className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Description */}
                     <div className="bg-white p-3 rounded-lg shadow-sm">
@@ -422,7 +501,7 @@ export default function Dashboard() {
                       </button>
 
                       <button
-                        onClick={() => rejectListing(listing)}
+                        onClick={() => openRejectModal(listing)}
                         disabled={approving === listing.id}
                         className="px-6 bg-red-100 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                       >
@@ -437,6 +516,89 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Rejection Modal */}
+      {rejectModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Reject Listing</h3>
+                <p className="text-sm text-gray-500">{rejectModal.listing?.product_name}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reason for rejection *
+                </label>
+                <select
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                >
+                  <option value="">Select a reason...</option>
+                  {REJECTION_REASONS.map(reason => (
+                    <option key={reason.value} value={reason.value}>
+                      {reason.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Additional note (optional)
+                </label>
+                <textarea
+                  value={rejectNote}
+                  onChange={(e) => setRejectNote(e.target.value)}
+                  placeholder="Add any specific feedback for the seller..."
+                  rows={3}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-xs text-amber-800">
+                  The seller will receive an email and WhatsApp message with this rejection reason.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={closeRejectModal}
+                disabled={approving === rejectModal.listing?.id}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitRejection}
+                disabled={approving === rejectModal.listing?.id || !rejectReason}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {approving === rejectModal.listing?.id ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Rejecting...
+                  </>
+                ) : (
+                  <>
+                    <X className="w-4 h-4" />
+                    Reject & Notify
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
