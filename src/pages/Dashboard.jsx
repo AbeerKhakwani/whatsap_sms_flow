@@ -25,6 +25,8 @@ export default function Dashboard() {
   const [rejectModal, setRejectModal] = useState({ open: false, listing: null });
   const [rejectReason, setRejectReason] = useState('');
   const [rejectNote, setRejectNote] = useState('');
+  const [approveModal, setApproveModal] = useState({ open: false, listing: null });
+  const [editedListing, setEditedListing] = useState({});
 
   useEffect(() => {
     fetchData();
@@ -81,13 +83,36 @@ export default function Dashboard() {
     setMarkingPaid(null);
   }
 
-  async function approveListing(listing) {
+  function openApproveModal(listing) {
+    setApproveModal({ open: true, listing });
+    setEditedListing({
+      description: listing.description || '',
+      tags: listing.tags ? listing.tags.join(', ') : '',
+      commission: listing.commission_rate || 18
+    });
+  }
+
+  function closeApproveModal() {
+    setApproveModal({ open: false, listing: null });
+    setEditedListing({});
+  }
+
+  async function confirmApproval() {
+    const { listing } = approveModal;
+
     setApproving(listing.id);
     try {
       const response = await fetch('/api/admin-listings?action=approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopifyProductId: listing.shopify_product_id })
+        body: JSON.stringify({
+          shopifyProductId: listing.shopify_product_id,
+          updates: {
+            description: editedListing.description,
+            tags: editedListing.tags,
+            commission: parseInt(editedListing.commission) || 18
+          }
+        })
       });
 
       const data = await response.json();
@@ -96,6 +121,7 @@ export default function Dashboard() {
         setListings(prev => prev.filter(l => l.id !== listing.id));
         setStats(prev => ({ ...prev, pending: prev.pending - 1, approved: prev.approved + 1 }));
         setExpandedId(null);
+        closeApproveModal();
       } else {
         alert(`Error: ${data.error || 'Failed to approve'}`);
       }
@@ -483,21 +509,12 @@ export default function Dashboard() {
                     {/* Action Buttons */}
                     <div className="flex gap-3 pt-2">
                       <button
-                        onClick={() => approveListing(listing)}
+                        onClick={() => openApproveModal(listing)}
                         disabled={approving === listing.id}
                         className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:from-green-600 hover:to-emerald-600 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
                       >
-                        {approving === listing.id ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Approving...
-                          </>
-                        ) : (
-                          <>
-                            <Check className="w-5 h-5" />
-                            Approve & Make Live
-                          </>
-                        )}
+                        <Check className="w-5 h-5" />
+                        Review & Approve
                       </button>
 
                       <button
@@ -516,6 +533,102 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Approval Modal */}
+      {approveModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <Check className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Review & Approve Listing</h3>
+                <p className="text-sm text-gray-500">{approveModal.listing?.product_name}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <textarea
+                  value={editedListing.description || ''}
+                  onChange={(e) => setEditedListing(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Edit the listing description..."
+                  rows={4}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tags (comma separated)
+                </label>
+                <input
+                  type="text"
+                  value={editedListing.tags || ''}
+                  onChange={(e) => setEditedListing(prev => ({ ...prev, tags: e.target.value }))}
+                  placeholder="e.g., Sana Safinaz, Lawn, Medium, Excellent"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Commission Rate (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={editedListing.commission || ''}
+                  onChange={(e) => setEditedListing(prev => ({ ...prev, commission: e.target.value }))}
+                  placeholder="18"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Default is 18%. Seller receives {100 - (parseInt(editedListing.commission) || 18)}% of asking price.
+                </p>
+              </div>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-xs text-green-800">
+                  This will approve the listing, add "New Arrivals" tag, and notify the seller via email and WhatsApp.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={closeApproveModal}
+                disabled={approving === approveModal.listing?.id}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmApproval}
+                disabled={approving === approveModal.listing?.id}
+                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {approving === approveModal.listing?.id ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Approving...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Approve & Make Live
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rejection Modal */}
       {rejectModal.open && (

@@ -1,7 +1,7 @@
 // api/admin-listings.js
 // Consolidated admin listing actions: get-pending, approve, reject
 
-import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts } from '../lib/shopify.js';
+import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct } from '../lib/shopify.js';
 import { sendListingApproved, sendPayoutNotification, sendListingRejected } from '../lib/email.js';
 import { logMessage } from '../lib/messages.js';
 import { getSellerEmail, getSellerPayout } from '../lib/metafield-helpers.js';
@@ -48,6 +48,10 @@ export default async function handler(req, res) {
         const sellerEmail = getSellerEmail(productWithMetafields);
         const sellerPayout = getSellerPayout(productWithMetafields) || 0;
 
+        // Get commission rate from metafields
+        const commissionMetafield = productWithMetafields.metafields?.find(m => m.namespace === 'pricing' && m.key === 'commission_rate');
+        const commissionRate = commissionMetafield?.value ? parseInt(commissionMetafield.value) : 18;
+
         let seller = null;
         if (sellerEmail) {
           const { data } = await supabase
@@ -77,6 +81,7 @@ export default async function handler(req, res) {
           condition: variant.option3 || 'Good',
           asking_price_usd: parseFloat(variant.price) || 0,
           seller_payout: sellerPayout,
+          commission_rate: commissionRate,
           description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
           images: product.images?.map(img => img.src) || [],
           created_at: product.created_at,
@@ -104,18 +109,117 @@ export default async function handler(req, res) {
 
     // APPROVE LISTING
     if (action === 'approve' && req.method === 'POST') {
-      const { shopifyProductId, skipNotification } = req.body;
+      const { shopifyProductId, skipNotification, updates } = req.body;
 
       if (!shopifyProductId) {
         return res.status(400).json({ error: 'Please provide shopifyProductId' });
       }
 
       const productBefore = await getProduct(shopifyProductId);
+
+      // Apply updates if provided (description, tags, commission)
+      if (updates) {
+        const updateData = {};
+
+        if (updates.description) {
+          updateData.body_html = `<p>${updates.description}</p>`;
+        }
+
+        if (updates.tags) {
+          updateData.tags = updates.tags;
+        }
+
+        // Update commission metafield if provided
+        if (updates.commission !== undefined) {
+          const commission = parseInt(updates.commission) || 18;
+          const variant = productBefore.variants?.[0];
+          const askingPrice = parseFloat(variant?.price) || 0;
+          const sellerPayout = (askingPrice - 10) * ((100 - commission) / 100); // Subtract $10 fee, then apply commission
+
+          // Update metafields via REST API
+          await fetch(
+            `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${shopifyProductId}/metafields.json`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
+              },
+              body: JSON.stringify({
+                metafield: {
+                  namespace: 'pricing',
+                  key: 'commission_rate',
+                  value: commission.toString(),
+                  type: 'number_integer'
+                }
+              })
+            }
+          );
+
+          await fetch(
+            `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${shopifyProductId}/metafields.json`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
+              },
+              body: JSON.stringify({
+                metafield: {
+                  namespace: 'pricing',
+                  key: 'seller_payout',
+                  value: JSON.stringify({
+                    amount: sellerPayout.toFixed(2),
+                    currency_code: 'USD'
+                  }),
+                  type: 'money'
+                }
+              })
+            }
+          );
+
+          // Update inventory item cost
+          if (variant?.inventory_item_id) {
+            await fetch(
+              `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/inventory_items/${variant.inventory_item_id}.json`,
+              {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
+                },
+                body: JSON.stringify({
+                  inventory_item: {
+                    id: variant.inventory_item_id,
+                    cost: sellerPayout.toFixed(2)
+                  }
+                })
+              }
+            );
+          }
+        }
+
+        // Apply the updates to the product
+        if (Object.keys(updateData).length > 0) {
+          await updateProduct(shopifyProductId, updateData);
+        }
+      }
+
       const product = await approveDraft(shopifyProductId);
 
       // Try metafield first, then fall back to Supabase lookup
       let sellerEmail = getSellerEmail(productBefore);
-      const sellerPayout = getSellerPayout(productBefore) || 0;
+
+      // Get updated payout if commission was changed
+      let sellerPayout;
+      if (updates?.commission !== undefined) {
+        const commission = parseInt(updates.commission) || 18;
+        const variant = productBefore.variants?.[0];
+        const askingPrice = parseFloat(variant?.price) || 0;
+        sellerPayout = (askingPrice - 10) * ((100 - commission) / 100);
+      } else {
+        sellerPayout = getSellerPayout(productBefore) || 0;
+      }
       const productUrl = `https://${STORE_URL}.com/products/${product.handle}`;
 
       let seller = null;
