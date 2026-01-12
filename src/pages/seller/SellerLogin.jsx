@@ -72,7 +72,13 @@ export default function SellerLogin() {
       }
 
       setUserInfo(data);
-      setStep('channel');
+
+      // If new user, ask for phone first
+      if (!data.exists) {
+        setStep('addPhone');
+      } else {
+        setStep('channel');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -125,11 +131,13 @@ export default function SellerLogin() {
     }
   }
 
-  // Handle adding phone and sending WhatsApp code
+  // Handle adding phone and sending code
   async function handleAddPhoneAndSend(e) {
     e.preventDefault();
     if (!phone.trim()) return;
-    await handleSendCode('whatsapp');
+    // For new users, send via email. For existing users, send via whatsapp
+    const sendChannel = userInfo?.exists ? 'whatsapp' : 'email';
+    await handleSendCode(sendChannel);
   }
 
   // Step 3: Verify code
@@ -376,13 +384,16 @@ export default function SellerLogin() {
                 </div>
                 <div>
                   <h2 className="text-lg font-medium text-gray-900">
-                    No WhatsApp number on file
+                    {userInfo?.exists ? 'No WhatsApp number on file' : "What's your phone number?"}
                   </h2>
                 </div>
               </div>
 
               <p className="text-sm text-gray-500 mb-6">
-                Add your WhatsApp number to receive the verification code
+                {userInfo?.exists
+                  ? 'Add your WhatsApp number to receive the verification code'
+                  : "We'll send you WhatsApp updates when your items sell, get approved, and for important notifications."
+                }
               </p>
 
               <form onSubmit={handleAddPhoneAndSend}>
