@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -57,6 +57,7 @@ export default function Layout({ children }) {
     { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { name: 'Sellers', path: '/admin/sellers', icon: Users },
     { name: 'Transactions', path: '/admin/transactions', icon: DollarSign },
+    { name: 'Scripts', path: '/admin/scripts', icon: Terminal },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
 

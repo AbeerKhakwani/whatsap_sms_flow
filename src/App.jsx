@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Sellers = lazy(() => import('./pages/Sellers'));
 const SellerDetail = lazy(() => import('./pages/SellerDetail'));
 const Transactions = lazy(() => import('./pages/Transactions'));
+const Scripts = lazy(() => import('./pages/Scripts'));
 const Settings = lazy(() => import('./pages/Settings'));
 
 // Loading splash screen
@@ -61,6 +62,7 @@ export default function App() {
                 <Route path="/sellers" element={<Sellers />} />
                 <Route path="/sellers/:id" element={<SellerDetail />} />
                 <Route path="/transactions" element={<Transactions />} />
+                <Route path="/scripts" element={<Scripts />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>
             </Layout>
