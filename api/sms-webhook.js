@@ -904,7 +904,7 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
       .insert({
         conversation_id: conv.id,
         seller_id: conv.seller_id,
-        status: 'pending_review',
+        status: 'draft',
         designer: flowData.brand,
         pieces_included: flowData.pieces,
         size: flowData.size,
