@@ -141,7 +141,7 @@ async function handleInit(decryptedData, aesKey) {
   }
 
   return {
-    screen: 'LISTING_DETAILS',
+    screen: 'REQUIRED_DETAILS',
     data: prefillData
   };
 }
@@ -154,8 +154,26 @@ async function handleDataExchange(decryptedData, aesKey) {
   console.log(`📝 data_exchange - Screen: ${screen}`);
 
   switch (screen) {
-    case 'LISTING_DETAILS':
-      // User submitted listing details, move to photos
+    case 'REQUIRED_DETAILS':
+      // Move to optional details
+      return {
+        screen: 'OPTIONAL_DETAILS',
+        data: {
+          brand: data.brand || '',
+          pieces: data.pieces || '',
+          size: data.size || '',
+          condition: data.condition || '',
+          price: data.price || '',
+          chest: data.chest || '',
+          hip: data.hip || '',
+          color: '',
+          fabric: '',
+          notes: ''
+        }
+      };
+
+    case 'OPTIONAL_DETAILS':
+      // Move to photos
       return {
         screen: 'PHOTOS',
         data: {
@@ -299,7 +317,7 @@ async function handleDataExchange(decryptedData, aesKey) {
     default:
       console.log('❓ Unknown screen:', screen);
       return {
-        screen: 'LISTING_DETAILS',
+        screen: 'REQUIRED_DETAILS',
         data: {}
       };
   }
@@ -388,7 +406,7 @@ export default async function handler(req, res) {
       default:
         console.log('❓ Unknown action:', decryptedData.action);
         response = {
-          screen: 'LISTING_DETAILS',
+          screen: 'REQUIRED_DETAILS',
           data: {}
         };
     }

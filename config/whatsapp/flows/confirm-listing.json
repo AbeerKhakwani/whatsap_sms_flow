@@ -2,13 +2,14 @@
   "version": "7.3",
   "data_api_version": "3.0",
   "routing_model": {
-    "LISTING_DETAILS": ["PHOTOS"],
+    "REQUIRED_DETAILS": ["OPTIONAL_DETAILS"],
+    "OPTIONAL_DETAILS": ["PHOTOS"],
     "PHOTOS": []
   },
   "screens": [
     {
-      "id": "LISTING_DETAILS",
-      "title": "Listing Details",
+      "id": "REQUIRED_DETAILS",
+      "title": "Required Details",
       "terminal": false,
       "data": {
         "brand": {"type": "string", "__example__": "Sana Safinaz"},
@@ -17,17 +18,14 @@
         "condition": {"type": "string", "__example__": "Like new"},
         "price": {"type": "string", "__example__": "95"},
         "chest": {"type": "string", "__example__": "36"},
-        "hip": {"type": "string", "__example__": "38"},
-        "color": {"type": "string", "__example__": "Maroon"},
-        "fabric": {"type": "string", "__example__": "Chiffon"},
-        "notes": {"type": "string", "__example__": ""}
+        "hip": {"type": "string", "__example__": "38"}
       },
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           {
             "type": "TextHeading",
-            "text": "Review your listing"
+            "text": "Required Information"
           },
           {
             "type": "TextInput",
@@ -96,30 +94,69 @@
             "helper-text": "Your asking price in USD"
           },
           {
-            "type": "TextSubheading",
-            "text": "Measurements (inches)"
-          },
-          {
             "type": "TextInput",
             "name": "chest",
-            "label": "Chest",
+            "label": "Chest (inches)",
             "input-type": "text",
             "required": true,
             "init-value": "${data.chest}",
-            "helper-text": "Chest measurement in inches"
+            "helper-text": "Chest measurement"
           },
           {
             "type": "TextInput",
             "name": "hip",
-            "label": "Hip",
+            "label": "Hip (inches)",
             "input-type": "text",
             "required": true,
             "init-value": "${data.hip}",
-            "helper-text": "Hip measurement in inches"
+            "helper-text": "Hip measurement"
           },
           {
-            "type": "TextSubheading",
-            "text": "Additional Details (optional)"
+            "type": "Footer",
+            "label": "Continue",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {"type": "screen", "name": "OPTIONAL_DETAILS"},
+              "payload": {
+                "brand": "${form.brand}",
+                "pieces": "${form.pieces}",
+                "size": "${form.size}",
+                "condition": "${form.condition}",
+                "price": "${form.price}",
+                "chest": "${form.chest}",
+                "hip": "${form.hip}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "OPTIONAL_DETAILS",
+      "title": "Additional Details",
+      "terminal": false,
+      "data": {
+        "brand": {"type": "string", "__example__": "Sana Safinaz"},
+        "pieces": {"type": "string", "__example__": "3-piece"},
+        "size": {"type": "string", "__example__": "M"},
+        "condition": {"type": "string", "__example__": "Like new"},
+        "price": {"type": "string", "__example__": "95"},
+        "chest": {"type": "string", "__example__": "36"},
+        "hip": {"type": "string", "__example__": "38"},
+        "color": {"type": "string", "__example__": "Maroon"},
+        "fabric": {"type": "string", "__example__": "Chiffon"},
+        "notes": {"type": "string", "__example__": ""}
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Optional Details"
+          },
+          {
+            "type": "TextBody",
+            "text": "These help buyers find your item"
           },
           {
             "type": "TextInput",
@@ -154,13 +191,13 @@
               "name": "navigate",
               "next": {"type": "screen", "name": "PHOTOS"},
               "payload": {
-                "brand": "${form.brand}",
-                "pieces": "${form.pieces}",
-                "size": "${form.size}",
-                "condition": "${form.condition}",
-                "price": "${form.price}",
-                "chest": "${form.chest}",
-                "hip": "${form.hip}",
+                "brand": "${data.brand}",
+                "pieces": "${data.pieces}",
+                "size": "${data.size}",
+                "condition": "${data.condition}",
+                "price": "${data.price}",
+                "chest": "${data.chest}",
+                "hip": "${data.hip}",
                 "color": "${form.color}",
                 "fabric": "${form.fabric}",
                 "notes": "${form.notes}"
@@ -196,7 +233,7 @@
           },
           {
             "type": "TextBody",
-            "text": "Upload at least 3 clear photos of your item. Include front, back, and any details or flaws."
+            "text": "Upload at least 3 clear photos. Include front, back, and any details or flaws."
           },
           {
             "type": "PhotoPicker",

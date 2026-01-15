@@ -478,8 +478,8 @@ export default async function handler(req, res) {
 
 async function sendWelcome(phone) {
   await sendButtons(phone,
-    `Hi! 👋 Welcome to The Phir Story.\n\n• Visit thephirstory.com to shop`,
-    [{ id: 'sell', title: 'SELL' }]
+    `Hi! 👋 Welcome to The Phir Story.\n\n`,
+    [{ id: 'sell', title: 'Click Here To SELL' }]
   );
 }
 
@@ -700,10 +700,10 @@ async function sendWhatsAppFlowWithVoiceOption(phone, flowToken) {
             flow_id: FLOW_ID,
             flow_message_version: '3',
             flow_token: flowToken,
-            flow_cta: 'Open Listing Form',
+            flow_cta: 'Edit and Submit Listing',
             flow_action: 'navigate',
             flow_action_payload: {
-              screen: 'LISTING_DETAILS'
+              screen: 'REQUIRED_DETAILS'
             }
           }
         }
@@ -748,10 +748,10 @@ async function sendWhatsAppFlow(phone, flowToken) {
             flow_id: FLOW_ID,
             flow_message_version: '3',
             flow_token: flowToken,
-            flow_cta: 'Open Listing Form',
+            flow_cta: 'Edit and Submit Listing',
             flow_action: 'navigate',
             flow_action_payload: {
-              screen: 'LISTING_DETAILS'
+              screen: 'REQUIRED_DETAILS'
             }
           }
         }
