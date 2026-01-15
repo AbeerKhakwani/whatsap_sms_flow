@@ -6,7 +6,7 @@ import { sanitizeText, basicValidation } from '../lib/security.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const REQUIRED_FIELDS = ['designer', 'size', 'condition', 'asking_price'];
+const REQUIRED_FIELDS = ['designer', 'pieces', 'size', 'condition', 'asking_price', 'chest', 'hip'];
 
 export default async function handler(req, res) {
   // CORS
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       extracted: {},
       missing: REQUIRED_FIELDS,
       isComplete: false,
-      message: "Please describe your item - what designer/brand is it, what size, condition, and what price you're asking?"
+      message: "Please describe your item - include the designer/brand, pieces (kurta, 2pc, 3pc), size, condition, price, and measurements (chest & hip in inches)."
     });
   }
 
@@ -57,24 +57,26 @@ export default async function handler(req, res) {
 
 Extract these fields from the user's description:
 - designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan", "Maria B", "Khaadi", "Agha Noor")
-- item_type: type of item (e.g., "Lawn Suit", "Kurta", "Formal Dress", "Lehnga")
-- size: size (e.g., "XS", "S", "M", "L", "XL", or measurements)
-- condition: item condition (e.g., "New with Tags", "Like New", "Gently Used", "Good")
-- color: main color(s)
-- material: fabric type (e.g., "Lawn", "Silk", "Chiffon", "Cotton", "Organza")
-- original_price: original/retail price if mentioned (number only, in USD)
+- pieces: how many pieces included - return one of: "1-piece", "2-piece", "3-piece", "Lehnga", "Saree", "Sharara", "Gharara", "Other"
+- size: size - return one of: "XS", "S", "M", "L", "XL", "XXL", "Unstitched", "Custom"
+- condition: item condition - return one of: "New with tags", "Like new", "Excellent", "Good", "Fair"
 - asking_price: asking/selling price (number only, in USD)
+- chest: chest measurement in inches (number only, e.g., "36")
+- hip: hip measurement in inches (number only, e.g., "38")
+- color: main color(s) (optional)
+- fabric: fabric type e.g., "Lawn", "Silk", "Chiffon", "Cotton", "Organza" (optional)
+- notes: any flaws, alterations, or extras mentioned (optional)
 
 Return JSON with:
 {
   "extracted": { ... fields you found ... },
-  "missing": [ ... required fields still needed: "designer", "size", "condition", "asking_price" ... ],
+  "missing": [ ... required fields still needed ... ],
   "isComplete": true/false,
   "message": "friendly message - if missing fields, ask for them specifically. If complete, confirm what you understood"
 }
 
-Required fields are: designer, size, condition, asking_price
-Be conversational and helpful in your message.`
+Required fields are: designer, pieces, size, condition, asking_price, chest, hip
+Be conversational and helpful in your message. If measurements are missing, gently ask for them.`
         },
         {
           role: 'user',

@@ -389,6 +389,20 @@ export default async function handler(req, res) {
     if (message.type === 'text') {
       text = message.text?.body?.trim() || '';
     } else if (message.type === 'interactive') {
+      // Check for Flow completion (nfm_reply)
+      if (message.interactive?.type === 'nfm_reply') {
+        console.log('📋 Flow completion (nfm_reply) received');
+        try {
+          const responseJson = message.interactive.nfm_reply?.response_json;
+          const flowData = JSON.parse(responseJson || '{}');
+          return await handleFlowCompletion(phone, flowData, conv, res);
+        } catch (e) {
+          console.error('❌ nfm_reply parse error:', e);
+          await sendMessage(phone, "Something went wrong. Reply SELL to try again.");
+          return res.status(200).json({ status: 'nfm_reply parse error' });
+        }
+      }
+      // Regular button/list reply
       buttonId = message.interactive?.button_reply?.id || message.interactive?.list_reply?.id;
       text = buttonId || '';
     } else if (message.type === 'audio') {
@@ -434,26 +448,16 @@ export default async function handler(req, res) {
       case 'awaiting_code':
         return await handleCode(phone, text, conv, res);
 
-      case 'awaiting_description':
-        return await handleDescription(phone, text, conv, res);
+      case 'sell_choosing_method':
+        return await handleMethodChoice(phone, text, buttonId, conv, res);
 
-      case 'sell_collecting':
-        return await handleMissingField(phone, text, buttonId, conv, res);
+      case 'awaiting_voice':
+        return await handleVoiceForFlow(phone, text, conv, res);
 
-      case 'sell_photos':
-        return await handlePhotoState(phone, text, buttonId, conv, res);
-
-      case 'awaiting_additional_details':
-        return await handleAdditionalDetails(phone, text, buttonId, conv, res);
-
-      case 'awaiting_additional_details_text':
-        return await handleAdditionalDetailsText(phone, text, conv, res);
-
-      case 'sell_confirming':
-        return await handleConfirmation(phone, text, buttonId, conv, res);
-
-      case 'sell_editing':
-        return await handleEditing(phone, text, buttonId, conv, res);
+      case 'awaiting_flow':
+        // User has Flow open - remind them to complete it
+        await sendMessage(phone, "Please complete the listing form that's open in WhatsApp.\n\nOr reply CANCEL to start over.");
+        return res.status(200).json({ status: 'awaiting flow' });
 
       default:
         await sendWelcome(phone);
@@ -478,21 +482,29 @@ async function sendWelcome(phone) {
 async function handleSellCommand(phone, conv, res) {
   // Check if already authorized
   if (conv.is_authorized && conv.seller_id) {
-    console.log(`✅ ${phone} already authorized - starting fresh sell flow`);
+    console.log(`✅ ${phone} already authorized - showing sell method choice`);
 
     // Clean up any previous flow
     await redisPhotos.clearPhotos(phone);
 
-    // Reset to fresh sell flow
+    // Reset context
     await smsDb.updateContext(phone, {
       listing_data: {},
+      extracted_data: {},
       photo_base64_list: [],
       current_field: null
     });
-    await smsDb.setState(phone, 'awaiting_description');
+    await smsDb.setState(phone, 'sell_choosing_method');
 
-    await sendMessage(phone, `Let's list your item\n\nDescribe your item (send a voice message or text):\n\nExample: "Maria B lawn 3pc, M, like new, $80"\n\nType CANCEL at anytime to exit flow.`);
-    return res.status(200).json({ status: 'asked description' });
+    // Show 2 buttons: Voice or Form
+    await sendButtons(phone,
+      `Let's list your item!\n\nHow would you like to start?`,
+      [
+        { id: 'start_voice', title: '🎤 Clcik here to Send a Voice Note (describe your item)' },
+        { id: 'start_form', title: '📝 Click Here to Tyoe: Guided Form' }
+      ]
+    );
+    return res.status(200).json({ status: 'asked method' });
   }
 
   // Not authorized - ask for email
@@ -575,58 +587,203 @@ async function handleCode(phone, text, conv, res) {
   // Authorize conversation
   await smsDb.authorize(phone, seller.id, email);
 
-  // Start sell flow
-  await smsDb.setState(phone, 'awaiting_description');
+  // Show sell method choice
+  await smsDb.setState(phone, 'sell_choosing_method');
 
   const greeting = seller.name ? `Welcome back, ${seller.name}! ✓` : `Welcome! ✓`;
-  await sendMessage(phone, `${greeting}\n\nDescribe your item (voice or text):\nDesigner, size, condition, price\n\nExample: "Maria B lawn 3pc, M, like new, $80"`);
+  await sendButtons(phone,
+    `${greeting}\n\nLet's list your item!\n\nHow would you like to start?`,
+    [
+      { id: 'start_voice', title: '🎤 Voice Message' },
+      { id: 'start_form', title: '📝 Start with Form' }
+    ]
+  );
 
   return res.status(200).json({ status: 'authorized' });
 }
 
-async function handleDescription(phone, text, conv, res) {
-  if (!text || text.trim().length < 5) {
-    await sendMessage(phone, "Please describe your item:\nDesigner, size, condition, price");
-    return res.status(200).json({ status: 'description too short' });
+// ============ FLOW-BASED HANDLERS ============
+
+/**
+ * Handle method choice: Voice or Form
+ */
+async function handleMethodChoice(phone, text, buttonId, conv, res) {
+  const choice = buttonId || text.toLowerCase();
+
+  if (choice === 'start_voice' || choice.includes('voice')) {
+    await smsDb.setState(phone, 'awaiting_voice');
+    await sendMessage(phone,
+      `🎤 Send a voice message describing your item.\n\n` +
+      `Include: brand, pieces (kurta/2pc/3pc), size, condition, price, and measurements (chest & hip in inches).\n\n` +
+      `Example: "Sana Safinaz 3-piece, medium, like new, $95. Chest 36, hip 38."`
+    );
+    return res.status(200).json({ status: 'awaiting voice' });
   }
 
-  // Extract with AI
-  const extracted = await extractListingData(text);
+  if (choice === 'start_form' || choice.includes('form') || choice.includes('type')) {
+    // Launch Flow directly (no pre-fill)
+    await sendWhatsAppFlow(phone, `fresh_${phone}`);
+    await smsDb.setState(phone, 'awaiting_flow');
+    return res.status(200).json({ status: 'sent flow' });
+  }
 
-  // Save to context
+  // Unknown - show buttons again
+  await sendButtons(phone, `Please choose:`, [
+    { id: 'start_voice', title: '🎤 Voice Message' },
+    { id: 'start_form', title: '📝 Form' }
+  ]);
+  return res.status(200).json({ status: 'asked again' });
+}
+
+/**
+ * Handle voice message - transcribe, extract, launch Flow with pre-fill
+ */
+async function handleVoiceForFlow(phone, text, conv, res) {
+  if (!text || text.trim().length < 10) {
+    await sendMessage(phone, "Couldn't understand that. Please send another voice message.");
+    return res.status(200).json({ status: 'voice too short' });
+  }
+
+  console.log('🤖 Extracting from voice:', text);
+  const extracted = await extractListingData(text);
+  console.log('📋 Extracted:', extracted);
+
+  // Save for Flow pre-fill
   await smsDb.updateContext(phone, {
-    listing_data: {
-      ...extracted,
-      description: text
-    }
+    extracted_data: extracted,
+    original_description: text
   });
 
-  // Move to collecting missing fields
-  await smsDb.setState(phone, 'sell_collecting');
+  // Show confirmation
+  const parts = [];
+  if (extracted.designer) parts.push(`Brand: ${extracted.designer}`);
+  if (extracted.pieces) parts.push(`Pieces: ${extracted.pieces}`);
+  if (extracted.size) parts.push(`Size: ${extracted.size}`);
+  if (extracted.condition) parts.push(`Condition: ${extracted.condition}`);
+  if (extracted.asking_price) parts.push(`Price: $${extracted.asking_price}`);
+  if (extracted.chest) parts.push(`Chest: ${extracted.chest}"`);
+  if (extracted.hip) parts.push(`Hip: ${extracted.hip}"`);
 
-  // Show what we extracted (like V1)
-  const confirmations = [];
-  if (extracted.designer) confirmations.push(`Designer: ${extracted.designer} ✓`);
-  if (extracted.pieces_included) confirmations.push(`Pieces: ${extracted.pieces_included} ✓`);
-  if (extracted.size) confirmations.push(`Size: ${extracted.size} ✓`);
-  if (extracted.condition) confirmations.push(`Condition: ${extracted.condition} ✓`);
-  if (extracted.asking_price_usd) confirmations.push(`Price: $${extracted.asking_price_usd} ✓`);
-
-  if (confirmations.length > 0) {
-    await sendMessage(phone, `Got it!\n\n${confirmations.join('\n')}\n\nDon't worry - you'll get a chance to review everything at the end.`);
+  if (parts.length > 0) {
+    await sendMessage(phone, `Got it!\n\n${parts.join('\n')}\n\nOpening form to review & add photos...`);
   }
 
-  console.log('📋 About to ask for next missing field...');
+  // Launch Flow with pre-fill
+  await sendWhatsAppFlow(phone, `prefill_${phone}`);
+  await smsDb.setState(phone, 'awaiting_flow');
 
-  // Ask for first missing field
+  return res.status(200).json({ status: 'sent flow with prefill' });
+}
+
+/**
+ * Send WhatsApp Flow
+ */
+async function sendWhatsAppFlow(phone, flowToken) {
+  const FLOW_ID = process.env.WHATSAPP_FLOW_ID?.replace(/\\n/g, '');
+
+  console.log(`📤 Sending Flow ${FLOW_ID} to ${phone}`);
+
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        body: { text: 'Complete your listing and add photos.' },
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_id: FLOW_ID,
+            flow_message_version: '3',
+            flow_token: flowToken,
+            flow_cta: 'Open Listing Form',
+            flow_action: 'navigate',
+            flow_action_payload: {
+              screen: 'LISTING_DETAILS'
+            }
+          }
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('❌ Flow send error:', err);
+    throw new Error(`Flow send failed: ${response.status}`);
+  }
+
+  console.log('✅ Flow sent');
+  return response.json();
+}
+
+/**
+ * Handle Flow completion (nfm_reply)
+ * Photos are already uploaded to Shopify by whatsapp-flow.js
+ * This just saves to DB and notifies user
+ */
+async function handleFlowCompletion(phone, flowData, conv, res) {
+  console.log('🎉 Flow completed:', JSON.stringify(flowData));
+
   try {
-    return await askNextMissingField(phone, res);
+    // Get productId from context (saved by whatsapp-flow.js)
+    const productId = conv.context?.shopify_product_id;
+    const listingData = conv.context?.listing_data || flowData;
+
+    if (!productId) {
+      console.warn('⚠️ No productId in context, product may not have been created');
+    }
+
+    // Save to listings table
+    const { data: listing, error } = await supabase
+      .from('listings')
+      .insert({
+        conversation_id: conv.id,
+        seller_id: conv.seller_id,
+        status: 'pending_review',
+        designer: listingData.brand || flowData.brand,
+        pieces_included: listingData.pieces || flowData.pieces,
+        size: listingData.size || flowData.size,
+        condition: listingData.condition || flowData.condition,
+        asking_price_usd: parseInt(listingData.price || flowData.price) || 0,
+        chest_inches: parseInt(listingData.chest || flowData.chest) || null,
+        hip_inches: parseInt(listingData.hip || flowData.hip) || null,
+        color: listingData.color || flowData.color || null,
+        fabric: listingData.fabric || flowData.fabric || null,
+        details: listingData.notes || flowData.notes || null,
+        shopify_product_id: productId,
+        input_method: 'whatsapp_flow'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await smsDb.resetConversation(phone);
+    await sendMessage(phone,
+      `✅ Listing submitted!\n\n` +
+      `${listingData.brand || flowData.brand} ${listingData.pieces || flowData.pieces}\n` +
+      `We'll notify you when it's approved.\n\n` +
+      `Reply SELL to list another item.`
+    );
+
+    return res.status(200).json({ status: 'submitted', listing_id: listing.id });
+
   } catch (error) {
-    console.error('❌ Error in askNextMissingField:', error);
-    await sendMessage(phone, "Oops! Something went wrong. Reply SELL to start over.");
-    return res.status(200).json({ status: 'error asking next field', error: error.message });
+    console.error('❌ Flow completion error:', error);
+    await sendMessage(phone, "Something went wrong. Please try again.");
+    await smsDb.resetConversation(phone);
+    return res.status(200).json({ status: 'error', error: error.message });
   }
 }
+
+// ============ LEGACY HANDLERS (kept for reference) ============
 
 async function askNextMissingField(phone, res, summaryPrefix = null) {
   console.log('🔍 askNextMissingField called for:', phone);
