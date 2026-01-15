@@ -824,22 +824,17 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
       try {
         let buffer;
 
-        // PhotoPicker can return different formats:
-        // 1. { cdn_url: "https://..." } - direct CDN URL
-        // 2. { media_id: "..." } - WhatsApp media ID
-        // 3. string - could be URL or media_id
-        if (photo.cdn_url) {
-          // Download from CDN URL directly
+        // PhotoPicker returns: { id: "...", mime_type: "...", sha256: "...", file_name: "..." }
+        const mediaId = photo.id || photo.media_id;
+        if (mediaId) {
+          console.log(`  📥 Downloading via media id: ${mediaId}`);
+          buffer = await downloadMedia(mediaId.toString());
+        } else if (photo.cdn_url) {
           console.log(`  📥 Downloading from CDN URL...`);
           const response = await fetch(photo.cdn_url);
           if (!response.ok) throw new Error(`CDN fetch failed: ${response.status}`);
           buffer = Buffer.from(await response.arrayBuffer());
-        } else if (photo.media_id) {
-          // Download via WhatsApp media API
-          console.log(`  📥 Downloading via media_id: ${photo.media_id}`);
-          buffer = await downloadMedia(photo.media_id);
         } else if (typeof photo === 'string' && photo.startsWith('http')) {
-          // Direct URL string
           console.log(`  📥 Downloading from URL string...`);
           const response = await fetch(photo);
           if (!response.ok) throw new Error(`URL fetch failed: ${response.status}`);
@@ -881,11 +876,9 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
         size: flowData.size,
         condition: flowData.condition,
         asking_price_usd: parseInt(flowData.price) || 0,
-        chest_inches: parseInt(flowData.chest) || null,
-        hip_inches: parseInt(flowData.hip) || null,
         color: flowData.color || null,
         fabric: flowData.fabric || null,
-        details: flowData.notes || null,
+        details: `Chest: ${flowData.chest || 'N/A'}, Hip: ${flowData.hip || 'N/A'}. ${flowData.notes || ''}`.trim(),
         shopify_product_id: productId,
         input_method: 'whatsapp_flow'
       })
