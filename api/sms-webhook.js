@@ -448,19 +448,13 @@ export default async function handler(req, res) {
       case 'awaiting_code':
         return await handleCode(phone, text, conv, res);
 
-      case 'sell_choosing_method':
-        return await handleMethodChoice(phone, text, buttonId, conv, res);
-
-      case 'awaiting_voice':
-        return await handleVoiceForFlow(phone, text, conv, res);
+      case 'awaiting_description':
+        // Handle both voice (already transcribed to text) and text input
+        return await handleDescription(phone, text, conv, res);
 
       case 'awaiting_flow':
-        // Check if they sent a voice message to pre-fill
-        if (message.type === 'audio') {
-          return await handleVoiceForFlow(phone, text, conv, res);
-        }
-        // Otherwise remind them
-        await sendMessage(phone, "Tap 'Open Listing Form' above to continue.\n\nOr send a voice message to pre-fill the form.\n\nReply CANCEL to start over.");
+        // Remind them to tap the button
+        await sendMessage(phone, "Tap 'Review and Add Photos' above to continue.\n\nReply CANCEL to start over.");
         return res.status(200).json({ status: 'awaiting flow' });
 
       default:
@@ -486,7 +480,7 @@ async function sendWelcome(phone) {
 async function handleSellCommand(phone, conv, res) {
   // Check if already authorized
   if (conv.is_authorized && conv.seller_id) {
-    console.log(`✅ ${phone} already authorized - sending Flow directly`);
+    console.log(`✅ ${phone} already authorized - asking for description`);
 
     // Clean up any previous flow
     await redisPhotos.clearPhotos(phone);
@@ -498,12 +492,11 @@ async function handleSellCommand(phone, conv, res) {
       photo_base64_list: [],
       current_field: null
     });
-    await smsDb.setState(phone, 'awaiting_flow');
+    await smsDb.setState(phone, 'awaiting_description');
 
-    // Send Flow directly as single CTA
-    // Voice option mentioned in text - they can send voice anytime
-    await sendWhatsAppFlowWithVoiceOption(phone, `fresh_${phone}`);
-    return res.status(200).json({ status: 'sent flow' });
+    // Simple prompt - just ask for description
+    await sendMessage(phone, "Tell us about your outfit in your own words.\n\nSend a voice note or text.");
+    return res.status(200).json({ status: 'asked description' });
   }
 
   // Not authorized - ask for email
@@ -586,16 +579,12 @@ async function handleCode(phone, text, conv, res) {
   // Authorize conversation
   await smsDb.authorize(phone, seller.id, email);
 
-  // Show sell method choice
-  await smsDb.setState(phone, 'sell_choosing_method');
+  // Go directly to asking for description
+  await smsDb.setState(phone, 'awaiting_description');
 
-  const greeting = seller.name ? `Welcome back, ${seller.name}! ✓` : `Welcome! ✓`;
-  await sendButtons(phone,
-    `${greeting}\n\nLet's list your item!\n\nHow would you like to start?`,
-    [
-      { id: 'start_voice', title: '🎤 Voice Message' },
-      { id: 'start_form', title: '📝 Start with Form' }
-    ]
+  const greeting = seller.name ? `Welcome back, ${seller.name}!` : `Welcome!`;
+  await sendMessage(phone,
+    `${greeting} ✓\n\nTell us about your outfit in your own words.\n\nSend a voice note or text.`
   );
 
   return res.status(200).json({ status: 'authorized' });
@@ -604,45 +593,15 @@ async function handleCode(phone, text, conv, res) {
 // ============ FLOW-BASED HANDLERS ============
 
 /**
- * Handle method choice: Voice or Form
+ * Handle description (voice or text) - extract and show feedback with Flow CTA
  */
-async function handleMethodChoice(phone, text, buttonId, conv, res) {
-  const choice = buttonId || text.toLowerCase();
-
-  if (choice === 'start_voice' || choice.includes('voice')) {
-    await smsDb.setState(phone, 'awaiting_voice');
-    await sendMessage(phone,
-      `🎤 Send a voice message describing your item.\n\n` +
-      `Example: "Sana Safinaz 3-piece, medium, like new, $95. Chest 36, hip 38."`
-    );
-    return res.status(200).json({ status: 'awaiting voice' });
+async function handleDescription(phone, text, conv, res) {
+  if (!text || text.trim().length < 5) {
+    await sendMessage(phone, "Please describe your outfit - include brand, size, condition, and price.");
+    return res.status(200).json({ status: 'description too short' });
   }
 
-  if (choice === 'start_form' || choice.includes('form') || choice.includes('type')) {
-    // Launch Flow directly (no pre-fill)
-    await sendWhatsAppFlow(phone, `fresh_${phone}`);
-    await smsDb.setState(phone, 'awaiting_flow');
-    return res.status(200).json({ status: 'sent flow' });
-  }
-
-  // Unknown - show buttons again
-  await sendButtons(phone, `Please choose:`, [
-    { id: 'start_voice', title: '🎤 Voice Message' },
-    { id: 'start_form', title: '📝 Form' }
-  ]);
-  return res.status(200).json({ status: 'asked again' });
-}
-
-/**
- * Handle voice message - transcribe, extract, launch Flow with pre-fill
- */
-async function handleVoiceForFlow(phone, text, conv, res) {
-  if (!text || text.trim().length < 10) {
-    await sendMessage(phone, "Couldn't understand that. Please send another voice message.");
-    return res.status(200).json({ status: 'voice too short' });
-  }
-
-  console.log('🤖 Extracting from voice:', text);
+  console.log('🤖 Extracting from description:', text);
   const extracted = await extractListingData(text);
   console.log('📋 Extracted:', extracted);
 
@@ -652,22 +611,25 @@ async function handleVoiceForFlow(phone, text, conv, res) {
     original_description: text
   });
 
-  // Build summary for Flow message
+  // Build feedback summary
   const parts = [];
-  if (extracted.designer) parts.push(`Brand: ${extracted.designer}`);
-  if (extracted.pieces) parts.push(`Pieces: ${extracted.pieces}`);
-  if (extracted.size) parts.push(`Size: ${extracted.size}`);
-  if (extracted.condition) parts.push(`Condition: ${extracted.condition}`);
-  if (extracted.asking_price) parts.push(`Price: $${extracted.asking_price}`);
-  if (extracted.chest) parts.push(`Chest: ${extracted.chest}"`);
-  if (extracted.hip) parts.push(`Hip: ${extracted.hip}"`);
+  if (extracted.designer) parts.push(`• Brand: ${extracted.designer}`);
+  if (extracted.pieces) parts.push(`• Pieces: ${extracted.pieces}`);
+  if (extracted.size) parts.push(`• Size: ${extracted.size}`);
+  if (extracted.condition) parts.push(`• Condition: ${extracted.condition}`);
+  if (extracted.asking_price) parts.push(`• Price: $${extracted.asking_price}`);
+  if (extracted.chest) parts.push(`• Chest: ${extracted.chest}"`);
+  if (extracted.hip) parts.push(`• Hip: ${extracted.hip}"`);
 
-  // Single message with extracted data + Flow CTA
-  const messageBody = `🎤 I heard: "${text}"\n\n` +
-    (parts.length > 0 ? `${parts.join('\n')}\n\n` : '') +
-    `Tap below to edit, add photos, and submit:`;
+  // Message with feedback + Flow CTA button
+  let messageBody;
+  if (parts.length > 0) {
+    messageBody = `Here's what I got:\n\n${parts.join('\n')}\n\nTap below to review, edit, and add photos:`;
+  } else {
+    messageBody = `I couldn't extract details. Tap below to fill in manually:`;
+  }
 
-  await sendWhatsAppFlowWithBody(phone, `prefill_${phone}`, messageBody);
+  await sendWhatsAppFlowWithBody(phone, `prefill_${phone}`, messageBody, 'Review and Add Photos');
   await smsDb.setState(phone, 'awaiting_flow');
 
   return res.status(200).json({ status: 'sent flow with prefill' });
@@ -722,9 +684,9 @@ async function sendWhatsAppFlowWithVoiceOption(phone, flowToken) {
 }
 
 /**
- * Send WhatsApp Flow with custom body text (for voice pre-fill)
+ * Send WhatsApp Flow with custom body text and CTA
  */
-async function sendWhatsAppFlowWithBody(phone, flowToken, bodyText) {
+async function sendWhatsAppFlowWithBody(phone, flowToken, bodyText, ctaText = 'Review and Add Photos') {
   const FLOW_ID = process.env.WHATSAPP_FLOW_ID?.replace(/\\n/g, '');
 
   console.log(`📤 Sending Flow with custom body to ${phone}`);
@@ -748,7 +710,7 @@ async function sendWhatsAppFlowWithBody(phone, flowToken, bodyText) {
             flow_id: FLOW_ID,
             flow_message_version: '3',
             flow_token: flowToken,
-            flow_cta: 'Edit, Add Photos & Submit',
+            flow_cta: ctaText,
             flow_action: 'navigate',
             flow_action_payload: {
               screen: 'REQUIRED_DETAILS'
