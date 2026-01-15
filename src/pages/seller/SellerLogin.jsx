@@ -503,10 +503,15 @@ export default function SellerLogin() {
                 >
                   {loading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
+                  ) : userInfo?.exists ? (
                     <>
                       <MessageCircle className="w-4 h-4" />
                       Send WhatsApp Code
+                    </>
+                  ) : (
+                    <>
+                      Continue
+                      <ArrowRight className="w-4 h-4" />
                     </>
                   )}
                 </button>
@@ -524,7 +529,7 @@ export default function SellerLogin() {
                   }}
                   className="w-full mt-3 text-gray-500 hover:text-gray-700 text-sm py-2"
                 >
-                  Use email instead
+                  {userInfo?.exists ? 'Use email instead' : 'Skip for now'}
                 </button>
               </form>
             </>
