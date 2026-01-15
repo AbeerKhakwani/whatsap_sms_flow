@@ -1175,6 +1175,52 @@ export default async function handler(req, res) {
       });
     }
 
+    // TEST SHIPPING - Test Easyship/EasyPost integration
+    if (action === 'test-shipping' && req.method === 'POST') {
+      const { getShippingLabel } = await import('../lib/shipping.js');
+
+      // Test addresses
+      const testSeller = {
+        name: 'Test Seller',
+        address_line1: '123 Main St',
+        city: 'Dallas',
+        state: 'TX',
+        zip: '75201',
+        phone: '5551234567'
+      };
+
+      const testBuyer = {
+        name: 'Test Buyer',
+        street1: '456 Oak Ave',
+        city: 'Austin',
+        state: 'TX',
+        zip: '78701',
+        country: 'US',
+        phone: '5559876543'
+      };
+
+      try {
+        console.log('🧪 Testing shipping label generation...');
+        console.log('   Easyship key:', process.env.EASYSHIP_API_KEY ? 'Set' : 'Not set');
+        console.log('   EasyPost key:', process.env.EASYPOST_API_KEY ? 'Set' : 'Not set');
+
+        const result = await getShippingLabel(testSeller, 'Test Product - Blue Dress', testBuyer);
+
+        return res.status(200).json({
+          success: true,
+          message: 'Shipping test completed',
+          result,
+          provider: process.env.EASYSHIP_API_KEY ? 'Easyship' : (process.env.EASYPOST_API_KEY ? 'EasyPost' : 'Manual')
+        });
+      } catch (err) {
+        return res.status(500).json({
+          success: false,
+          error: err.message,
+          provider: process.env.EASYSHIP_API_KEY ? 'Easyship' : (process.env.EASYPOST_API_KEY ? 'EasyPost' : 'Manual')
+        });
+      }
+    }
+
     return res.status(400).json({ error: 'Invalid action' });
 
   } catch (error) {
