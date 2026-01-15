@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User } from 'lucide-react';
+import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2 } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -22,6 +22,18 @@ export default function SellerDashboard() {
   const [uploadProgress, setUploadProgress] = useState('');
   const [togglingStatus, setTogglingStatus] = useState(null); // productId being toggled
   const photoInputRef = useRef(null);
+
+  // Address modal state
+  const [showAddressModal, setShowAddressModal] = useState(false);
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [shippingAddress, setShippingAddress] = useState({
+    full_name: '',
+    street_address: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    country: 'USA'
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('seller_token');
@@ -63,6 +75,11 @@ export default function SellerDashboard() {
       const sellerEmail = authData.seller.email || storedEmail;
       setEmail(sellerEmail);
       setSeller(authData.seller);
+
+      // Show address modal if user doesn't have an address
+      if (!authData.seller.has_address) {
+        setShowAddressModal(true);
+      }
 
       // Fetch listings
       fetchListings(sellerEmail);
@@ -271,6 +288,38 @@ export default function SellerDashboard() {
       alert(`Failed to ${action}: ` + error.message);
     } finally {
       setTogglingStatus(null);
+    }
+  }
+
+  function isAddressValid() {
+    return shippingAddress.street_address && shippingAddress.city &&
+           shippingAddress.state && shippingAddress.postal_code;
+  }
+
+  async function handleSaveAddress() {
+    if (!isAddressValid()) return;
+
+    setSavingAddress(true);
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update-address',
+          email,
+          shipping_address: shippingAddress
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSeller({ ...seller, has_address: true, shipping_address: shippingAddress });
+        setShowAddressModal(false);
+      }
+    } catch (err) {
+      console.error('Failed to save address:', err);
+    } finally {
+      setSavingAddress(false);
     }
   }
 
@@ -834,6 +883,97 @@ export default function SellerDashboard() {
                   className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   {saving ? (uploadProgress || 'Saving...') : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Address Modal */}
+      {showAddressModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
+                  <MapPin className="w-6 h-6 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900">Add Shipping Address</h3>
+                  <p className="text-sm text-gray-500">Required to create shipping labels when items sell</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={shippingAddress.full_name}
+                  onChange={(e) => setShippingAddress({ ...shippingAddress, full_name: e.target.value })}
+                  placeholder="Full Name"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                />
+                <input
+                  type="text"
+                  value={shippingAddress.street_address}
+                  onChange={(e) => setShippingAddress({ ...shippingAddress, street_address: e.target.value })}
+                  placeholder="Street Address"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={shippingAddress.city}
+                    onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })}
+                    placeholder="City"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={shippingAddress.state}
+                    onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })}
+                    placeholder="State"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={shippingAddress.postal_code}
+                    onChange={(e) => setShippingAddress({ ...shippingAddress, postal_code: e.target.value })}
+                    placeholder="ZIP Code"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={shippingAddress.country}
+                    onChange={(e) => setShippingAddress({ ...shippingAddress, country: e.target.value })}
+                    placeholder="Country"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowAddressModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50"
+                >
+                  Later
+                </button>
+                <button
+                  onClick={handleSaveAddress}
+                  disabled={!isAddressValid() || savingAddress}
+                  className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {savingAddress ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <MapPin className="w-4 h-4" />
+                      Save Address
+                    </>
+                  )}
                 </button>
               </div>
             </div>
