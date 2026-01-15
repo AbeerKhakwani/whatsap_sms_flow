@@ -610,7 +610,6 @@ async function handleDescription(phone, text, conv, res) {
     extracted_data: extracted,
     original_description: text
   });
-  console.log('💾 Saved extracted_data to context for phone:', phone);
 
   // Build feedback summary
   const parts = [];
@@ -630,8 +629,22 @@ async function handleDescription(phone, text, conv, res) {
     messageBody = `I couldn't extract details. Tap below to fill in manually:`;
   }
 
-  console.log('📤 Sending Flow with token:', `prefill_${phone}`);
-  await sendWhatsAppFlowWithBody(phone, `prefill_${phone}`, messageBody, 'Review and Add Photos');
+  // Build pre-fill data for Flow
+  const prefillData = {
+    brand: extracted.designer || '',
+    pieces: extracted.pieces || '',
+    size: extracted.size || '',
+    condition: extracted.condition || '',
+    price: extracted.asking_price?.toString() || '',
+    chest: extracted.chest?.toString() || '',
+    hip: extracted.hip?.toString() || '',
+    color: extracted.color || '',
+    fabric: extracted.fabric || '',
+    notes: extracted.notes || ''
+  };
+
+  console.log('📤 Sending Flow with prefill data:', JSON.stringify(prefillData));
+  await sendWhatsAppFlowWithPrefill(phone, `prefill_${phone}`, messageBody, prefillData);
   await smsDb.setState(phone, 'awaiting_flow');
 
   return res.status(200).json({ status: 'sent flow with prefill' });
@@ -682,6 +695,55 @@ async function sendWhatsAppFlowWithVoiceOption(phone, flowToken) {
   }
 
   console.log('✅ Flow sent');
+  return response.json();
+}
+
+/**
+ * Send WhatsApp Flow with pre-fill data in payload
+ */
+async function sendWhatsAppFlowWithPrefill(phone, flowToken, bodyText, prefillData) {
+  const FLOW_ID = process.env.WHATSAPP_FLOW_ID?.replace(/\\n/g, '');
+
+  console.log(`📤 Sending Flow with prefill to ${phone}`);
+
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        body: { text: bodyText },
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_id: FLOW_ID,
+            flow_message_version: '3',
+            flow_token: flowToken,
+            flow_cta: 'Review and Add Photos',
+            flow_action: 'navigate',
+            flow_action_payload: {
+              screen: 'REQUIRED_DETAILS',
+              data: prefillData
+            }
+          }
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('❌ Flow send error:', err);
+    throw new Error(`Flow send failed: ${response.status}`);
+  }
+
+  console.log('✅ Flow with prefill sent');
   return response.json();
 }
 
