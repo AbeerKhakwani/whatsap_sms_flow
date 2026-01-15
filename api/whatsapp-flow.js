@@ -110,19 +110,27 @@ async function handleInit(decryptedData, aesKey) {
 
   // flow_token format: "prefill_{phone}" or "fresh_{phone}"
   if (flow_token?.startsWith('prefill_')) {
-    // Extract phone - handle + sign and any trailing parts
-    const phone = flow_token.replace('prefill_', '');
+    // Extract phone and normalize (add + prefix if missing)
+    let phone = flow_token.replace('prefill_', '');
+    if (!phone.startsWith('+')) {
+      phone = '+' + phone;
+    }
     console.log('📋 Looking up pre-fill data for phone:', phone);
 
     // Look up the conversation context for extracted data
-    const { data: conv } = await supabase
+    const { data: conv, error } = await supabase
       .from('sms_conversations')
       .select('context')
       .eq('phone_number', phone)
       .single();
 
+    console.log('📋 DB lookup result:', conv ? 'found' : 'not found', error?.message || '');
+
+    console.log('📋 Context data:', JSON.stringify(conv?.context || {}));
+
     if (conv?.context?.extracted_data) {
       const extracted = conv.context.extracted_data;
+      console.log('📋 Extracted data:', JSON.stringify(extracted));
       prefillData = {
         brand: extracted.designer || '',
         pieces: extracted.pieces || '',
@@ -135,7 +143,9 @@ async function handleInit(decryptedData, aesKey) {
         fabric: extracted.fabric || '',
         notes: extracted.notes || ''
       };
-      console.log('✅ Pre-filling with:', prefillData);
+      console.log('✅ Pre-filling with:', JSON.stringify(prefillData));
+    } else {
+      console.log('⚠️ No extracted_data found in context');
     }
   }
 
