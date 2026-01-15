@@ -774,7 +774,9 @@ async function sendWhatsAppFlowWithBody(phone, flowToken, bodyText) {
  * Creates Shopify product, uploads photos, and saves to DB
  */
 async function handleFlowCompletion(phone, flowData, conv, res) {
-  console.log('🎉 Flow completed:', JSON.stringify(flowData));
+  console.log('🎉 Flow completed - full data:', JSON.stringify(flowData));
+  console.log('🎉 Flow photos field:', JSON.stringify(flowData.photos));
+  console.log('🎉 Flow keys:', Object.keys(flowData));
 
   try {
     // Get seller info
