@@ -740,14 +740,60 @@ export default async function handler(req, res) {
         // Get buyer address from transaction if not provided
         let finalBuyerAddress = buyerAddress;
         if (!finalBuyerAddress && transactionId) {
-          const { data: tx } = await supabase
+          const { data: tx, error: txError } = await supabase
             .from('transactions')
-            .select('buyer_address')
+            .select('buyer_address, order_id')
             .eq('id', transactionId)
             .single();
+
+          console.log('📦 Transaction lookup:', { transactionId, tx, txError });
           finalBuyerAddress = tx?.buyer_address;
+
+          // If no buyer address stored, try to get from Shopify order
+          if (!finalBuyerAddress && tx?.order_id) {
+            console.log('📦 No buyer address in transaction, fetching from Shopify order:', tx.order_id);
+            try {
+              const orderRes = await fetch(
+                `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/orders/${tx.order_id}.json`,
+                { headers: { 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN } }
+              );
+              const orderData = await orderRes.json();
+              const shippingAddr = orderData.order?.shipping_address;
+
+              if (shippingAddr) {
+                finalBuyerAddress = {
+                  name: shippingAddr.name,
+                  street1: shippingAddr.address1,
+                  street2: shippingAddr.address2 || '',
+                  city: shippingAddr.city,
+                  state: shippingAddr.province_code,
+                  zip: shippingAddr.zip,
+                  country: shippingAddr.country_code || 'US',
+                  phone: shippingAddr.phone || ''
+                };
+
+                // Save it to transaction for next time
+                await supabase
+                  .from('transactions')
+                  .update({ buyer_address: finalBuyerAddress })
+                  .eq('id', transactionId);
+
+                console.log('📦 Fetched and saved buyer address from Shopify');
+              }
+            } catch (shopifyErr) {
+              console.error('📦 Failed to fetch Shopify order:', shopifyErr.message);
+            }
+          }
         }
 
+        if (!finalBuyerAddress) {
+          return res.status(400).json({
+            error: 'Buyer address not found. This order may be too old.',
+            needsBuyerAddress: true
+          });
+        }
+
+        console.log('📦 Generating label:', { seller: sellerForShipping.name, buyer: finalBuyerAddress.name });
         const labelResult = await getShippingLabel(sellerForShipping, productTitle, finalBuyerAddress);
 
         // If we got a real label and have a transaction ID, update the transaction
