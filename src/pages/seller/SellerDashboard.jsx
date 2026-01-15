@@ -391,14 +391,53 @@ export default function SellerDashboard() {
               <Plus className="w-4 h-4" />
               Submit Listing
             </Link>
-            <span className="text-sm text-gray-600">{email}</span>
-            <button
-              onClick={handleLogout}
-              className="text-gray-500 hover:text-gray-700 p-2"
-              title="Sign out"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
+
+            {/* Profile Dropdown - Desktop */}
+            <div className="relative">
+              <button
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition"
+              >
+                <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
+                  <User className="w-4 h-4" />
+                </div>
+                <span className="text-sm max-w-[150px] truncate">{email}</span>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showProfileMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowProfileMenu(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
+                    <div className="px-4 py-2 border-b border-gray-100">
+                      <p className="text-sm font-medium text-gray-900 truncate">{email}</p>
+                      <p className="text-xs text-gray-500">Seller Account</p>
+                    </div>
+                    <Link
+                      to="/seller/profile"
+                      className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
+                      onClick={() => setShowProfileMenu(false)}
+                    >
+                      <User className="w-4 h-4" />
+                      <span>My Profile</span>
+                    </Link>
+                    <div className="border-t border-gray-100" />
+                    <button
+                      onClick={() => { setShowProfileMenu(false); handleLogout(); }}
+                      className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
