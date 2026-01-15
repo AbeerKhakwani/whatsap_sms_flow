@@ -771,38 +771,100 @@ async function sendWhatsAppFlow(phone, flowToken) {
 
 /**
  * Handle Flow completion (nfm_reply)
- * Photos are already uploaded to Shopify by whatsapp-flow.js
- * This just saves to DB and notifies user
+ * Creates Shopify product, uploads photos, and saves to DB
  */
 async function handleFlowCompletion(phone, flowData, conv, res) {
   console.log('🎉 Flow completed:', JSON.stringify(flowData));
 
   try {
-    // Get productId from context (saved by whatsapp-flow.js)
-    const productId = conv.context?.shopify_product_id;
-    const listingData = conv.context?.listing_data || flowData;
-
-    if (!productId) {
-      console.warn('⚠️ No productId in context, product may not have been created');
+    // Get seller info
+    const seller = await smsDb.findSellerByPhone(phone);
+    if (!seller) {
+      throw new Error('Seller not found');
     }
 
-    // Save to listings table
+    // Step 1: Create Shopify draft product
+    console.log('📦 Creating Shopify draft product...');
+    const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: seller.email,
+        phone: seller.phone,
+        description: conv.context?.original_description || '',
+        extracted: {
+          designer: flowData.brand,
+          item_type: flowData.pieces,
+          size: flowData.size,
+          condition: flowData.condition,
+          asking_price: parseInt(flowData.price) || 0
+        }
+      })
+    });
+
+    const draftData = await draftRes.json();
+    if (!draftData.success) {
+      throw new Error(draftData.error || 'Failed to create draft');
+    }
+
+    const productId = draftData.productId;
+    console.log('✅ Draft created:', productId);
+
+    // Step 2: Upload photos from PhotoPicker
+    const photos = flowData.photos || [];
+    console.log(`📸 Processing ${photos.length} photos...`);
+
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[i];
+      console.log(`  Uploading photo ${i + 1}/${photos.length}...`);
+
+      try {
+        // PhotoPicker returns objects with media_id
+        const mediaId = photo.media_id || photo;
+        if (!mediaId) {
+          console.warn(`  ⚠️ Photo ${i + 1} has no media_id`);
+          continue;
+        }
+
+        // Download from WhatsApp
+        const buffer = await downloadMedia(mediaId);
+        const compressed = await compressImage(buffer);
+        const base64 = compressed.toString('base64');
+
+        // Upload to Shopify
+        await fetch(`${API_BASE}/api/product-image?action=add`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId,
+            base64,
+            filename: `photo_${i + 1}.jpg`
+          })
+        });
+        console.log(`  ✅ Photo ${i + 1} uploaded`);
+      } catch (photoErr) {
+        console.error(`  ❌ Photo ${i + 1} failed:`, photoErr.message);
+        // Continue with other photos
+      }
+    }
+
+    // Step 3: Save to listings table
     const { data: listing, error } = await supabase
       .from('listings')
       .insert({
         conversation_id: conv.id,
         seller_id: conv.seller_id,
         status: 'pending_review',
-        designer: listingData.brand || flowData.brand,
-        pieces_included: listingData.pieces || flowData.pieces,
-        size: listingData.size || flowData.size,
-        condition: listingData.condition || flowData.condition,
-        asking_price_usd: parseInt(listingData.price || flowData.price) || 0,
-        chest_inches: parseInt(listingData.chest || flowData.chest) || null,
-        hip_inches: parseInt(listingData.hip || flowData.hip) || null,
-        color: listingData.color || flowData.color || null,
-        fabric: listingData.fabric || flowData.fabric || null,
-        details: listingData.notes || flowData.notes || null,
+        designer: flowData.brand,
+        pieces_included: flowData.pieces,
+        size: flowData.size,
+        condition: flowData.condition,
+        asking_price_usd: parseInt(flowData.price) || 0,
+        chest_inches: parseInt(flowData.chest) || null,
+        hip_inches: parseInt(flowData.hip) || null,
+        color: flowData.color || null,
+        fabric: flowData.fabric || null,
+        details: flowData.notes || null,
         shopify_product_id: productId,
         input_method: 'whatsapp_flow'
       })
@@ -814,7 +876,8 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
     await smsDb.resetConversation(phone);
     await sendMessage(phone,
       `✅ Listing submitted!\n\n` +
-      `${listingData.brand || flowData.brand} ${listingData.pieces || flowData.pieces}\n` +
+      `${flowData.brand} ${flowData.pieces}\n` +
+      `${photos.length} photos uploaded\n\n` +
       `We'll notify you when it's approved.\n\n` +
       `Reply SELL to list another item.`
     );

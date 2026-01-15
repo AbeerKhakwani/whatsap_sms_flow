@@ -14,7 +14,6 @@ import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const PRIVATE_KEY = process.env.WHATSAPP_PRIVATE_KEY?.replace(/\\n/g, '\n');
-const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN?.replace(/\\n/g, '');
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
@@ -191,124 +190,9 @@ async function handleDataExchange(decryptedData, aesKey) {
       };
 
     case 'PHOTOS':
-      // Photos screen - create Shopify product and upload photos
-      console.log('📸 Processing photos and creating Shopify product...');
-
-      try {
-        // Extract phone from flow_token (format: "prefill_PHONE" or "fresh_PHONE")
-        const phone = flow_token?.replace('prefill_', '').replace('fresh_', '').split('_')[0];
-
-        if (!phone) {
-          console.error('❌ No phone in flow_token:', flow_token);
-          throw new Error('Missing phone number');
-        }
-
-        // Get seller info
-        const { data: conv } = await supabase
-          .from('sms_conversations')
-          .select('seller_id, context')
-          .eq('phone_number', phone)
-          .single();
-
-        const { data: seller } = await supabase
-          .from('sellers')
-          .select('email, phone')
-          .eq('id', conv.seller_id)
-          .single();
-
-        // Create Shopify draft product
-        const API_BASE = process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : 'https://sell.thephirstory.com';
-
-        console.log('📦 Creating Shopify draft...');
-        const draftRes = await fetch(`${API_BASE}/api/create-draft`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: seller.email,
-            phone: seller.phone,
-            description: conv.context?.original_description || '',
-            extracted: {
-              designer: data.brand,
-              item_type: data.pieces,
-              size: data.size,
-              condition: data.condition,
-              asking_price: parseInt(data.price) || 0
-            }
-          })
-        });
-
-        const draftData = await draftRes.json();
-        if (!draftData.success) throw new Error(draftData.error || 'Draft failed');
-
-        const productId = draftData.productId;
-        console.log('✅ Draft created:', productId);
-
-        // Handle photos from PhotoPicker
-        // Photos come as encrypted media that we need to decrypt
-        const photos = data.photos || [];
-        console.log(`📸 Processing ${photos.length} photos...`);
-
-        for (let i = 0; i < photos.length; i++) {
-          const photo = photos[i];
-          console.log(`  Uploading photo ${i + 1}/${photos.length}...`);
-
-          // If photo has media_id, download from WhatsApp
-          if (photo.media_id) {
-            try {
-              // Get media URL
-              const mediaRes = await fetch(`https://graph.facebook.com/v21.0/${photo.media_id}`, {
-                headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
-              });
-              const mediaData = await mediaRes.json();
-
-              if (mediaData.url) {
-                // Download media
-                const downloadRes = await fetch(mediaData.url, {
-                  headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}` }
-                });
-                const buffer = Buffer.from(await downloadRes.arrayBuffer());
-                const base64 = buffer.toString('base64');
-
-                // Upload to Shopify
-                await fetch(`${API_BASE}/api/product-image?action=add`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    productId,
-                    base64,
-                    filename: `photo_${i + 1}.jpg`
-                  })
-                });
-                console.log(`  ✅ Photo ${i + 1} uploaded`);
-              }
-            } catch (photoErr) {
-              console.error(`  ❌ Photo ${i + 1} failed:`, photoErr.message);
-            }
-          }
-        }
-
-        // Save productId to conversation context for webhook completion
-        await supabase
-          .from('sms_conversations')
-          .update({
-            context: {
-              ...conv.context,
-              shopify_product_id: productId,
-              listing_data: data
-            }
-          })
-          .eq('phone_number', phone);
-
-        console.log('✅ All photos processed, productId saved to context');
-
-      } catch (error) {
-        console.error('❌ PHOTOS processing error:', error);
-        // Continue anyway - webhook will handle errors
-      }
-
-      // Return same screen to trigger completion
+      // PHOTOS screen is terminal with "complete" action
+      // This case should rarely be hit - photos are handled via nfm_reply in webhook
+      console.log('📸 PHOTOS screen data_exchange (unexpected)');
       return {
         screen: 'PHOTOS',
         data: data

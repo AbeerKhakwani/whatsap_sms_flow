@@ -9,7 +9,7 @@
   "screens": [
     {
       "id": "REQUIRED_DETAILS",
-      "title": "Required Details",
+      "title": "Item Details",
       "terminal": false,
       "data": {
         "brand": {"type": "string", "__example__": "Sana Safinaz"},
@@ -24,34 +24,32 @@
         "type": "SingleColumnLayout",
         "children": [
           {
-            "type": "TextHeading",
-            "text": "Required Information"
-          },
-          {
             "type": "TextInput",
             "name": "brand",
-            "label": "Brand / Designer",
+            "label": "Brand",
             "input-type": "text",
             "required": true,
             "init-value": "${data.brand}",
-            "helper-text": "Sana Safinaz, Maria B, Khaadi, etc."
+            "helper-text": "e.g. Sana Safinaz, Maria B"
           },
           {
             "type": "Dropdown",
             "name": "pieces",
-            "label": "Pieces Included",
+            "label": "Pieces",
             "required": true,
             "init-value": "${data.pieces}",
             "data-source": [
-              {"id": "1-piece", "title": "1-piece (Kurta only)"},
+              {"id": "1-piece", "title": "1-piece"},
               {"id": "2-piece", "title": "2-piece"},
               {"id": "3-piece", "title": "3-piece"},
-              {"id": "Lehnga", "title": "Lehnga Set"},
+              {"id": "Lehnga", "title": "Lehnga"},
               {"id": "Saree", "title": "Saree"},
-              {"id": "Sharara", "title": "Sharara Set"},
-              {"id": "Gharara", "title": "Gharara Set"},
+              {"id": "Sharara", "title": "Sharara"},
+              {"id": "Gharara", "title": "Gharara"},
               {"id": "Other", "title": "Other"}
-            ]
+            ],
+            "helper-text": "e.g. Kurta only, 3-piece set"
+
           },
           {
             "type": "Dropdown",
@@ -67,8 +65,10 @@
               {"id": "XL", "title": "XL"},
               {"id": "XXL", "title": "XXL"},
               {"id": "Unstitched", "title": "Unstitched"},
-              {"id": "Custom", "title": "Custom Size"}
-            ]
+              {"id": "Custom", "title": "Custom"}
+            ], 
+             "helper-text": "e.g. Large, Xl"
+
           },
           {
             "type": "Dropdown",
@@ -82,38 +82,44 @@
               {"id": "Excellent", "title": "Excellent"},
               {"id": "Good", "title": "Good"},
               {"id": "Fair", "title": "Fair"}
-            ]
+            ],
+            "helper-text": "e.g. Like New, NWT, NWOT"
+
           },
           {
             "type": "TextInput",
             "name": "price",
-            "label": "Asking Price ($)",
+            "label": "Price",
             "input-type": "text",
             "required": true,
             "init-value": "${data.price}",
-            "helper-text": "Your asking price in USD"
+            "helper-text": "e.g. Your asking price in USD"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "Measurements"
           },
           {
             "type": "TextInput",
             "name": "chest",
-            "label": "Chest (inches)",
+            "label": "Chest (in)",
             "input-type": "text",
             "required": true,
             "init-value": "${data.chest}",
-            "helper-text": "Chest measurement"
+            "helper-text": "e.g. 36"
           },
           {
             "type": "TextInput",
             "name": "hip",
-            "label": "Hip (inches)",
+            "label": "Hip (in)",
             "input-type": "text",
             "required": true,
             "init-value": "${data.hip}",
-            "helper-text": "Hip measurement"
+            "helper-text": "e.g. 38"
           },
           {
             "type": "Footer",
-            "label": "Continue",
+            "label": "Next",
             "on-click-action": {
               "name": "navigate",
               "next": {"type": "screen", "name": "OPTIONAL_DETAILS"},
@@ -133,7 +139,7 @@
     },
     {
       "id": "OPTIONAL_DETAILS",
-      "title": "Additional Details",
+      "title": "More Details",
       "terminal": false,
       "data": {
         "brand": {"type": "string", "__example__": "Sana Safinaz"},
@@ -143,20 +149,16 @@
         "price": {"type": "string", "__example__": "95"},
         "chest": {"type": "string", "__example__": "36"},
         "hip": {"type": "string", "__example__": "38"},
-        "color": {"type": "string", "__example__": "Maroon"},
-        "fabric": {"type": "string", "__example__": "Chiffon"},
+        "color": {"type": "string", "__example__": ""},
+        "fabric": {"type": "string", "__example__": ""},
         "notes": {"type": "string", "__example__": ""}
       },
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           {
-            "type": "TextHeading",
-            "text": "Optional Details"
-          },
-          {
             "type": "TextBody",
-            "text": "These help buyers find your item"
+            "text": "Optional - helps buyers find your item"
           },
           {
             "type": "TextInput",
@@ -165,7 +167,7 @@
             "input-type": "text",
             "required": false,
             "init-value": "${data.color}",
-            "helper-text": "e.g. Maroon with gold embroidery"
+            "helper-text": "e.g. Maroon, Gold"
           },
           {
             "type": "TextInput",
@@ -174,7 +176,7 @@
             "input-type": "text",
             "required": false,
             "init-value": "${data.fabric}",
-            "helper-text": "e.g. Chiffon, Silk, Lawn, Cotton"
+            "helper-text": "e.g. Chiffon, Silk, Lawn"
           },
           {
             "type": "TextArea",
@@ -182,11 +184,11 @@
             "label": "Notes",
             "required": false,
             "init-value": "${data.notes}",
-            "helper-text": "Any flaws, alterations, or extras included"
+            "helper-text": "Flaws, alterations, extras"
           },
           {
             "type": "Footer",
-            "label": "Continue to Photos",
+            "label": "Add Photos",
             "on-click-action": {
               "name": "navigate",
               "next": {"type": "screen", "name": "PHOTOS"},
@@ -209,7 +211,7 @@
     },
     {
       "id": "PHOTOS",
-      "title": "Add Photos",
+      "title": "Photos",
       "terminal": true,
       "success": true,
       "data": {
@@ -220,26 +222,22 @@
         "price": {"type": "string", "__example__": "95"},
         "chest": {"type": "string", "__example__": "36"},
         "hip": {"type": "string", "__example__": "38"},
-        "color": {"type": "string", "__example__": "Maroon"},
-        "fabric": {"type": "string", "__example__": "Chiffon"},
+        "color": {"type": "string", "__example__": ""},
+        "fabric": {"type": "string", "__example__": ""},
         "notes": {"type": "string", "__example__": ""}
       },
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           {
-            "type": "TextHeading",
-            "text": "Add Photos"
-          },
-          {
             "type": "TextBody",
-            "text": "Upload at least 3 clear photos. Include front, back, and any details or flaws."
+            "text": "Add 3+ clear photos (front, back, details)"
           },
           {
             "type": "PhotoPicker",
             "name": "photos",
-            "label": "Item Photos",
-            "description": "Take new photos or choose from gallery",
+            "label": "Photos",
+            "description": "Tap to add photos",
             "photo-source": "camera_gallery",
             "min-uploaded-photos": 3,
             "max-uploaded-photos": 10,
@@ -260,7 +258,8 @@
                 "hip": "${data.hip}",
                 "color": "${data.color}",
                 "fabric": "${data.fabric}",
-                "notes": "${data.notes}"
+                "notes": "${data.notes}",
+                "photos": "${form.photos}"
               }
             }
           }
