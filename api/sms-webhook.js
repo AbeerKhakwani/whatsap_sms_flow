@@ -921,11 +921,7 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
 
     await smsDb.resetConversation(phone);
     await sendMessage(phone,
-      `✅ Listing submitted!\n\n` +
-      `${flowData.brand} ${flowData.pieces}\n` +
-      `${photos.length} photos uploaded\n\n` +
-      `We'll notify you when it's approved.\n\n` +
-      `Reply SELL to list another item.`
+      `Your item was submitted!\n\nOnce approved and online, you will receive a notification.\n\nReply SELL to list another item.`
     );
 
     return res.status(200).json({ status: 'submitted', listing_id: listing.id });
