@@ -47,9 +47,7 @@
               {"id": "Sharara", "title": "Sharara"},
               {"id": "Gharara", "title": "Gharara"},
               {"id": "Other", "title": "Other"}
-            ],
-            "helper-text": "e.g. Kurta only, 3-piece set"
-
+            ]
           },
           {
             "type": "Dropdown",
@@ -66,9 +64,7 @@
               {"id": "XXL", "title": "XXL"},
               {"id": "Unstitched", "title": "Unstitched"},
               {"id": "Custom", "title": "Custom"}
-            ], 
-             "helper-text": "e.g. Large, Xl"
-
+            ]
           },
           {
             "type": "Dropdown",
@@ -82,9 +78,7 @@
               {"id": "Excellent", "title": "Excellent"},
               {"id": "Good", "title": "Good"},
               {"id": "Fair", "title": "Fair"}
-            ],
-            "helper-text": "e.g. Like New, NWT, NWOT"
-
+            ]
           },
           {
             "type": "TextInput",
