@@ -124,7 +124,10 @@
                 "condition": "${form.condition}",
                 "price": "${form.price}",
                 "chest": "${form.chest}",
-                "hip": "${form.hip}"
+                "hip": "${form.hip}",
+                "color": "",
+                "fabric": "",
+                "notes": ""
               }
             }
           }
