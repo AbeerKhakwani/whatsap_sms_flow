@@ -813,21 +813,40 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
     // Step 2: Upload photos from PhotoPicker
     const photos = flowData.photos || [];
     console.log(`📸 Processing ${photos.length} photos...`);
+    console.log(`📸 Photo data structure:`, JSON.stringify(photos[0] || 'empty'));
 
     for (let i = 0; i < photos.length; i++) {
       const photo = photos[i];
       console.log(`  Uploading photo ${i + 1}/${photos.length}...`);
 
       try {
-        // PhotoPicker returns objects with media_id
-        const mediaId = photo.media_id || photo;
-        if (!mediaId) {
-          console.warn(`  ⚠️ Photo ${i + 1} has no media_id`);
+        let buffer;
+
+        // PhotoPicker can return different formats:
+        // 1. { cdn_url: "https://..." } - direct CDN URL
+        // 2. { media_id: "..." } - WhatsApp media ID
+        // 3. string - could be URL or media_id
+        if (photo.cdn_url) {
+          // Download from CDN URL directly
+          console.log(`  📥 Downloading from CDN URL...`);
+          const response = await fetch(photo.cdn_url);
+          if (!response.ok) throw new Error(`CDN fetch failed: ${response.status}`);
+          buffer = Buffer.from(await response.arrayBuffer());
+        } else if (photo.media_id) {
+          // Download via WhatsApp media API
+          console.log(`  📥 Downloading via media_id: ${photo.media_id}`);
+          buffer = await downloadMedia(photo.media_id);
+        } else if (typeof photo === 'string' && photo.startsWith('http')) {
+          // Direct URL string
+          console.log(`  📥 Downloading from URL string...`);
+          const response = await fetch(photo);
+          if (!response.ok) throw new Error(`URL fetch failed: ${response.status}`);
+          buffer = Buffer.from(await response.arrayBuffer());
+        } else {
+          console.warn(`  ⚠️ Photo ${i + 1} unknown format:`, JSON.stringify(photo));
           continue;
         }
 
-        // Download from WhatsApp
-        const buffer = await downloadMedia(mediaId);
         const compressed = await compressImage(buffer);
         const base64 = compressed.toString('base64');
 
