@@ -829,6 +829,14 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
     }
 
     // Step 3: Save to listings table
+    // Build details string with all extra info
+    const detailsParts = [];
+    if (flowData.chest) detailsParts.push(`Chest: ${flowData.chest}"`);
+    if (flowData.hip) detailsParts.push(`Hip: ${flowData.hip}"`);
+    if (flowData.color) detailsParts.push(`Color: ${flowData.color}`);
+    if (flowData.fabric) detailsParts.push(`Fabric: ${flowData.fabric}`);
+    if (flowData.notes) detailsParts.push(flowData.notes);
+
     const { data: listing, error } = await supabase
       .from('listings')
       .insert({
@@ -840,9 +848,7 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
         size: flowData.size,
         condition: flowData.condition,
         asking_price_usd: parseInt(flowData.price) || 0,
-        color: flowData.color || null,
-        fabric: flowData.fabric || null,
-        details: `Chest: ${flowData.chest || 'N/A'}, Hip: ${flowData.hip || 'N/A'}. ${flowData.notes || ''}`.trim(),
+        details: detailsParts.join('. ') || null,
         shopify_product_id: productId,
         input_method: 'whatsapp_flow'
       })
