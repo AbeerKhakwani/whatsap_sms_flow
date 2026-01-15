@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Phone, ArrowRight, Loader2, ArrowLeft, Check, X, MessageCircle } from 'lucide-react';
+import { Mail, Phone, ArrowRight, Loader2, ArrowLeft, Check, X, MessageCircle, MapPin } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -17,6 +17,16 @@ export default function SellerLogin() {
   const [code, setCode] = useState('');
   const [phone, setPhone] = useState('');
   const [channel, setChannel] = useState('email');
+
+  // Shipping address for new users
+  const [shippingAddress, setShippingAddress] = useState({
+    full_name: '',
+    street_address: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    country: 'USA'
+  });
 
   // User info from check
   const [userInfo, setUserInfo] = useState(null);
@@ -131,13 +141,30 @@ export default function SellerLogin() {
     }
   }
 
-  // Handle adding phone and sending code
+  // Handle adding phone - for new users, go to address step; for existing users, send code
   async function handleAddPhoneAndSend(e) {
     e.preventDefault();
     if (!phone.trim()) return;
-    // For new users, send via email. For existing users, send via whatsapp
-    const sendChannel = userInfo?.exists ? 'whatsapp' : 'email';
-    await handleSendCode(sendChannel);
+
+    if (!userInfo?.exists) {
+      // New user - collect address before sending code
+      setStep('address');
+    } else {
+      // Existing user - send code via whatsapp
+      await handleSendCode('whatsapp');
+    }
+  }
+
+  // Handle address submission and send code
+  async function handleAddressAndSendCode(e) {
+    e.preventDefault();
+    if (!shippingAddress.street_address || !shippingAddress.city ||
+        !shippingAddress.state || !shippingAddress.postal_code) {
+      setError('Please fill in all address fields');
+      return;
+    }
+    // Send code via email for new users
+    await handleSendCode('email');
   }
 
   // Step 3: Verify code
@@ -175,6 +202,23 @@ export default function SellerLogin() {
       // Store token
       localStorage.setItem('seller_token', data.token);
       localStorage.setItem('seller_email', data.seller.email || '');
+
+      // If new user with shipping address, save it
+      if (!userInfo?.exists && shippingAddress.street_address) {
+        try {
+          await fetch(`${API_URL}/api/auth`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'update-address',
+              email: normalizedEmail,
+              shipping_address: shippingAddress
+            })
+          });
+        } catch (err) {
+          console.error('Failed to save address:', err);
+        }
+      }
 
       // If seller still has no phone (logged in via email), prompt to add
       if (!data.seller.phone && !phone) {
@@ -230,7 +274,14 @@ export default function SellerLogin() {
     setError('');
     if (step === 'code') {
       setCode('');
-      setStep('channel');
+      // Go back to address step if new user, otherwise channel
+      if (!userInfo?.exists) {
+        setStep('address');
+      } else {
+        setStep('channel');
+      }
+    } else if (step === 'address') {
+      setStep('addPhone');
     } else if (step === 'channel') {
       setStep('email');
     } else if (step === 'addPhone') {
@@ -437,6 +488,115 @@ export default function SellerLogin() {
                   className="w-full mt-3 text-gray-500 hover:text-gray-700 text-sm py-2"
                 >
                   Use email instead
+                </button>
+              </form>
+            </>
+          )}
+
+          {/* Step 2c: Shipping Address (for new users) */}
+          {step === 'address' && (
+            <>
+              <button
+                onClick={handleBack}
+                className="flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-4 text-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                  <MapPin className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-medium text-gray-900">
+                    Shipping Address
+                  </h2>
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-6">
+                We need your address to create shipping labels when your items sell.
+              </p>
+
+              <form onSubmit={handleAddressAndSendCode}>
+                <div className="space-y-3">
+                  <div>
+                    <input
+                      type="text"
+                      value={shippingAddress.full_name}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, full_name: e.target.value })}
+                      placeholder="Full Name"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      value={shippingAddress.street_address}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, street_address: e.target.value })}
+                      placeholder="Street Address"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={shippingAddress.city}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })}
+                      placeholder="City"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                    />
+                    <input
+                      type="text"
+                      value={shippingAddress.state}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })}
+                      placeholder="State"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={shippingAddress.postal_code}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, postal_code: e.target.value })}
+                      placeholder="ZIP Code"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                    />
+                    <input
+                      type="text"
+                      value={shippingAddress.country}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, country: e.target.value })}
+                      placeholder="Country"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {error && (
+                  <p className="text-red-600 text-sm mt-4 text-center">{error}</p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={!shippingAddress.street_address || !shippingAddress.city || !shippingAddress.state || !shippingAddress.postal_code || loading}
+                  className="w-full mt-4 bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      Continue
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               </form>
             </>

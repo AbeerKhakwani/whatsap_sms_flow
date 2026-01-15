@@ -49,6 +49,7 @@ export default async function handler(req, res) {
         exists: !!seller,
         hasPhone: !!seller?.phone,
         hasEmail: !!seller?.email,
+        hasAddress: !!seller?.shipping_address,
         name: seller?.name || null
       });
     }
@@ -172,7 +173,9 @@ export default async function handler(req, res) {
           id: seller.id,
           name: seller.name,
           email: seller.email,
-          phone: seller.phone
+          phone: seller.phone,
+          has_address: !!seller.shipping_address,
+          shipping_address: seller.shipping_address || null
         }
       });
     }
@@ -208,7 +211,9 @@ export default async function handler(req, res) {
           id: seller.id,
           name: seller.name,
           email: seller.email,
-          phone: seller.phone
+          phone: seller.phone,
+          has_address: !!seller.shipping_address,
+          shipping_address: seller.shipping_address || null
         }
       });
     }
@@ -284,6 +289,79 @@ export default async function handler(req, res) {
       return res.status(200).json({
         success: true,
         message: 'Phone number added'
+      });
+    }
+
+    // UPDATE-ADDRESS - Add/update shipping address
+    if (action === 'update-address') {
+      const { email, shipping_address } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email required' });
+      }
+
+      if (!shipping_address || !shipping_address.street_address || !shipping_address.city ||
+          !shipping_address.state || !shipping_address.postal_code) {
+        return res.status(400).json({ error: 'Complete shipping address required' });
+      }
+
+      // Find seller by email
+      const { data: seller, error: findError } = await supabase
+        .from('sellers')
+        .select('*')
+        .ilike('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (findError || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      // Update shipping address
+      const { error: updateError } = await supabase
+        .from('sellers')
+        .update({ shipping_address })
+        .eq('id', seller.id);
+
+      if (updateError) {
+        console.error('Error updating address:', updateError);
+        return res.status(500).json({ error: 'Failed to update address' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Shipping address updated',
+        shipping_address
+      });
+    }
+
+    // GET-PROFILE - Get seller profile including address
+    if (action === 'get-profile') {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email required' });
+      }
+
+      const { data: seller, error } = await supabase
+        .from('sellers')
+        .select('*')
+        .ilike('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (error || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        seller: {
+          id: seller.id,
+          name: seller.name,
+          email: seller.email,
+          phone: seller.phone,
+          has_address: !!seller.shipping_address,
+          shipping_address: seller.shipping_address || null
+        }
       });
     }
 

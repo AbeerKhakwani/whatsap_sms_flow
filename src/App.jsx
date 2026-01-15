@@ -7,6 +7,7 @@ import SellerDashboard from './pages/seller/SellerDashboard';
 
 // Lazy load - only when needed
 const SellerSubmit = lazy(() => import('./pages/seller/SellerSubmit'));
+const SellerProfile = lazy(() => import('./pages/seller/SellerProfile'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const Layout = lazy(() => import('./components/Layout'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -49,6 +50,8 @@ export default function App() {
           <Route path="/seller" element={<SellerDashboard />} />
           <Route path="/seller/login" element={<SellerLogin />} />
           <Route path="/seller/submit" element={<SellerSubmit />} />
+          <Route path="/seller/profile" element={<SellerProfile />} />
+          <Route path="/profile" element={<SellerProfile />} />
 
           {/* Admin Login */}
           <Route path="/admin" element={<AdminLogin />} />

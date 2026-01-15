@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2, ArrowLeft, Video, Image, Tag, RotateCcw, Home, Plus, LogOut } from 'lucide-react';
+import { Mic, MicOff, Camera, Send, X, CheckCircle, Loader2, ArrowLeft, Video, Image, Tag, RotateCcw, Home, Plus, LogOut, MapPin } from 'lucide-react';
+
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Required photo types with guidance
 const REQUIRED_PHOTOS = [
@@ -96,6 +98,18 @@ export default function SellerSubmit() {
   const [processingCount, setProcessingCount] = useState(0);
   const [submitError, setSubmitError] = useState(null); // { message: string, issues: array }
 
+  // Address state for existing users without address
+  const [hasAddress, setHasAddress] = useState(null); // null = loading, true/false = has/doesn't have
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [shippingAddress, setShippingAddress] = useState({
+    full_name: '',
+    street_address: '',
+    city: '',
+    state: '',
+    postal_code: '',
+    country: 'USA'
+  });
+
   // Form fields
   const [formData, setFormData] = useState({
     designer: '',
@@ -124,6 +138,27 @@ export default function SellerSubmit() {
       return;
     }
     setSeller({ email: storedEmail });
+
+    // Fetch seller profile to check if they have an address
+    async function fetchProfile() {
+      try {
+        const res = await fetch(`${API_URL}/api/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get-profile', email: storedEmail })
+        });
+        const data = await res.json();
+        if (data.success) {
+          setHasAddress(data.seller.has_address);
+        } else {
+          setHasAddress(false);
+        }
+      } catch (err) {
+        console.error('Failed to fetch profile:', err);
+        setHasAddress(false);
+      }
+    }
+    fetchProfile();
   }, [navigate]);
 
   async function startRecording() {
@@ -408,6 +443,47 @@ export default function SellerSubmit() {
 
   const MIN_PHOTOS = 3;
   const hasEnoughPhotos = photos.length >= MIN_PHOTOS;
+
+  // Check if shipping address form is valid
+  function isAddressValid() {
+    return shippingAddress.street_address && shippingAddress.city &&
+           shippingAddress.state && shippingAddress.postal_code;
+  }
+
+  // Save shipping address
+  async function handleSaveAddress() {
+    if (!isAddressValid()) {
+      setSubmitError({ message: 'Please fill in all address fields', issues: [] });
+      return;
+    }
+
+    setSavingAddress(true);
+    setSubmitError(null);
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update-address',
+          email: seller?.email,
+          shipping_address: shippingAddress
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setHasAddress(true);
+      } else {
+        setSubmitError({ message: data.error || 'Failed to save address', issues: [] });
+      }
+    } catch (err) {
+      console.error('Failed to save address:', err);
+      setSubmitError({ message: 'Failed to save address', issues: [] });
+    } finally {
+      setSavingAddress(false);
+    }
+  }
 
   async function handleSubmit() {
     // Clear any previous errors
@@ -1076,6 +1152,84 @@ export default function SellerSubmit() {
                 />
               </div>
 
+              {/* Shipping Address - only show if user doesn't have one */}
+              {hasAddress === false && (
+                <div className="border-t border-gray-200 pt-4">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                      <MapPin className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-gray-900">Shipping Address Required</h3>
+                      <p className="text-sm text-gray-500">We need this to create a shipping label when your item sells</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <input
+                      type="text"
+                      value={shippingAddress.full_name}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, full_name: e.target.value })}
+                      placeholder="Full Name"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={shippingAddress.street_address}
+                      onChange={(e) => setShippingAddress({ ...shippingAddress, street_address: e.target.value })}
+                      placeholder="Street Address"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        value={shippingAddress.city}
+                        onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })}
+                        placeholder="City"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={shippingAddress.state}
+                        onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })}
+                        placeholder="State"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        value={shippingAddress.postal_code}
+                        onChange={(e) => setShippingAddress({ ...shippingAddress, postal_code: e.target.value })}
+                        placeholder="ZIP Code"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={shippingAddress.country}
+                        onChange={(e) => setShippingAddress({ ...shippingAddress, country: e.target.value })}
+                        placeholder="Country"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={handleSaveAddress}
+                      disabled={!isAddressValid() || savingAddress}
+                      className="w-full bg-amber-600 text-white py-2 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {savingAddress ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <MapPin className="w-4 h-4" />
+                          Save Address
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Error Display */}
               {submitError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -1110,13 +1264,18 @@ export default function SellerSubmit() {
               {/* Submit */}
               <button
                 onClick={handleSubmit}
-                disabled={isSubmitting || !hasEnoughPhotos}
+                disabled={isSubmitting || !hasEnoughPhotos || hasAddress === false}
                 className="w-full bg-green-600 text-white py-4 rounded-lg font-medium text-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
                     {uploadProgress || 'Submitting...'}
+                  </>
+                ) : hasAddress === false ? (
+                  <>
+                    <MapPin className="w-5 h-5" />
+                    Add Address First
                   </>
                 ) : (
                   <>
