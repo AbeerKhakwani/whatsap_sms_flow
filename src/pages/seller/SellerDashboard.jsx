@@ -419,12 +419,40 @@ export default function SellerDashboard() {
                       <p className="text-xs text-gray-500">Seller Account</p>
                     </div>
                     <Link
-                      to="/seller/profile"
+                      to="/seller/profile?tab=sales"
+                      className="flex items-center justify-between px-4 py-3 text-gray-700 hover:bg-gray-50"
+                      onClick={() => setShowProfileMenu(false)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Package className="w-4 h-4" />
+                        <span>My Sales</span>
+                      </div>
+                    </Link>
+                    <div
+                      className="flex items-center justify-between px-4 py-3 text-gray-400 cursor-not-allowed"
+                    >
+                      <div className="flex items-center gap-3">
+                        <DollarSign className="w-4 h-4" />
+                        <span>My Balance</span>
+                      </div>
+                      <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
+                    </div>
+                    <div
+                      className="flex items-center justify-between px-4 py-3 text-gray-400 cursor-not-allowed"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Clock className="w-4 h-4" />
+                        <span>My Offers</span>
+                      </div>
+                      <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
+                    </div>
+                    <Link
+                      to="/seller/profile?tab=profile"
                       className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
                       onClick={() => setShowProfileMenu(false)}
                     >
                       <User className="w-4 h-4" />
-                      <span>My Profile</span>
+                      <span>Profile Settings</span>
                     </Link>
                     <div className="border-t border-gray-100" />
                     <button
@@ -462,14 +490,38 @@ export default function SellerDashboard() {
                   className="fixed inset-0 z-40"
                   onClick={() => setShowProfileMenu(false)}
                 />
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
                   <Link
-                    to="/seller/profile"
+                    to="/seller/profile?tab=sales"
+                    className="flex items-center justify-between px-4 py-3 text-gray-700 hover:bg-gray-50"
+                    onClick={() => setShowProfileMenu(false)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Package className="w-4 h-4" />
+                      <span>My Sales</span>
+                    </div>
+                  </Link>
+                  <div className="flex items-center justify-between px-4 py-3 text-gray-400">
+                    <div className="flex items-center gap-3">
+                      <DollarSign className="w-4 h-4" />
+                      <span>My Balance</span>
+                    </div>
+                    <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-3 text-gray-400">
+                    <div className="flex items-center gap-3">
+                      <Clock className="w-4 h-4" />
+                      <span>My Offers</span>
+                    </div>
+                    <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
+                  </div>
+                  <Link
+                    to="/seller/profile?tab=profile"
                     className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
                     onClick={() => setShowProfileMenu(false)}
                   >
                     <User className="w-4 h-4" />
-                    <span>My Profile</span>
+                    <span>Profile Settings</span>
                   </Link>
                   <div className="border-t border-gray-100" />
                   <button
