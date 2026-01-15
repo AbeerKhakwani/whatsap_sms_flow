@@ -498,10 +498,10 @@ async function handleSellCommand(phone, conv, res) {
 
     // Show 2 buttons: Voice or Form
     await sendButtons(phone,
-      `Let's list your item!\n\nHow would you like to start?`,
+      `How would you like to list your item?\nClick Button Below`,
       [
-        { id: 'start_voice', title: '🎤 Clcik here to Send a Voice Note (describe your item)' },
-        { id: 'start_form', title: '📝 Click Here to Tyoe: Guided Form' }
+        { id: 'start_voice', title: '🎤 Send a Voice Note' },
+        { id: 'start_form', title: '📝 Type: Guided Form' }
       ]
     );
     return res.status(200).json({ status: 'asked method' });
@@ -614,7 +614,6 @@ async function handleMethodChoice(phone, text, buttonId, conv, res) {
     await smsDb.setState(phone, 'awaiting_voice');
     await sendMessage(phone,
       `🎤 Send a voice message describing your item.\n\n` +
-      `Include: brand, pieces (kurta/2pc/3pc), size, condition, price, and measurements (chest & hip in inches).\n\n` +
       `Example: "Sana Safinaz 3-piece, medium, like new, $95. Chest 36, hip 38."`
     );
     return res.status(200).json({ status: 'awaiting voice' });
