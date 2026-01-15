@@ -603,13 +603,14 @@ async function handleDescription(phone, text, conv, res) {
 
   console.log('🤖 Extracting from description:', text);
   const extracted = await extractListingData(text);
-  console.log('📋 Extracted:', extracted);
+  console.log('📋 Extracted data:', JSON.stringify(extracted));
 
   // Save for Flow pre-fill
   await smsDb.updateContext(phone, {
     extracted_data: extracted,
     original_description: text
   });
+  console.log('💾 Saved extracted_data to context for phone:', phone);
 
   // Build feedback summary
   const parts = [];
@@ -629,6 +630,7 @@ async function handleDescription(phone, text, conv, res) {
     messageBody = `I couldn't extract details. Tap below to fill in manually:`;
   }
 
+  console.log('📤 Sending Flow with token:', `prefill_${phone}`);
   await sendWhatsAppFlowWithBody(phone, `prefill_${phone}`, messageBody, 'Review and Add Photos');
   await smsDb.setState(phone, 'awaiting_flow');
 
