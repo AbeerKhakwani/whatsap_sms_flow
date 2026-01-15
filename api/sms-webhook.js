@@ -455,8 +455,12 @@ export default async function handler(req, res) {
         return await handleVoiceForFlow(phone, text, conv, res);
 
       case 'awaiting_flow':
-        // User has Flow open - remind them to complete it
-        await sendMessage(phone, "Please complete the listing form that's open in WhatsApp.\n\nOr reply CANCEL to start over.");
+        // Check if they sent a voice message to pre-fill
+        if (message.type === 'audio') {
+          return await handleVoiceForFlow(phone, text, conv, res);
+        }
+        // Otherwise remind them
+        await sendMessage(phone, "Tap 'Open Listing Form' above to continue.\n\nOr send a voice message to pre-fill the form.\n\nReply CANCEL to start over.");
         return res.status(200).json({ status: 'awaiting flow' });
 
       default:
@@ -482,7 +486,7 @@ async function sendWelcome(phone) {
 async function handleSellCommand(phone, conv, res) {
   // Check if already authorized
   if (conv.is_authorized && conv.seller_id) {
-    console.log(`✅ ${phone} already authorized - showing sell method choice`);
+    console.log(`✅ ${phone} already authorized - sending Flow directly`);
 
     // Clean up any previous flow
     await redisPhotos.clearPhotos(phone);
@@ -494,17 +498,12 @@ async function handleSellCommand(phone, conv, res) {
       photo_base64_list: [],
       current_field: null
     });
-    await smsDb.setState(phone, 'sell_choosing_method');
+    await smsDb.setState(phone, 'awaiting_flow');
 
-    // Show 2 buttons: Voice or Form
-    await sendButtons(phone,
-      `How would you like to list your item?\nClick Button Below`,
-      [
-        { id: 'start_voice', title: '🎤 Send a Voice Note' },
-        { id: 'start_form', title: '📝 Type: Guided Form' }
-      ]
-    );
-    return res.status(200).json({ status: 'asked method' });
+    // Send Flow directly as single CTA
+    // Voice option mentioned in text - they can send voice anytime
+    await sendWhatsAppFlowWithVoiceOption(phone, `fresh_${phone}`);
+    return res.status(200).json({ status: 'sent flow' });
   }
 
   // Not authorized - ask for email
@@ -675,9 +674,9 @@ async function handleVoiceForFlow(phone, text, conv, res) {
 }
 
 /**
- * Send WhatsApp Flow
+ * Send WhatsApp Flow with voice option in message
  */
-async function sendWhatsAppFlow(phone, flowToken) {
+async function sendWhatsAppFlowWithVoiceOption(phone, flowToken) {
   const FLOW_ID = process.env.WHATSAPP_FLOW_ID?.replace(/\\n/g, '');
 
   console.log(`📤 Sending Flow ${FLOW_ID} to ${phone}`);
@@ -694,7 +693,55 @@ async function sendWhatsAppFlow(phone, flowToken) {
       type: 'interactive',
       interactive: {
         type: 'flow',
-        body: { text: 'Complete your listing and add photos.' },
+        body: { text: 'Ready to list your item?\n\nTap below to open the form.\nOr send a voice message first to pre-fill it.' },
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_id: FLOW_ID,
+            flow_message_version: '3',
+            flow_token: flowToken,
+            flow_cta: 'Open Listing Form',
+            flow_action: 'navigate',
+            flow_action_payload: {
+              screen: 'LISTING_DETAILS'
+            }
+          }
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('❌ Flow send error:', err);
+    throw new Error(`Flow send failed: ${response.status}`);
+  }
+
+  console.log('✅ Flow sent');
+  return response.json();
+}
+
+/**
+ * Send WhatsApp Flow (with pre-fill, after voice)
+ */
+async function sendWhatsAppFlow(phone, flowToken) {
+  const FLOW_ID = process.env.WHATSAPP_FLOW_ID?.replace(/\\n/g, '');
+
+  console.log(`📤 Sending pre-filled Flow to ${phone}`);
+
+  const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: phone,
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        body: { text: 'Review your details and add photos.' },
         action: {
           name: 'flow',
           parameters: {

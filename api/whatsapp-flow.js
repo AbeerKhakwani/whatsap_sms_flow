@@ -111,8 +111,9 @@ async function handleInit(decryptedData, aesKey) {
 
   // flow_token format: "prefill_{phone}" or "fresh_{phone}"
   if (flow_token?.startsWith('prefill_')) {
-    const phone = flow_token.replace('prefill_', '').split('_')[0];
-    console.log('📋 Looking up pre-fill data for:', phone);
+    // Extract phone - handle + sign and any trailing parts
+    const phone = flow_token.replace('prefill_', '');
+    console.log('📋 Looking up pre-fill data for phone:', phone);
 
     // Look up the conversation context for extracted data
     const { data: conv } = await supabase
