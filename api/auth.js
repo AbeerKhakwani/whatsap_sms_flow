@@ -124,6 +124,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: result.error });
       }
 
+      // If adding a phone, check it's not already in use
+      if (newPhone) {
+        const existingWithPhone = await findSeller(newPhone);
+        if (existingWithPhone) {
+          return res.status(400).json({ error: 'This phone number is already linked to another account' });
+        }
+      }
+
       // Find or create seller
       let seller = await findSeller(identifier);
 
@@ -175,7 +183,8 @@ export default async function handler(req, res) {
           email: seller.email,
           phone: seller.phone,
           has_address: !!seller.shipping_address,
-          shipping_address: seller.shipping_address || null
+          shipping_address: seller.shipping_address || null,
+          payout_method: seller.payout_method || null
         }
       });
     }
@@ -213,7 +222,8 @@ export default async function handler(req, res) {
           email: seller.email,
           phone: seller.phone,
           has_address: !!seller.shipping_address,
-          shipping_address: seller.shipping_address || null
+          shipping_address: seller.shipping_address || null,
+          payout_method: seller.payout_method || null
         }
       });
     }
@@ -360,8 +370,201 @@ export default async function handler(req, res) {
           email: seller.email,
           phone: seller.phone,
           has_address: !!seller.shipping_address,
-          shipping_address: seller.shipping_address || null
+          shipping_address: seller.shipping_address || null,
+          payout_method: seller.payout_method || null
         }
+      });
+    }
+
+    // UPDATE-PAYOUT - Add/update payout method
+    if (action === 'update-payout') {
+      const { email, payout_method } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email required' });
+      }
+
+      if (!payout_method || !payout_method.type || !payout_method.account) {
+        return res.status(400).json({ error: 'Payout method type and account required' });
+      }
+
+      const { data: seller, error: findError } = await supabase
+        .from('sellers')
+        .select('*')
+        .ilike('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (findError || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      const { error: updateError } = await supabase
+        .from('sellers')
+        .update({ payout_method })
+        .eq('id', seller.id);
+
+      if (updateError) {
+        console.error('Error updating payout:', updateError);
+        return res.status(500).json({ error: 'Failed to update payout method' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payout method updated',
+        payout_method
+      });
+    }
+
+    // REQUEST-EMAIL-CHANGE - Send verification code to new email
+    if (action === 'request-email-change') {
+      const { currentEmail, newEmail } = req.body;
+
+      if (!currentEmail || !newEmail) {
+        return res.status(400).json({ error: 'Current and new email required' });
+      }
+
+      // Check if new email is already in use
+      const { data: existing } = await supabase
+        .from('sellers')
+        .select('id')
+        .ilike('email', newEmail.toLowerCase())
+        .maybeSingle();
+
+      if (existing) {
+        return res.status(400).json({ error: 'Email already in use' });
+      }
+
+      // Generate and send code to NEW email
+      const code = generateCode();
+      const stored = await storeVerificationCode(newEmail, code, 'email');
+      if (!stored) {
+        return res.status(500).json({ error: 'Failed to generate code' });
+      }
+
+      const sent = await sendVerificationCode(newEmail, code);
+      if (!sent || !sent.success) {
+        return res.status(500).json({ error: 'Failed to send verification email' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Verification code sent to new email'
+      });
+    }
+
+    // VERIFY-EMAIL-CHANGE - Verify code and update email
+    if (action === 'verify-email-change') {
+      const { currentEmail, newEmail, code } = req.body;
+
+      if (!currentEmail || !newEmail || !code) {
+        return res.status(400).json({ error: 'Current email, new email, and code required' });
+      }
+
+      // Verify the code
+      const result = await verifyCode(newEmail, code);
+      if (!result.valid) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Find seller by current email
+      const { data: seller, error: findError } = await supabase
+        .from('sellers')
+        .select('*')
+        .ilike('email', currentEmail.toLowerCase())
+        .maybeSingle();
+
+      if (findError || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      // Update email
+      const { error: updateError } = await supabase
+        .from('sellers')
+        .update({ email: newEmail.toLowerCase() })
+        .eq('id', seller.id);
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update email' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email updated successfully',
+        newEmail: newEmail.toLowerCase()
+      });
+    }
+
+    // REQUEST-PHONE-CHANGE - Send verification code to new phone via WhatsApp
+    if (action === 'request-phone-change') {
+      const { email, newPhone } = req.body;
+
+      if (!email || !newPhone) {
+        return res.status(400).json({ error: 'Email and new phone required' });
+      }
+
+      // Check if phone is already in use by another account
+      const existingSeller = await findSeller(newPhone);
+      if (existingSeller && existingSeller.email?.toLowerCase() !== email.toLowerCase()) {
+        return res.status(400).json({ error: 'This phone number is already linked to another account' });
+      }
+
+      // Generate and send code via WhatsApp
+      const code = generateCode();
+      const stored = await storeVerificationCode(newPhone, code, 'whatsapp');
+      if (!stored) {
+        return res.status(500).json({ error: 'Failed to generate code' });
+      }
+
+      const sent = await sendWhatsAppCode(newPhone, code);
+      if (!sent) {
+        return res.status(500).json({ error: 'Failed to send WhatsApp code' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Verification code sent via WhatsApp'
+      });
+    }
+
+    // VERIFY-PHONE-CHANGE - Verify code and update phone
+    if (action === 'verify-phone-change') {
+      const { email, newPhone, code } = req.body;
+
+      if (!email || !newPhone || !code) {
+        return res.status(400).json({ error: 'Email, new phone, and code required' });
+      }
+
+      // Verify the code
+      const result = await verifyCode(newPhone, code);
+      if (!result.valid) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      // Find seller by email
+      const { data: seller, error: findError } = await supabase
+        .from('sellers')
+        .select('*')
+        .ilike('email', email.toLowerCase())
+        .maybeSingle();
+
+      if (findError || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      // Update phone
+      const { error: updateError } = await supabase
+        .from('sellers')
+        .update({ phone: newPhone })
+        .eq('id', seller.id);
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update phone' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Phone updated successfully',
+        newPhone
       });
     }
 

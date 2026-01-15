@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User } from 'lucide-react';
+import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User, DollarSign, Check } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -8,11 +8,27 @@ export default function SellerProfile() {
   const navigate = useNavigate();
   const [seller, setSeller] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editingAddress, setEditingAddress] = useState(false);
-  const [savingAddress, setSavingAddress] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Edit modes
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [editingPayout, setEditingPayout] = useState(false);
+
+  // Saving states
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [savingPayout, setSavingPayout] = useState(false);
+
+  // Verification states
+  const [emailVerifyStep, setEmailVerifyStep] = useState('input'); // 'input' | 'verify'
+  const [phoneVerifyStep, setPhoneVerifyStep] = useState('input'); // 'input' | 'verify'
+  const [verificationCode, setVerificationCode] = useState('');
+
+  // Form data
   const [shippingAddress, setShippingAddress] = useState({
     full_name: '',
     street_address: '',
@@ -20,6 +36,13 @@ export default function SellerProfile() {
     state: '',
     postal_code: '',
     country: 'USA'
+  });
+  const [newEmail, setNewEmail] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [payoutMethod, setPayoutMethod] = useState({
+    type: 'Zelle',
+    name: '',
+    account: ''
   });
 
   useEffect(() => {
@@ -42,6 +65,9 @@ export default function SellerProfile() {
           if (data.seller.shipping_address) {
             setShippingAddress(data.seller.shipping_address);
           }
+          if (data.seller.payout_method) {
+            setPayoutMethod(data.seller.payout_method);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch profile:', err);
@@ -53,6 +79,12 @@ export default function SellerProfile() {
     fetchProfile();
   }, [navigate]);
 
+  function showSuccess(msg) {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), 3000);
+  }
+
+  // ============ ADDRESS ============
   function isAddressValid() {
     return shippingAddress.street_address && shippingAddress.city &&
            shippingAddress.state && shippingAddress.postal_code;
@@ -66,7 +98,6 @@ export default function SellerProfile() {
 
     setSavingAddress(true);
     setError('');
-    setSuccess('');
 
     try {
       const res = await fetch(`${API_URL}/api/auth`, {
@@ -83,24 +114,232 @@ export default function SellerProfile() {
       if (data.success) {
         setSeller({ ...seller, has_address: true, shipping_address: shippingAddress });
         setEditingAddress(false);
-        setSuccess('Address saved successfully');
-        setTimeout(() => setSuccess(''), 3000);
+        showSuccess('Address saved');
       } else {
         setError(data.error || 'Failed to save address');
       }
     } catch (err) {
-      console.error('Failed to save address:', err);
       setError('Failed to save address');
     } finally {
       setSavingAddress(false);
     }
   }
 
-  function handleCancelEdit() {
+  // ============ EMAIL ============
+  async function handleRequestEmailChange() {
+    if (!newEmail || !newEmail.includes('@')) {
+      setError('Please enter a valid email');
+      return;
+    }
+
+    setSavingEmail(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'request-email-change',
+          currentEmail: seller?.email,
+          newEmail
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setEmailVerifyStep('verify');
+        setVerificationCode('');
+      } else {
+        setError(data.error || 'Failed to send verification code');
+      }
+    } catch (err) {
+      setError('Failed to send verification code');
+    } finally {
+      setSavingEmail(false);
+    }
+  }
+
+  async function handleVerifyEmailChange() {
+    if (verificationCode.length !== 6) {
+      setError('Please enter the 6-digit code');
+      return;
+    }
+
+    setSavingEmail(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify-email-change',
+          currentEmail: seller?.email,
+          newEmail,
+          code: verificationCode
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem('seller_email', data.newEmail);
+        setSeller({ ...seller, email: data.newEmail });
+        setEditingEmail(false);
+        setEmailVerifyStep('input');
+        setNewEmail('');
+        setVerificationCode('');
+        showSuccess('Email updated');
+      } else {
+        setError(data.error || 'Invalid code');
+      }
+    } catch (err) {
+      setError('Failed to verify code');
+    } finally {
+      setSavingEmail(false);
+    }
+  }
+
+  // ============ PHONE ============
+  async function handleRequestPhoneChange() {
+    if (!newPhone || newPhone.length < 10) {
+      setError('Please enter a valid phone number');
+      return;
+    }
+
+    setSavingPhone(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'request-phone-change',
+          email: seller?.email,
+          newPhone
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setPhoneVerifyStep('verify');
+        setVerificationCode('');
+      } else {
+        setError(data.error || 'Failed to send verification code');
+      }
+    } catch (err) {
+      setError('Failed to send verification code');
+    } finally {
+      setSavingPhone(false);
+    }
+  }
+
+  async function handleVerifyPhoneChange() {
+    if (verificationCode.length !== 6) {
+      setError('Please enter the 6-digit code');
+      return;
+    }
+
+    setSavingPhone(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify-phone-change',
+          email: seller?.email,
+          newPhone,
+          code: verificationCode
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSeller({ ...seller, phone: data.newPhone });
+        setEditingPhone(false);
+        setPhoneVerifyStep('input');
+        setNewPhone('');
+        setVerificationCode('');
+        showSuccess('Phone updated');
+      } else {
+        setError(data.error || 'Invalid code');
+      }
+    } catch (err) {
+      setError('Failed to verify code');
+    } finally {
+      setSavingPhone(false);
+    }
+  }
+
+  // ============ PAYOUT ============
+  async function handleSavePayout() {
+    if (!payoutMethod.name || !payoutMethod.account) {
+      setError('Please fill in name and account');
+      return;
+    }
+
+    setSavingPayout(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update-payout',
+          email: seller?.email,
+          payout_method: payoutMethod
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSeller({ ...seller, payout_method: payoutMethod });
+        setEditingPayout(false);
+        showSuccess('Payout method saved');
+      } else {
+        setError(data.error || 'Failed to save payout method');
+      }
+    } catch (err) {
+      setError('Failed to save payout method');
+    } finally {
+      setSavingPayout(false);
+    }
+  }
+
+  // ============ CANCEL HANDLERS ============
+  function cancelEmailEdit() {
+    setEditingEmail(false);
+    setEmailVerifyStep('input');
+    setNewEmail('');
+    setVerificationCode('');
+    setError('');
+  }
+
+  function cancelPhoneEdit() {
+    setEditingPhone(false);
+    setPhoneVerifyStep('input');
+    setNewPhone('');
+    setVerificationCode('');
+    setError('');
+  }
+
+  function cancelAddressEdit() {
     if (seller?.shipping_address) {
       setShippingAddress(seller.shipping_address);
     }
     setEditingAddress(false);
+    setError('');
+  }
+
+  function cancelPayoutEdit() {
+    if (seller?.payout_method) {
+      setPayoutMethod(seller.payout_method);
+    }
+    setEditingPayout(false);
     setError('');
   }
 
@@ -125,7 +364,6 @@ export default function SellerProfile() {
           <div className="flex-1">
             <h1 className="font-medium text-gray-900">My Profile</h1>
           </div>
-          <img src="/logo.svg" alt="" className="h-6 md:hidden opacity-60" />
         </div>
       </header>
 
@@ -148,41 +386,257 @@ export default function SellerProfile() {
       </nav>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Account Info */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Account Information</h2>
-
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                <Mail className="w-5 h-5 text-gray-500" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Email</p>
-                <p className="text-gray-900">{seller?.email || '-'}</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                <Phone className="w-5 h-5 text-gray-500" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Phone</p>
-                <p className="text-gray-900">{seller?.phone || 'Not set'}</p>
-              </div>
-            </div>
+        {/* Global Messages */}
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
+              <X className="w-4 h-4" />
+            </button>
           </div>
+        )}
+        {success && (
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm flex items-center gap-2">
+            <Check className="w-4 h-4" />
+            {success}
+          </div>
+        )}
+
+        {/* Email */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Mail className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h2 className="font-medium text-gray-900">Email</h2>
+                {!editingEmail && <p className="text-gray-600">{seller?.email || '-'}</p>}
+              </div>
+            </div>
+            {!editingEmail && (
+              <button
+                onClick={() => setEditingEmail(true)}
+                className="text-green-600 hover:text-green-700 text-sm font-medium flex items-center gap-1"
+              >
+                <Edit2 className="w-4 h-4" />
+                Change
+              </button>
+            )}
+          </div>
+
+          {editingEmail && (
+            <div className="space-y-3">
+              {emailVerifyStep === 'input' ? (
+                <>
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="New email address"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  />
+                  <div className="flex gap-3">
+                    <button onClick={cancelEmailEdit} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleRequestEmailChange}
+                      disabled={savingEmail || !newEmail}
+                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {savingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send Code'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-600">Enter the code sent to {newEmail}</p>
+                  <input
+                    type="text"
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    className="w-full text-center text-xl tracking-widest font-mono px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    maxLength={6}
+                  />
+                  <div className="flex gap-3">
+                    <button onClick={cancelEmailEdit} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleVerifyEmailChange}
+                      disabled={savingEmail || verificationCode.length !== 6}
+                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {savingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Phone */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                <Phone className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <h2 className="font-medium text-gray-900">Phone</h2>
+                {!editingPhone && <p className="text-gray-600">{seller?.phone || 'Not set'}</p>}
+              </div>
+            </div>
+            {!editingPhone && (
+              <button
+                onClick={() => setEditingPhone(true)}
+                className="text-green-600 hover:text-green-700 text-sm font-medium flex items-center gap-1"
+              >
+                <Edit2 className="w-4 h-4" />
+                {seller?.phone ? 'Change' : 'Add'}
+              </button>
+            )}
+          </div>
+
+          {editingPhone && (
+            <div className="space-y-3">
+              {phoneVerifyStep === 'input' ? (
+                <>
+                  <input
+                    type="tel"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    placeholder="+1 234 567 8900"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                  />
+                  <p className="text-xs text-gray-500">We'll send a verification code via WhatsApp</p>
+                  <div className="flex gap-3">
+                    <button onClick={cancelPhoneEdit} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleRequestPhoneChange}
+                      disabled={savingPhone || !newPhone}
+                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {savingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send Code'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-gray-600">Enter the code sent to {newPhone}</p>
+                  <input
+                    type="text"
+                    value={verificationCode}
+                    onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    className="w-full text-center text-xl tracking-widest font-mono px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+                    maxLength={6}
+                  />
+                  <div className="flex gap-3">
+                    <button onClick={cancelPhoneEdit} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleVerifyPhoneChange}
+                      disabled={savingPhone || verificationCode.length !== 6}
+                      className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {savingPhone ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Payout Method */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <DollarSign className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <h2 className="font-medium text-gray-900">Payout Method</h2>
+                {!editingPayout && seller?.payout_method && (
+                  <p className="text-gray-600">{seller.payout_method.type}: {seller.payout_method.account}</p>
+                )}
+                {!editingPayout && !seller?.payout_method && (
+                  <p className="text-gray-500">Not set</p>
+                )}
+              </div>
+            </div>
+            {!editingPayout && (
+              <button
+                onClick={() => setEditingPayout(true)}
+                className="text-green-600 hover:text-green-700 text-sm font-medium flex items-center gap-1"
+              >
+                <Edit2 className="w-4 h-4" />
+                {seller?.payout_method ? 'Change' : 'Add'}
+              </button>
+            )}
+          </div>
+
+          {editingPayout && (
+            <div className="space-y-3">
+              <select
+                value={payoutMethod.type}
+                onChange={(e) => setPayoutMethod({ ...payoutMethod, type: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+              >
+                <option value="Zelle">Zelle</option>
+                <option value="Venmo">Venmo</option>
+                <option value="PayPal">PayPal</option>
+              </select>
+              <input
+                type="text"
+                value={payoutMethod.name}
+                onChange={(e) => setPayoutMethod({ ...payoutMethod, name: e.target.value })}
+                placeholder="Name on account"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+              />
+              <input
+                type="text"
+                value={payoutMethod.account}
+                onChange={(e) => setPayoutMethod({ ...payoutMethod, account: e.target.value })}
+                placeholder={payoutMethod.type === 'PayPal' ? 'PayPal email' : 'Phone or email'}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
+              />
+              <div className="flex gap-3">
+                <button onClick={cancelPayoutEdit} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSavePayout}
+                  disabled={savingPayout || !payoutMethod.name || !payoutMethod.account}
+                  className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {savingPayout ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4" /> Save</>}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Shipping Address */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-gray-900">Shipping Address</h2>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                <MapPin className="w-5 h-5 text-amber-600" />
+              </div>
+              <h2 className="font-medium text-gray-900">Shipping Address</h2>
+            </div>
             {!editingAddress && seller?.has_address && (
               <button
                 onClick={() => setEditingAddress(true)}
-                className="flex items-center gap-1 text-green-600 hover:text-green-700 text-sm font-medium"
+                className="text-green-600 hover:text-green-700 text-sm font-medium flex items-center gap-1"
               >
                 <Edit2 className="w-4 h-4" />
                 Edit
@@ -190,22 +644,10 @@ export default function SellerProfile() {
             )}
           </div>
 
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
-            </div>
-          )}
-
-          {success && (
-            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-              {success}
-            </div>
-          )}
-
           {editingAddress || !seller?.has_address ? (
             <div className="space-y-3">
               {!seller?.has_address && (
-                <p className="text-sm text-amber-600 mb-4">
+                <p className="text-sm text-amber-600 mb-2">
                   Add your shipping address so we can create labels when your items sell.
                 </p>
               )}
@@ -258,44 +700,25 @@ export default function SellerProfile() {
 
               <div className="flex gap-3 pt-2">
                 {editingAddress && (
-                  <button
-                    onClick={handleCancelEdit}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50"
-                  >
+                  <button onClick={cancelAddressEdit} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
                     Cancel
                   </button>
                 )}
                 <button
                   onClick={handleSaveAddress}
                   disabled={!isAddressValid() || savingAddress}
-                  className={`${editingAddress ? 'flex-1' : 'w-full'} bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2`}
+                  className={`${editingAddress ? 'flex-1' : 'w-full'} bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2`}
                 >
-                  {savingAddress ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4" />
-                      Save Address
-                    </>
-                  )}
+                  {savingAddress ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Save className="w-4 h-4" /> Save Address</>}
                 </button>
               </div>
             </div>
           ) : (
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <MapPin className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                {shippingAddress.full_name && (
-                  <p className="font-medium text-gray-900">{shippingAddress.full_name}</p>
-                )}
-                <p className="text-gray-700">{shippingAddress.street_address}</p>
-                <p className="text-gray-700">
-                  {shippingAddress.city}, {shippingAddress.state} {shippingAddress.postal_code}
-                </p>
-                <p className="text-gray-500">{shippingAddress.country}</p>
-              </div>
+            <div className="text-gray-700">
+              {shippingAddress.full_name && <p className="font-medium">{shippingAddress.full_name}</p>}
+              <p>{shippingAddress.street_address}</p>
+              <p>{shippingAddress.city}, {shippingAddress.state} {shippingAddress.postal_code}</p>
+              <p className="text-gray-500">{shippingAddress.country}</p>
             </div>
           )}
         </div>

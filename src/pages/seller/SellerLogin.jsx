@@ -141,14 +141,37 @@ export default function SellerLogin() {
     }
   }
 
-  // Handle adding phone - for new users, go to address step; for existing users, send code
+  // Handle adding phone - for new users, check phone not in use then go to address step
   async function handleAddPhoneAndSend(e) {
     e.preventDefault();
     if (!phone.trim()) return;
 
     if (!userInfo?.exists) {
-      // New user - collect address before sending code
-      setStep('address');
+      // New user - check if phone is already in use
+      setLoading(true);
+      setError('');
+
+      try {
+        const res = await fetch(`${API_URL}/api/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'check-user', identifier: phone.replace(/\D/g, '') })
+        });
+        const data = await res.json();
+
+        if (data.exists) {
+          setError('This phone number is already linked to another account. Please use a different number or login with that account.');
+          setLoading(false);
+          return;
+        }
+
+        // Phone not in use - collect address before sending code
+        setStep('address');
+      } catch (err) {
+        setError('Failed to verify phone number');
+      } finally {
+        setLoading(false);
+      }
     } else {
       // Existing user - send code via whatsapp
       await handleSendCode('whatsapp');

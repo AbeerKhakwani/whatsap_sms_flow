@@ -25,6 +25,7 @@ export default function SellerDashboard() {
 
   // Address modal state
   const [showAddressModal, setShowAddressModal] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
   const [shippingAddress, setShippingAddress] = useState({
     full_name: '',
@@ -404,8 +405,45 @@ export default function SellerDashboard() {
 
       {/* Header - Mobile */}
       <header className="bg-white border-b border-gray-200 md:hidden sticky top-0 z-40">
-        <div className="px-4 py-3 flex items-center justify-center">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="w-10" /> {/* Spacer for centering */}
           <img src="/logo.svg" alt="The Phir Story" className="h-7" />
+          <div className="relative">
+            <button
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200"
+            >
+              <User className="w-5 h-5" />
+            </button>
+
+            {/* Profile Dropdown */}
+            {showProfileMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowProfileMenu(false)}
+                />
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                  <Link
+                    to="/seller/profile"
+                    className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
+                    onClick={() => setShowProfileMenu(false)}
+                  >
+                    <User className="w-4 h-4" />
+                    <span>My Profile</span>
+                  </Link>
+                  <div className="border-t border-gray-100" />
+                  <button
+                    onClick={() => { setShowProfileMenu(false); handleLogout(); }}
+                    className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -423,13 +461,13 @@ export default function SellerDashboard() {
             <Plus className="w-7 h-7" />
             <span className="text-xs mt-0.5 font-medium">Sell</span>
           </Link>
-          <button
-            onClick={handleLogout}
+          <Link
+            to="/seller/profile"
             className="flex flex-col items-center py-2 px-4 text-gray-500"
           >
-            <LogOut className="w-6 h-6" />
-            <span className="text-xs mt-1">Logout</span>
-          </button>
+            <User className="w-6 h-6" />
+            <span className="text-xs mt-1">Profile</span>
+          </Link>
         </div>
       </nav>
 
