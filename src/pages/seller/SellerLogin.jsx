@@ -304,12 +304,18 @@ export default function SellerLogin() {
         setStep('channel');
       }
     } else if (step === 'address') {
+      // Go back to addPhone step
       setStep('addPhone');
     } else if (step === 'channel') {
       setStep('email');
     } else if (step === 'addPhone') {
       setPhone('');
-      setStep('channel');
+      // New users came from email step, existing users from channel
+      if (!userInfo?.exists) {
+        setStep('email');
+      } else {
+        setStep('channel');
+      }
     }
   }
 
@@ -507,7 +513,15 @@ export default function SellerLogin() {
 
                 <button
                   type="button"
-                  onClick={() => { setStep('channel'); setPhone(''); }}
+                  onClick={() => {
+                    setPhone('');
+                    // New users should go to address step, existing users to channel
+                    if (!userInfo?.exists) {
+                      setStep('address');
+                    } else {
+                      setStep('channel');
+                    }
+                  }}
                   className="w-full mt-3 text-gray-500 hover:text-gray-700 text-sm py-2"
                 >
                   Use email instead
