@@ -495,7 +495,7 @@ async function handleSellCommand(phone, conv, res) {
     await smsDb.setState(phone, 'awaiting_description');
 
     // Simple prompt - just ask for description
-    await sendMessage(phone, "Tell us about your outfit in your own words.\n\nSend a voice note or text.");
+    await sendMessage(phone, "Send a voice note or text.\n ex: 'Designer X, size M, kurta, excellent condition, $200'");
     return res.status(200).json({ status: 'asked description' });
   }
 
@@ -725,7 +725,7 @@ async function sendWhatsAppFlowWithPrefill(phone, flowToken, bodyText, prefillDa
             flow_id: FLOW_ID,
             flow_message_version: '3',
             flow_token: flowToken,
-            flow_cta: 'Click Here: To Edit, $ add Photos',
+            flow_cta: 'Click Here: To Edit, Review and add Photos',
             flow_action: 'navigate',
             flow_action_payload: {
               screen: 'REQUIRED_DETAILS',
