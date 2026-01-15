@@ -90,7 +90,7 @@
             "type": "TextInput",
             "name": "price",
             "label": "Asking Price ($)",
-            "input-type": "number",
+            "input-type": "text",
             "required": true,
             "init-value": "${data.price}",
             "helper-text": "Your asking price in USD"
@@ -103,7 +103,7 @@
             "type": "TextInput",
             "name": "chest",
             "label": "Chest",
-            "input-type": "number",
+            "input-type": "text",
             "required": true,
             "init-value": "${data.chest}",
             "helper-text": "Chest measurement in inches"
@@ -112,7 +112,7 @@
             "type": "TextInput",
             "name": "hip",
             "label": "Hip",
-            "input-type": "number",
+            "input-type": "text",
             "required": true,
             "init-value": "${data.hip}",
             "helper-text": "Hip measurement in inches"
