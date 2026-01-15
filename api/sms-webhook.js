@@ -652,7 +652,7 @@ async function handleVoiceForFlow(phone, text, conv, res) {
     original_description: text
   });
 
-  // Show confirmation
+  // Build summary for Flow message
   const parts = [];
   if (extracted.designer) parts.push(`Brand: ${extracted.designer}`);
   if (extracted.pieces) parts.push(`Pieces: ${extracted.pieces}`);
@@ -662,12 +662,12 @@ async function handleVoiceForFlow(phone, text, conv, res) {
   if (extracted.chest) parts.push(`Chest: ${extracted.chest}"`);
   if (extracted.hip) parts.push(`Hip: ${extracted.hip}"`);
 
-  if (parts.length > 0) {
-    await sendMessage(phone, `Got it!\n\n${parts.join('\n')}\n\nOpening form to review & add photos...`);
-  }
+  // Single message with extracted data + Flow CTA
+  const messageBody = `🎤 I heard: "${text}"\n\n` +
+    (parts.length > 0 ? `${parts.join('\n')}\n\n` : '') +
+    `Tap below to edit, add photos, and submit:`;
 
-  // Launch Flow with pre-fill
-  await sendWhatsAppFlow(phone, `prefill_${phone}`);
+  await sendWhatsAppFlowWithBody(phone, `prefill_${phone}`, messageBody);
   await smsDb.setState(phone, 'awaiting_flow');
 
   return res.status(200).json({ status: 'sent flow with prefill' });
@@ -722,12 +722,12 @@ async function sendWhatsAppFlowWithVoiceOption(phone, flowToken) {
 }
 
 /**
- * Send WhatsApp Flow (with pre-fill, after voice)
+ * Send WhatsApp Flow with custom body text (for voice pre-fill)
  */
-async function sendWhatsAppFlow(phone, flowToken) {
+async function sendWhatsAppFlowWithBody(phone, flowToken, bodyText) {
   const FLOW_ID = process.env.WHATSAPP_FLOW_ID?.replace(/\\n/g, '');
 
-  console.log(`📤 Sending pre-filled Flow to ${phone}`);
+  console.log(`📤 Sending Flow with custom body to ${phone}`);
 
   const response = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
     method: 'POST',
@@ -741,14 +741,14 @@ async function sendWhatsAppFlow(phone, flowToken) {
       type: 'interactive',
       interactive: {
         type: 'flow',
-        body: { text: 'Review your details and add photos.' },
+        body: { text: bodyText },
         action: {
           name: 'flow',
           parameters: {
             flow_id: FLOW_ID,
             flow_message_version: '3',
             flow_token: flowToken,
-            flow_cta: 'Edit and Submit Listing',
+            flow_cta: 'Edit, Add Photos & Submit',
             flow_action: 'navigate',
             flow_action_payload: {
               screen: 'REQUIRED_DETAILS'
