@@ -624,7 +624,7 @@ async function handleDescription(phone, text, conv, res) {
   // Message with feedback + Flow CTA button
   let messageBody;
   if (parts.length > 0) {
-    messageBody = `Here's what I got:\n\n${parts.join('\n')}\n\nTap below to review, edit, and add photos:`;
+    messageBody = `\nTap below to edit, and add photos:`;
   } else {
     messageBody = `I couldn't extract details. Tap below to fill in manually:`;
   }
@@ -725,7 +725,7 @@ async function sendWhatsAppFlowWithPrefill(phone, flowToken, bodyText, prefillDa
             flow_id: FLOW_ID,
             flow_message_version: '3',
             flow_token: flowToken,
-            flow_cta: 'Review and Add Photos',
+            flow_cta: 'Click Here: To Edit, $ add Photos',
             flow_action: 'navigate',
             flow_action_payload: {
               screen: 'REQUIRED_DETAILS',
