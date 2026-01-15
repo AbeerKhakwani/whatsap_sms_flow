@@ -674,49 +674,15 @@ export default async function handler(req, res) {
 
           console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
 
-          // Generate shipping label if seller has address
-          let labelResult = null;
-          if (seller.shipping_address) {
-            try {
-              // Format seller address for shipping API
-              const sellerForShipping = {
-                name: seller.shipping_address.full_name || seller.name,
-                address_line1: seller.shipping_address.street_address,
-                address_line2: seller.shipping_address.apartment || '',
-                city: seller.shipping_address.city,
-                state: seller.shipping_address.state,
-                zip: seller.shipping_address.postal_code,
-                phone: seller.phone || ''
-              };
+          // NOTE: Labels are generated ON-DEMAND when seller clicks "Get Label"
+          // This avoids paying for labels that are never used
 
-              labelResult = await getShippingLabel(sellerForShipping, item.title || product.title);
-
-              if (labelResult.labelUrl) {
-                // Update transaction with shipping info
-                await supabase
-                  .from('transactions')
-                  .update({
-                    shipping_label_url: labelResult.labelUrl,
-                    tracking_number: labelResult.trackingNumber,
-                    carrier: labelResult.carrier || 'USPS',
-                    shipping_service: labelResult.service,
-                    shipping_status: 'label_created'
-                  })
-                  .eq('id', newTx.id);
-
-                console.log(`   📦 Generated shipping label: ${labelResult.trackingNumber}`);
-              }
-            } catch (labelErr) {
-              console.log(`   ⚠️ Could not generate label: ${labelErr.message}`);
-            }
-          }
-
-          // Send notifications to seller (include label if available)
+          // Send notifications to seller
           await notifySellerOfSale(seller, {
             productTitle: item.title || product.title,
             salePrice,
             sellerPayout,
-            labelResult
+            labelResult: null  // No auto-generated label
           });
 
           results.push({ sellerId: seller.id, productId, payout: sellerPayout, hasLabel: !!labelResult?.labelUrl });
@@ -735,7 +701,7 @@ export default async function handler(req, res) {
 
     // GET SHIPPING LABEL or instructions
     if (action === 'shipping-label' && req.method === 'POST') {
-      const { email, productId, productTitle, transactionId } = req.body;
+      const { email, productId, productTitle, transactionId, buyerAddress } = req.body;
 
       if (!email) {
         return res.status(400).json({ error: 'Email required' });
@@ -771,7 +737,18 @@ export default async function handler(req, res) {
           phone: seller.phone || ''
         };
 
-        const labelResult = await getShippingLabel(sellerForShipping, productTitle);
+        // Get buyer address from transaction if not provided
+        let finalBuyerAddress = buyerAddress;
+        if (!finalBuyerAddress && transactionId) {
+          const { data: tx } = await supabase
+            .from('transactions')
+            .select('buyer_address')
+            .eq('id', transactionId)
+            .single();
+          finalBuyerAddress = tx?.buyer_address;
+        }
+
+        const labelResult = await getShippingLabel(sellerForShipping, productTitle, finalBuyerAddress);
 
         // If we got a real label and have a transaction ID, update the transaction
         if (labelResult.labelUrl && transactionId) {
