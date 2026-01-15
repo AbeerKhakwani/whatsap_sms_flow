@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User, DollarSign, Check, ChevronRight, Package, Tag, CreditCard, Lock } from 'lucide-react';
+import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User, DollarSign, Check, ChevronRight, Package, Tag, CreditCard, Lock, Printer, Truck, ExternalLink, MoreVertical } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -21,6 +21,10 @@ export default function SellerProfile() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [soldProducts, setSoldProducts] = useState([]);
+
+  // Shipping action states
+  const [openShippingMenu, setOpenShippingMenu] = useState(null);
+  const [requestingLabel, setRequestingLabel] = useState(null);
 
   // Active tab - default to menu on mobile (null), profile on desktop
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || null);
@@ -395,6 +399,62 @@ export default function SellerProfile() {
     navigate('/seller/login');
   }
 
+  // Request shipping label for a sold item
+  async function handleRequestLabel(item) {
+    setRequestingLabel(item.id);
+    setOpenShippingMenu(null);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/seller?action=shipping-label`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: seller?.email,
+          productTitle: item.title,
+          transactionId: item.id
+        })
+      });
+
+      const data = await res.json();
+
+      if (data.needsAddress) {
+        setError('Please add your shipping address in your profile first');
+        setActiveTab('profile');
+        return;
+      }
+
+      if (data.labelUrl) {
+        // Update the sold product in state with new label info
+        setSoldProducts(prev => prev.map(p =>
+          p.id === item.id
+            ? { ...p, shippingLabelUrl: data.labelUrl, trackingNumber: data.trackingNumber, shippingStatus: 'label_created' }
+            : p
+        ));
+        showSuccess('Shipping label sent to your email!');
+        // Open the label in a new tab
+        window.open(data.labelUrl, '_blank');
+      } else if (data.message) {
+        // Instructions only
+        showSuccess('Shipping instructions sent to your email!');
+      }
+    } catch (err) {
+      setError('Failed to request shipping label');
+    } finally {
+      setRequestingLabel(null);
+    }
+  }
+
+  function getShippingStatusBadge(status) {
+    const badges = {
+      pending_label: { label: 'Ship Now', color: 'bg-amber-100 text-amber-800' },
+      label_created: { label: 'Label Ready', color: 'bg-blue-100 text-blue-800' },
+      shipped: { label: 'Shipped', color: 'bg-purple-100 text-purple-800' },
+      delivered: { label: 'Delivered', color: 'bg-green-100 text-green-800' }
+    };
+    return badges[status] || badges.pending_label;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -535,56 +595,154 @@ export default function SellerProfile() {
           </div>
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
-            {soldProducts.map((item, idx) => (
-              <div key={idx} className="p-4 flex items-start gap-4">
-                {/* Image */}
-                <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
-                  {item.image ? (
-                    <img
-                      src={getThumbnail(item.image)}
-                      alt={item.title}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-400">
-                      <Package className="w-6 h-6" />
+            {soldProducts.map((item, idx) => {
+              const shippingBadge = getShippingStatusBadge(item.shippingStatus);
+              const hasLabel = !!item.shippingLabelUrl;
+
+              return (
+                <div key={idx} className="p-4">
+                  <div className="flex items-start gap-4">
+                    {/* Image */}
+                    <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                      {item.image ? (
+                        <img
+                          src={getThumbnail(item.image)}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400">
+                          <Package className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-medium text-gray-900 truncate">{item.title}</h3>
+                      <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
+                        {item.brand && <span>{item.brand}</span>}
+                        <span>Sold for ${item.retailPrice}</span>
+                      </div>
+                      <p className="text-sm text-green-600 font-medium mt-1">
+                        You earned ${item.earnings?.toFixed(0)}
+                      </p>
+                      {item.trackingNumber && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Tracking: {item.trackingNumber}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Status & Actions */}
+                    <div className="flex flex-col items-end gap-2">
+                      {/* Payout Status */}
+                      {item.status === 'SOLD_WITH_PAYOUT' ? (
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Paid Out
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                          Pending Payout
+                        </span>
+                      )}
+
+                      {/* Shipping Status */}
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${shippingBadge.color}`}>
+                        {shippingBadge.label}
+                      </span>
+
+                      {/* Shipping Actions Dropdown */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setOpenShippingMenu(openShippingMenu === item.id ? null : item.id)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                        >
+                          <MoreVertical className="w-5 h-5" />
+                        </button>
+
+                        {openShippingMenu === item.id && (
+                          <>
+                            <div
+                              className="fixed inset-0 z-40"
+                              onClick={() => setOpenShippingMenu(null)}
+                            />
+                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                              {hasLabel ? (
+                                <>
+                                  <a
+                                    href={item.shippingLabelUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                    onClick={() => setOpenShippingMenu(null)}
+                                  >
+                                    <Printer className="w-4 h-4" />
+                                    Print Label
+                                  </a>
+                                  {item.trackingNumber && (
+                                    <a
+                                      href={`https://tools.usps.com/go/TrackConfirmAction?tLabels=${item.trackingNumber}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                      onClick={() => setOpenShippingMenu(null)}
+                                    >
+                                      <Truck className="w-4 h-4" />
+                                      Track Package
+                                    </a>
+                                  )}
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleRequestLabel(item)}
+                                  disabled={requestingLabel === item.id}
+                                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full disabled:opacity-50"
+                                >
+                                  {requestingLabel === item.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Printer className="w-4 h-4" />
+                                  )}
+                                  Get Shipping Label
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Shipping Call to Action for items without label */}
+                  {!hasLabel && item.shippingStatus === 'pending_label' && (
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-amber-600" />
+                          <span className="text-sm text-amber-800">Ship this item to get paid</span>
+                        </div>
+                        <button
+                          onClick={() => handleRequestLabel(item)}
+                          disabled={requestingLabel === item.id}
+                          className="px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {requestingLabel === item.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <>
+                              <Printer className="w-4 h-4" />
+                              Get Label
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-gray-900 truncate">{item.title}</h3>
-                  <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
-                    {item.brand && <span>{item.brand}</span>}
-                    <span>Sold for ${item.retailPrice}</span>
-                  </div>
-                  <p className="text-sm text-green-600 font-medium mt-1">
-                    You earned ${item.earnings?.toFixed(0)}
-                  </p>
-                  {item.status === 'SOLD_WITH_PAYOUT' && item.paymentNote && (
-                    <p className="text-xs text-gray-500 mt-1">{item.paymentNote}</p>
-                  )}
-                </div>
-
-                {/* Status */}
-                <div className="flex flex-col items-end gap-1">
-                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    Sold
-                  </span>
-                  {item.status === 'SOLD_WITH_PAYOUT' ? (
-                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      Paid Out
-                    </span>
-                  ) : (
-                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                      Pending Payout
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

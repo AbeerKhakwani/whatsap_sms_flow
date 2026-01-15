@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   DollarSign, Clock, CheckCircle, User, ExternalLink,
-  Check, X, MessageSquare, Filter, RefreshCw, FileText
+  Check, X, MessageSquare, Filter, RefreshCw, FileText,
+  Package, Truck, Printer
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -135,6 +136,16 @@ export default function Transactions() {
            date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
 
+  function getShippingBadge(status) {
+    const badges = {
+      pending_label: { label: 'Awaiting Label', color: 'bg-amber-100 text-amber-700', icon: Package },
+      label_created: { label: 'Label Ready', color: 'bg-blue-100 text-blue-700', icon: Printer },
+      shipped: { label: 'Shipped', color: 'bg-purple-100 text-purple-700', icon: Truck },
+      delivered: { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle }
+    };
+    return badges[status] || badges.pending_label;
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -247,6 +258,7 @@ export default function Transactions() {
                 <th className="text-right px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Sale</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Payout</th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Status</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Shipping</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -317,6 +329,41 @@ export default function Transactions() {
                         Pending
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {(() => {
+                      const badge = getShippingBadge(tx.shipping_status);
+                      const IconComponent = badge.icon;
+                      return (
+                        <div className="inline-flex flex-col items-center">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${badge.color}`}>
+                            <IconComponent className="w-3 h-3" />
+                            {badge.label}
+                          </span>
+                          {tx.tracking_number && (
+                            <a
+                              href={`https://tools.usps.com/go/TrackConfirmAction?tLabels=${tx.tracking_number}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-blue-600 hover:underline mt-0.5"
+                            >
+                              {tx.tracking_number}
+                            </a>
+                          )}
+                          {tx.shipping_label_url && (
+                            <a
+                              href={tx.shipping_label_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-stone-500 hover:text-stone-700 mt-0.5 flex items-center gap-0.5"
+                            >
+                              <Printer className="w-3 h-3" />
+                              Label
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3">
                     {tx.status === 'pending_payout' && (

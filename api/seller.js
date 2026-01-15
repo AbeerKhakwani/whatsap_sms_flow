@@ -188,7 +188,13 @@ export default async function handler(req, res) {
         brand: null,
         orderName: tx.order_name,
         paidAt: tx.paid_at,
-        paymentNote: tx.seller_note
+        paymentNote: tx.seller_note,
+        // Shipping info
+        shippingStatus: tx.shipping_status || 'pending_label',
+        shippingLabelUrl: tx.shipping_label_url,
+        trackingNumber: tx.tracking_number,
+        carrier: tx.carrier,
+        shippingService: tx.shipping_service
       }));
 
       // Calculate earnings from transactions
@@ -626,6 +632,18 @@ export default async function handler(req, res) {
             sellerPayout = salePrice * ((100 - commissionRate) / 100);
           }
 
+          // Extract buyer shipping address from order
+          const buyerAddress = order.shipping_address ? {
+            name: order.shipping_address.name,
+            street1: order.shipping_address.address1,
+            street2: order.shipping_address.address2 || '',
+            city: order.shipping_address.city,
+            state: order.shipping_address.province_code,
+            zip: order.shipping_address.zip,
+            country: order.shipping_address.country_code || 'US',
+            phone: order.shipping_address.phone || ''
+          } : null;
+
           // Create transaction record
           const transaction = {
             seller_id: seller.id,
@@ -637,11 +655,17 @@ export default async function handler(req, res) {
             seller_payout: sellerPayout,
             commission_rate: commissionRate,
             status: 'pending_payout',
+            shipping_status: 'pending_label',
             customer_email: order.email,
+            buyer_address: buyerAddress,
             created_at: new Date().toISOString()
           };
 
-          const { error: txError } = await supabase.from('transactions').insert(transaction);
+          const { data: newTx, error: txError } = await supabase
+            .from('transactions')
+            .insert(transaction)
+            .select()
+            .single();
 
           if (txError) {
             console.error(`   Failed to create transaction:`, txError);
@@ -650,14 +674,52 @@ export default async function handler(req, res) {
 
           console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
 
-          // Send notifications to seller
+          // Generate shipping label if seller has address
+          let labelResult = null;
+          if (seller.shipping_address) {
+            try {
+              // Format seller address for shipping API
+              const sellerForShipping = {
+                name: seller.shipping_address.full_name || seller.name,
+                address_line1: seller.shipping_address.street_address,
+                address_line2: seller.shipping_address.apartment || '',
+                city: seller.shipping_address.city,
+                state: seller.shipping_address.state,
+                zip: seller.shipping_address.postal_code,
+                phone: seller.phone || ''
+              };
+
+              labelResult = await getShippingLabel(sellerForShipping, item.title || product.title);
+
+              if (labelResult.labelUrl) {
+                // Update transaction with shipping info
+                await supabase
+                  .from('transactions')
+                  .update({
+                    shipping_label_url: labelResult.labelUrl,
+                    tracking_number: labelResult.trackingNumber,
+                    carrier: labelResult.carrier || 'USPS',
+                    shipping_service: labelResult.service,
+                    shipping_status: 'label_created'
+                  })
+                  .eq('id', newTx.id);
+
+                console.log(`   📦 Generated shipping label: ${labelResult.trackingNumber}`);
+              }
+            } catch (labelErr) {
+              console.log(`   ⚠️ Could not generate label: ${labelErr.message}`);
+            }
+          }
+
+          // Send notifications to seller (include label if available)
           await notifySellerOfSale(seller, {
             productTitle: item.title || product.title,
             salePrice,
-            sellerPayout
+            sellerPayout,
+            labelResult
           });
 
-          results.push({ sellerId: seller.id, productId, payout: sellerPayout });
+          results.push({ sellerId: seller.id, productId, payout: sellerPayout, hasLabel: !!labelResult?.labelUrl });
 
         } catch (err) {
           console.error(`   Error processing product ${productId}:`, err.message);
@@ -673,7 +735,7 @@ export default async function handler(req, res) {
 
     // GET SHIPPING LABEL or instructions
     if (action === 'shipping-label' && req.method === 'POST') {
-      const { email, productId, productTitle } = req.body;
+      const { email, productId, productTitle, transactionId } = req.body;
 
       if (!email) {
         return res.status(400).json({ error: 'Email required' });
@@ -689,8 +751,42 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Seller not found' });
       }
 
+      // Check if seller has shipping address
+      if (!seller.shipping_address) {
+        return res.status(400).json({
+          error: 'Please add your shipping address in your profile first',
+          needsAddress: true
+        });
+      }
+
       try {
-        const labelResult = await getShippingLabel(seller, productTitle);
+        // Format seller address for shipping API
+        const sellerForShipping = {
+          name: seller.shipping_address.full_name || seller.name,
+          address_line1: seller.shipping_address.street_address,
+          address_line2: seller.shipping_address.apartment || '',
+          city: seller.shipping_address.city,
+          state: seller.shipping_address.state,
+          zip: seller.shipping_address.postal_code,
+          phone: seller.phone || ''
+        };
+
+        const labelResult = await getShippingLabel(sellerForShipping, productTitle);
+
+        // If we got a real label and have a transaction ID, update the transaction
+        if (labelResult.labelUrl && transactionId) {
+          await supabase
+            .from('transactions')
+            .update({
+              shipping_label_url: labelResult.labelUrl,
+              tracking_number: labelResult.trackingNumber,
+              carrier: labelResult.carrier || 'USPS',
+              shipping_service: labelResult.service,
+              shipping_status: 'label_created'
+            })
+            .eq('id', transactionId)
+            .eq('seller_id', seller.id);
+        }
 
         // If we got a real label, send it via WhatsApp/email
         if (labelResult.labelUrl) {
@@ -1112,7 +1208,7 @@ export default async function handler(req, res) {
 
 // Send sale notification to seller via WhatsApp and email
 async function notifySellerOfSale(seller, saleInfo) {
-  const { productTitle, salePrice, sellerPayout } = saleInfo;
+  const { productTitle, salePrice, sellerPayout, labelResult } = saleInfo;
   const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
   const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const RESEND_KEY = process.env.RESEND_API_KEY;
@@ -1177,6 +1273,31 @@ async function notifySellerOfSale(seller, saleInfo) {
     const emailSubject = `🎉 Your item sold! - ${productTitle}`;
     const emailContent = `${productTitle} sold for $${salePrice.toFixed(2)}. Your payout: $${sellerPayout.toFixed(2)}`;
 
+    // Build shipping section if label is available
+    const shippingSection = labelResult?.labelUrl ? `
+      <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <h2 style="margin: 0 0 12px 0; color: #166534;">📦 Ship Your Item</h2>
+        <p style="margin: 0 0 8px 0;">Your prepaid shipping label is ready!</p>
+        <p style="margin: 0 0 8px 0;"><strong>Tracking:</strong> ${labelResult.trackingNumber}</p>
+        <p style="margin: 0 0 16px 0;"><strong>Service:</strong> ${labelResult.carrier} ${labelResult.service}</p>
+        <a href="${labelResult.labelUrl}" style="display: inline-block; background: #166534; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin-right: 8px;">Print Label</a>
+      </div>
+      <div style="background: #fefce8; border: 1px solid #fde047; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #854d0e;">📝 How to Ship</h3>
+        <ol style="margin: 0; padding-left: 20px; color: #713f12;">
+          <li>Print the shipping label above</li>
+          <li>Pack your item securely in a box or padded envelope</li>
+          <li>Attach the label to the outside of the package</li>
+          <li>Drop off at any USPS location or schedule a pickup</li>
+        </ol>
+      </div>
+    ` : `
+      <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #9a3412;">📦 Next Step: Ship Your Item</h3>
+        <p style="margin: 0; color: #c2410c;">Visit your dashboard to get your shipping label and instructions.</p>
+      </div>
+    `;
+
     try {
       const emailRes = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -1189,11 +1310,12 @@ async function notifySellerOfSale(seller, saleInfo) {
           to: seller.email,
           subject: emailSubject,
           html: `
-            <div style="font-family: sans-serif; max-width: 500px;">
+            <div style="font-family: sans-serif; max-width: 600px;">
               <h1 style="color: #16a34a;">🎉 Congratulations${seller.name ? `, ${seller.name}` : ''}!</h1>
               <p>Your item <strong>${productTitle}</strong> just sold for $${salePrice.toFixed(2)}!</p>
               <p style="font-size: 24px; color: #16a34a;"><strong>Your payout: $${sellerPayout.toFixed(2)}</strong></p>
-              <p>We'll process your payment within 7 business days.</p>
+              ${shippingSection}
+              <p>We'll process your payment within 7 business days after we receive the item.</p>
               <a href="https://sell.thephirstory.com" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px;">View Dashboard</a>
             </div>
           `
