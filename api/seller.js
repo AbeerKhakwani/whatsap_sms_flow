@@ -4,7 +4,7 @@
 
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { getProduct, updateProduct } from '../lib/shopify.js';
+import { getProduct, updateProduct, fulfillOrder } from '../lib/shopify.js';
 import { validateUpdate } from '../lib/security.js';
 import { getShippingLabel, getShippingInstructions, WAREHOUSE_ADDRESS } from '../lib/shipping.js';
 import { logMessage, getSellerMessages } from '../lib/messages.js';
@@ -799,6 +799,13 @@ export default async function handler(req, res) {
 
         // If we got a real label and have a transaction ID, update the transaction
         if (labelResult.labelUrl && transactionId) {
+          // Get the order_id for Shopify fulfillment
+          const { data: txForFulfill } = await supabase
+            .from('transactions')
+            .select('order_id')
+            .eq('id', transactionId)
+            .single();
+
           await supabase
             .from('transactions')
             .update({
@@ -806,10 +813,25 @@ export default async function handler(req, res) {
               tracking_number: labelResult.trackingNumber,
               carrier: labelResult.carrier || 'USPS',
               shipping_service: labelResult.service,
-              shipping_status: 'label_created'
+              shipping_status: 'label_created',
+              payout_status: 'in_transit'
             })
             .eq('id', transactionId)
             .eq('seller_id', seller.id);
+
+          // Fulfill the Shopify order to notify the buyer
+          if (txForFulfill?.order_id && labelResult.trackingNumber) {
+            try {
+              await fulfillOrder(txForFulfill.order_id, {
+                tracking_number: labelResult.trackingNumber,
+                carrier: labelResult.carrier || 'USPS'
+              });
+              console.log('📦 Shopify order fulfilled - buyer will receive tracking notification');
+            } catch (fulfillErr) {
+              console.error('📦 Shopify fulfillment failed (non-blocking):', fulfillErr.message);
+              // Don't fail the request - label was created successfully
+            }
+          }
         }
 
         // If we got a real label, send it via WhatsApp/email

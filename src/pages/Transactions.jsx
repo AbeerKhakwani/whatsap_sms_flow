@@ -12,7 +12,7 @@ export default function Transactions() {
   const [transactions, setTransactions] = useState([]);
   const [stats, setStats] = useState({ totalPending: 0, totalPaid: 0, pendingCount: 0, paidCount: 0 });
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, pending_payout, paid
+  const [filter, setFilter] = useState('all'); // all, pending_shipping, in_transit, delivered, available, paid, contested
 
   // Mark paid state
   const [markingPaid, setMarkingPaid] = useState(null); // transaction being marked (full object)
@@ -83,6 +83,7 @@ export default function Transactions() {
             ? {
                 ...t,
                 status: 'paid',
+                payout_status: 'paid',
                 paid_at: new Date().toISOString(),
                 seller_note: sellerNote || t.seller_note,
                 admin_note: adminNote || t.admin_note
@@ -117,10 +118,40 @@ export default function Transactions() {
     }
   }
 
-  // Filter transactions
+  // Filter transactions based on payout_status (new) or status (legacy)
   const filteredTransactions = filter === 'all'
     ? transactions
-    : transactions.filter(t => t.status === filter);
+    : transactions.filter(t => {
+        // Use payout_status if available, fallback to status for legacy
+        const payoutStatus = t.payout_status || (t.status === 'paid' ? 'paid' : 'pending_shipping');
+        return payoutStatus === filter;
+      });
+
+  // Calculate stats by payout status
+  const payoutStats = transactions.reduce((acc, t) => {
+    const status = t.payout_status || (t.status === 'paid' ? 'paid' : 'pending_shipping');
+    if (!acc[status]) acc[status] = { count: 0, total: 0 };
+    acc[status].count++;
+    acc[status].total += t.seller_payout || 0;
+    return acc;
+  }, {});
+
+  // Helper to check if shipping is overdue
+  function isShippingOverdue(tx) {
+    if (!tx.ship_by) return false;
+    const payoutStatus = tx.payout_status || 'pending_shipping';
+    if (payoutStatus !== 'pending_shipping') return false;
+    return new Date(tx.ship_by) < new Date();
+  }
+
+  // Helper to get days until ship_by
+  function getDaysUntilShipBy(tx) {
+    if (!tx.ship_by) return null;
+    const shipBy = new Date(tx.ship_by);
+    const now = new Date();
+    const diffDays = Math.ceil((shipBy - now) / (1000 * 60 * 60 * 24));
+    return diffDays;
+  }
 
   // Format date
   function formatDate(dateStr) {
@@ -214,26 +245,36 @@ export default function Transactions() {
       </div>
 
       {/* Filter */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <Filter className="w-4 h-4 text-stone-400" />
-        <div className="flex bg-stone-100 rounded-lg p-0.5">
+        <div className="flex bg-stone-100 rounded-lg p-0.5 flex-wrap">
           {[
-            { value: 'all', label: 'All' },
-            { value: 'pending_payout', label: 'Pending' },
-            { value: 'paid', label: 'Paid' }
-          ].map(option => (
-            <button
-              key={option.value}
-              onClick={() => setFilter(option.value)}
-              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                filter === option.value
-                  ? 'bg-white text-stone-900 shadow-sm font-medium'
-                  : 'text-stone-500 hover:text-stone-700'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
+            { value: 'all', label: 'All', color: '' },
+            { value: 'pending_shipping', label: 'Pending Ship', color: 'text-amber-600' },
+            { value: 'in_transit', label: 'In Transit', color: 'text-blue-600' },
+            { value: 'delivered', label: 'Delivered', color: 'text-purple-600' },
+            { value: 'available', label: 'Available', color: 'text-green-600' },
+            { value: 'paid', label: 'Paid', color: 'text-stone-600' },
+            { value: 'contested', label: 'Contested', color: 'text-red-600' }
+          ].map(option => {
+            const count = option.value === 'all' ? transactions.length : (payoutStats[option.value]?.count || 0);
+            return (
+              <button
+                key={option.value}
+                onClick={() => setFilter(option.value)}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                  filter === option.value
+                    ? 'bg-white text-stone-900 shadow-sm font-medium'
+                    : 'text-stone-500 hover:text-stone-700'
+                }`}
+              >
+                {option.label}
+                {count > 0 && option.value !== 'all' && (
+                  <span className={`ml-1 text-xs ${option.color}`}>({count})</span>
+                )}
+              </button>
+            );
+          })}
         </div>
         <span className="text-sm text-stone-400 ml-2">
           {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
@@ -301,34 +342,58 @@ export default function Transactions() {
                     <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(2)}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {tx.status === 'paid' ? (
-                      <div className="inline-flex flex-col items-center">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                          <CheckCircle className="w-3 h-3" />
-                          Paid
-                        </span>
-                        {tx.paid_at && (
-                          <span className="text-[10px] text-stone-400 mt-0.5">
-                            {formatDateTime(tx.paid_at)}
+                    {(() => {
+                      const payoutStatus = tx.payout_status || (tx.status === 'paid' ? 'paid' : 'pending_shipping');
+                      const daysLeft = getDaysUntilShipBy(tx);
+                      const overdue = isShippingOverdue(tx);
+
+                      const statusConfig = {
+                        pending_shipping: { label: 'Pending Ship', color: 'bg-amber-100 text-amber-700', icon: Clock },
+                        in_transit: { label: 'In Transit', color: 'bg-blue-100 text-blue-700', icon: Truck },
+                        delivered: { label: 'Delivered', color: 'bg-purple-100 text-purple-700', icon: Package },
+                        available: { label: 'Available', color: 'bg-green-100 text-green-700', icon: DollarSign },
+                        paid: { label: 'Paid Out', color: 'bg-stone-100 text-stone-700', icon: CheckCircle },
+                        contested: { label: 'Contested', color: 'bg-red-100 text-red-700', icon: X }
+                      };
+
+                      const config = statusConfig[payoutStatus] || statusConfig.pending_shipping;
+                      const IconComponent = config.icon;
+
+                      return (
+                        <div className="inline-flex flex-col items-center">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${overdue ? 'bg-red-100 text-red-700' : config.color}`}>
+                            <IconComponent className="w-3 h-3" />
+                            {overdue ? 'OVERDUE' : config.label}
                           </span>
-                        )}
-                        {tx.seller_note && (
-                          <span className="text-[11px] text-green-600 mt-1">
-                            {tx.seller_note}
-                          </span>
-                        )}
-                        {tx.admin_note && (
-                          <span className="text-[10px] text-stone-400 mt-0.5 italic">
-                            ({tx.admin_note})
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
-                        <Clock className="w-3 h-3" />
-                        Pending
-                      </span>
-                    )}
+
+                          {/* Ship-by countdown for pending_shipping */}
+                          {payoutStatus === 'pending_shipping' && tx.ship_by && (
+                            <span className={`text-[10px] mt-0.5 ${overdue ? 'text-red-600 font-medium' : daysLeft <= 2 ? 'text-amber-600' : 'text-stone-400'}`}>
+                              {overdue ? `${Math.abs(daysLeft)} days overdue` : daysLeft === 0 ? 'Due today' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
+                            </span>
+                          )}
+
+                          {/* Contest window countdown for delivered */}
+                          {payoutStatus === 'delivered' && tx.contest_window_ends && (
+                            <span className="text-[10px] text-purple-600 mt-0.5">
+                              Review ends {formatDate(tx.contest_window_ends)}
+                            </span>
+                          )}
+
+                          {/* Paid info */}
+                          {payoutStatus === 'paid' && tx.paid_at && (
+                            <span className="text-[10px] text-stone-400 mt-0.5">
+                              {formatDateTime(tx.paid_at)}
+                            </span>
+                          )}
+                          {payoutStatus === 'paid' && tx.seller_note && (
+                            <span className="text-[11px] text-green-600 mt-1">
+                              {tx.seller_note}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {(() => {
@@ -366,20 +431,42 @@ export default function Transactions() {
                     })()}
                   </td>
                   <td className="px-4 py-3">
-                    {tx.status === 'pending_payout' && (
-                      <button
-                        onClick={() => openMarkPaidModal(tx)}
-                        className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                      >
-                        <DollarSign className="w-3 h-3" />
-                        Mark Paid
-                      </button>
-                    )}
-                    {tx.status === 'paid' && tx.seller?.paypal_email && (
-                      <span className="text-[10px] text-stone-400" title={tx.seller.paypal_email}>
-                        {tx.seller.paypal_email}
-                      </span>
-                    )}
+                    {(() => {
+                      const payoutStatus = tx.payout_status || (tx.status === 'paid' ? 'paid' : 'pending_shipping');
+
+                      // Show "Mark Paid" for available transactions
+                      if (payoutStatus === 'available') {
+                        return (
+                          <button
+                            onClick={() => openMarkPaidModal(tx)}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          >
+                            <DollarSign className="w-3 h-3" />
+                            Mark Paid
+                          </button>
+                        );
+                      }
+
+                      // Show PayPal email for paid transactions
+                      if (payoutStatus === 'paid' && tx.seller?.paypal_email) {
+                        return (
+                          <span className="text-[10px] text-stone-400" title={tx.seller.paypal_email}>
+                            {tx.seller.paypal_email}
+                          </span>
+                        );
+                      }
+
+                      // Show payout amount for other statuses
+                      if (payoutStatus !== 'paid') {
+                        return (
+                          <span className="text-[10px] text-stone-400">
+                            ${(tx.seller_payout || 0).toFixed(2)} pending
+                          </span>
+                        );
+                      }
+
+                      return null;
+                    })()}
                   </td>
                 </tr>
               ))}

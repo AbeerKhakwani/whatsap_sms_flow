@@ -499,6 +499,7 @@ export default async function handler(req, res) {
 
       const updateData = {
         status: 'paid',
+        payout_status: 'paid',
         paid_at: new Date().toISOString()
       };
       if (sellerNote) updateData.seller_note = sellerNote;
