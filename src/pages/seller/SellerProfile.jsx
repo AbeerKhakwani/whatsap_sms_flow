@@ -445,7 +445,11 @@ export default function SellerProfile() {
     }
   }
 
-  function getShippingStatusBadge(status) {
+  function getShippingStatusBadge(status, fulfilledAt) {
+    // If order is fulfilled but no label was created, show "Fulfilled" instead of "Ship Now"
+    if (fulfilledAt && status === 'pending_label') {
+      return { label: 'Fulfilled', color: 'bg-green-100 text-green-800' };
+    }
     const badges = {
       pending_label: { label: 'Ship Now', color: 'bg-amber-100 text-amber-800' },
       label_created: { label: 'Label Ready', color: 'bg-blue-100 text-blue-800' },
@@ -596,8 +600,9 @@ export default function SellerProfile() {
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
             {soldProducts.map((item, idx) => {
-              const shippingBadge = getShippingStatusBadge(item.shippingStatus);
+              const shippingBadge = getShippingStatusBadge(item.shippingStatus, item.fulfilledAt);
               const hasLabel = !!item.shippingLabelUrl;
+              const isFulfilledWithoutLabel = item.fulfilledAt && !hasLabel;
 
               return (
                 <div key={idx} className="p-4">
@@ -653,16 +658,17 @@ export default function SellerProfile() {
                         {shippingBadge.label}
                       </span>
 
-                      {/* Shipping Actions Dropdown */}
-                      <div className="relative">
-                        <button
-                          onClick={() => setOpenShippingMenu(openShippingMenu === item.id ? null : item.id)}
-                          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-                        >
-                          <MoreVertical className="w-5 h-5" />
-                        </button>
+                      {/* Shipping Actions Dropdown - hide for fulfilled orders without labels */}
+                      {!isFulfilledWithoutLabel && (
+                        <div className="relative">
+                          <button
+                            onClick={() => setOpenShippingMenu(openShippingMenu === item.id ? null : item.id)}
+                            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                          >
+                            <MoreVertical className="w-5 h-5" />
+                          </button>
 
-                        {openShippingMenu === item.id && (
+                          {openShippingMenu === item.id && (
                           <>
                             <div
                               className="fixed inset-0 z-40"
@@ -710,13 +716,14 @@ export default function SellerProfile() {
                               )}
                             </div>
                           </>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Shipping Call to Action for items without label */}
-                  {!hasLabel && item.shippingStatus === 'pending_label' && (
+                  {/* Shipping Call to Action for items without label (only if not already fulfilled) */}
+                  {!hasLabel && item.shippingStatus === 'pending_label' && !item.fulfilledAt && (
                     <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">

@@ -194,7 +194,8 @@ export default async function handler(req, res) {
         shippingLabelUrl: tx.shipping_label_url,
         trackingNumber: tx.tracking_number,
         carrier: tx.carrier,
-        shippingService: tx.shipping_service
+        shippingService: tx.shipping_service,
+        fulfilledAt: tx.fulfilled_at
       }));
 
       // Calculate earnings from transactions
