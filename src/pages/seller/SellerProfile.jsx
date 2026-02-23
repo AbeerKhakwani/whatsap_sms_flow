@@ -8,7 +8,7 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 // Tab configuration
 const TABS = [
   { id: 'sales', label: 'My Sales', icon: Package, comingSoon: false },
-  { id: 'balance', label: 'My Balance', icon: DollarSign, comingSoon: true },
+  { id: 'balance', label: 'My Balance', icon: DollarSign, comingSoon: false },
   { id: 'offers', label: 'My Offers', icon: Tag, comingSoon: true },
   { id: 'profile', label: 'Profile', icon: User, comingSoon: false },
 ];
@@ -21,6 +21,14 @@ export default function SellerProfile() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [soldProducts, setSoldProducts] = useState([]);
+  const [balanceBreakdown, setBalanceBreakdown] = useState({
+    pendingShipping: 0,
+    inTransit: 0,
+    delivered: 0,
+    available: 0,
+    paid: 0,
+    contested: 0
+  });
 
   // Shipping action states
   const [openShippingMenu, setOpenShippingMenu] = useState(null);
@@ -103,11 +111,14 @@ export default function SellerProfile() {
           }
         }
 
-        // Fetch sold products
+        // Fetch sold products and balance breakdown
         const sellerRes = await fetch(`/api/seller?action=listings&email=${encodeURIComponent(storedEmail)}`);
         const sellerData = await sellerRes.json();
         if (sellerData.success) {
           setSoldProducts(sellerData.soldProducts || []);
+          if (sellerData.balanceBreakdown) {
+            setBalanceBreakdown(sellerData.balanceBreakdown);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch profile:', err);
@@ -1129,12 +1140,156 @@ export default function SellerProfile() {
     );
   }
 
+  // ============ RENDER MY BALANCE TAB ============
+  function renderBalanceContent() {
+    // Helper to get days remaining
+    function getDaysRemaining(shipBy) {
+      if (!shipBy) return null;
+      const now = new Date();
+      const deadline = new Date(shipBy);
+      const diff = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+      return diff;
+    }
+
+    // Filter items by payout status
+    const pendingShipItems = soldProducts.filter(p => p.payoutStatus === 'pending_shipping' || (!p.payoutStatus && p.shippingStatus === 'pending_label'));
+    const inTransitItems = soldProducts.filter(p => p.payoutStatus === 'in_transit' || (!p.payoutStatus && (p.shippingStatus === 'shipped' || p.shippingStatus === 'label_created')));
+    const availableItems = soldProducts.filter(p => p.payoutStatus === 'available');
+    const paidItems = soldProducts.filter(p => p.payoutStatus === 'paid' || p.status === 'SOLD_WITH_PAYOUT');
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-xl font-semibold text-gray-900">My Balance</h2>
+
+        {/* Balance Breakdown Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-amber-600 mb-2">
+              <Package className="w-5 h-5" />
+              <span className="text-sm font-medium">Pending Ship</span>
+            </div>
+            <p className="text-2xl font-bold text-gray-900">${balanceBreakdown.pendingShipping || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">{pendingShipItems.length} item{pendingShipItems.length !== 1 ? 's' : ''}</p>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-blue-600 mb-2">
+              <Truck className="w-5 h-5" />
+              <span className="text-sm font-medium">In Transit</span>
+            </div>
+            <p className="text-2xl font-bold text-gray-900">${balanceBreakdown.inTransit || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">{inTransitItems.length} item{inTransitItems.length !== 1 ? 's' : ''}</p>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-green-600 mb-2">
+              <DollarSign className="w-5 h-5" />
+              <span className="text-sm font-medium">Available</span>
+            </div>
+            <p className="text-2xl font-bold text-green-600">${balanceBreakdown.available || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">{availableItems.length} item{availableItems.length !== 1 ? 's' : ''}</p>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-gray-500 mb-2">
+              <Check className="w-5 h-5" />
+              <span className="text-sm font-medium">Total Paid</span>
+            </div>
+            <p className="text-2xl font-bold text-gray-900">${balanceBreakdown.paid || 0}</p>
+            <p className="text-xs text-gray-500 mt-1">{paidItems.length} item{paidItems.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        {/* Items Pending Shipping */}
+        {pendingShipItems.length > 0 && (
+          <div className="bg-white rounded-lg border border-amber-200 p-4">
+            <h3 className="font-medium text-amber-800 mb-3 flex items-center gap-2">
+              <Package className="w-5 h-5" />
+              Action Required: Ship These Items
+            </h3>
+            <div className="space-y-3">
+              {pendingShipItems.map((item, idx) => {
+                const daysLeft = getDaysRemaining(item.shipBy);
+                const isOverdue = daysLeft !== null && daysLeft < 0;
+                const isUrgent = daysLeft !== null && daysLeft <= 2 && daysLeft >= 0;
+
+                return (
+                  <div key={idx} className={`flex items-center justify-between p-3 rounded-lg ${isOverdue ? 'bg-red-50 border border-red-200' : isUrgent ? 'bg-amber-50' : 'bg-gray-50'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded bg-gray-200 overflow-hidden">
+                        {item.image && <img src={getThumbnail(item.image)} alt={item.title} className="w-full h-full object-cover" />}
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-900 text-sm">{item.title}</p>
+                        <p className="text-sm text-green-600">Earnings: ${item.earnings?.toFixed(0)}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {daysLeft !== null && (
+                        <p className={`text-sm font-medium ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-600'}`}>
+                          {isOverdue ? `${Math.abs(daysLeft)} day${Math.abs(daysLeft) !== 1 ? 's' : ''} overdue` : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
+                        </p>
+                      )}
+                      <button
+                        onClick={() => { setActiveTab('sales'); }}
+                        className="text-xs text-[#C91A2B] hover:underline mt-1"
+                      >
+                        Get Label
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Available for Payout */}
+        {availableItems.length > 0 && (
+          <div className="bg-green-50 rounded-lg border border-green-200 p-4">
+            <h3 className="font-medium text-green-800 mb-2 flex items-center gap-2">
+              <DollarSign className="w-5 h-5" />
+              Ready for Payout
+            </h3>
+            <p className="text-sm text-green-700 mb-3">
+              ${balanceBreakdown.available} is ready to be paid out. We'll process payouts via your preferred method.
+            </p>
+            <div className="space-y-2">
+              {availableItems.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-700">{item.title}</span>
+                  <span className="font-medium text-green-700">${item.earnings?.toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Payout Method Reminder */}
+        {!seller?.payout_method && (
+          <div className="bg-amber-50 rounded-lg border border-amber-200 p-4">
+            <p className="text-sm text-amber-800">
+              <strong>Set up your payout method</strong> to receive earnings when your items sell.
+            </p>
+            <button
+              onClick={() => setActiveTab('profile')}
+              className="mt-2 text-sm text-[#C91A2B] hover:underline font-medium"
+            >
+              Add Payout Method
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ============ RENDER CONTENT FOR ACTIVE TAB ============
   function renderTabContent() {
     switch (activeTab) {
       case 'sales':
         return renderSalesContent();
       case 'balance':
+        return renderBalanceContent();
       case 'offers':
         return renderComingSoonContent(activeTab);
       case 'profile':

@@ -195,8 +195,50 @@ export default async function handler(req, res) {
         trackingNumber: tx.tracking_number,
         carrier: tx.carrier,
         shippingService: tx.shipping_service,
-        fulfilledAt: tx.fulfilled_at
+        fulfilledAt: tx.fulfilled_at,
+        // Payout lifecycle
+        payoutStatus: tx.payout_status || 'pending_shipping',
+        shipBy: tx.ship_by,
+        deliveredAt: tx.delivered_at,
+        contestWindowEnds: tx.contest_window_ends,
+        image: tx.product_image
       }));
+
+      // Calculate balance breakdown by payout status
+      const balanceBreakdown = {
+        pendingShipping: 0,
+        inTransit: 0,
+        delivered: 0,
+        available: 0,
+        paid: 0,
+        contested: 0
+      };
+
+      for (const tx of transactions || []) {
+        const amount = tx.seller_payout || 0;
+        const payoutStatus = tx.payout_status || (tx.status === 'paid' ? 'paid' : 'pending_shipping');
+
+        switch (payoutStatus) {
+          case 'pending_shipping':
+            balanceBreakdown.pendingShipping += amount;
+            break;
+          case 'in_transit':
+            balanceBreakdown.inTransit += amount;
+            break;
+          case 'delivered':
+            balanceBreakdown.delivered += amount;
+            break;
+          case 'available':
+            balanceBreakdown.available += amount;
+            break;
+          case 'paid':
+            balanceBreakdown.paid += amount;
+            break;
+          case 'contested':
+            balanceBreakdown.contested += amount;
+            break;
+        }
+      }
 
       // Calculate earnings from transactions
       const totalEarnings = (transactions || [])
@@ -204,7 +246,7 @@ export default async function handler(req, res) {
         .reduce((sum, tx) => sum + (tx.seller_payout || 0), 0);
 
       const pendingPayout = (transactions || [])
-        .filter(tx => tx.status === 'pending_payout')
+        .filter(tx => tx.status !== 'paid')
         .reduce((sum, tx) => sum + (tx.seller_payout || 0), 0);
 
       return res.status(200).json({
@@ -221,7 +263,8 @@ export default async function handler(req, res) {
           totalEarnings,
           pendingPayout
         },
-        soldProducts: allSoldProducts
+        soldProducts: allSoldProducts,
+        balanceBreakdown
       });
     }
 
