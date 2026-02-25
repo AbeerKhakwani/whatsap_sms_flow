@@ -415,7 +415,7 @@ export default async function handler(req, res) {
       const sellerIds = [...new Set((transactions || []).map(t => t.seller_id))];
       const { data: sellers } = await supabase
         .from('sellers')
-        .select('id, name, email, phone')
+        .select('id, name, email, phone, paypal_email')
         .in('id', sellerIds);
 
       const sellersById = {};
@@ -439,15 +439,19 @@ export default async function handler(req, res) {
 
     // GET ALL TRANSACTIONS (for admin transactions page)
     if (action === 'transactions' && req.method === 'GET') {
-      const status = req.query.status; // optional filter: pending_payout, paid
+      const statusFilter = req.query.status; // optional: pending_payout, paid
+      const pipelineFilter = req.query.pipeline; // optional: pending_shipping, in_transit, delivered, available, paid
 
       let query = supabase
         .from('transactions')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (status) {
-        query = query.eq('status', status);
+      if (statusFilter) {
+        query = query.eq('status', statusFilter);
+      }
+      if (pipelineFilter) {
+        query = query.eq('payout_status', pipelineFilter);
       }
 
       const { data: transactions, error } = await query;
@@ -460,8 +464,8 @@ export default async function handler(req, res) {
       const sellerIds = [...new Set((transactions || []).map(t => t.seller_id))];
       const { data: sellers } = await supabase
         .from('sellers')
-        .select('id, name, email, phone')
-        .in('id', sellerIds);
+        .select('id, name, email, phone, paypal_email')
+        .in('id', sellerIds.length ? sellerIds : ['none']);
 
       const sellersById = {};
       for (const s of sellers || []) {
@@ -473,18 +477,34 @@ export default async function handler(req, res) {
         seller: sellersById[t.seller_id] || null
       }));
 
-      // Calculate totals
-      const pending = enriched.filter(t => t.status === 'pending_payout');
-      const paid = enriched.filter(t => t.status === 'paid');
+      // Pipeline stats (counts + totals by payout_status)
+      const pipeline = {};
+      for (const status of ['pending_shipping', 'in_transit', 'delivered', 'available', 'paid', 'contested']) {
+        const items = enriched.filter(t => t.payout_status === status);
+        pipeline[status] = {
+          count: items.length,
+          total: items.reduce((sum, t) => sum + (t.seller_payout || 0), 0)
+        };
+      }
+
+      // Shipping alerts: items overdue for shipping
+      const now = new Date();
+      const overdueShipping = enriched.filter(t =>
+        t.payout_status === 'pending_shipping' &&
+        t.ship_by && new Date(t.ship_by) < now
+      );
 
       return res.status(200).json({
         success: true,
         transactions: enriched,
         stats: {
-          totalPending: pending.reduce((sum, t) => sum + (t.seller_payout || 0), 0),
-          totalPaid: paid.reduce((sum, t) => sum + (t.seller_payout || 0), 0),
-          pendingCount: pending.length,
-          paidCount: paid.length
+          totalGMV: enriched.reduce((sum, t) => sum + (t.sale_price || 0), 0),
+          totalCommission: enriched.reduce((sum, t) => sum + ((t.sale_price || 0) - (t.seller_payout || 0)), 0),
+          totalPending: enriched.filter(t => t.status !== 'paid').reduce((sum, t) => sum + (t.seller_payout || 0), 0),
+          totalPaid: enriched.filter(t => t.status === 'paid').reduce((sum, t) => sum + (t.seller_payout || 0), 0),
+          totalCount: enriched.length,
+          pipeline,
+          overdueShippingCount: overdueShipping.length
         }
       });
     }
@@ -605,6 +625,196 @@ export default async function handler(req, res) {
         success: true,
         transaction: data,
         notificationSent
+      });
+    }
+
+    // BULK MARK TRANSACTIONS AS PAID
+    if (action === 'bulk-mark-paid' && req.method === 'POST') {
+      const { transactionIds, sellerNote, adminNote } = req.body;
+
+      if (!transactionIds?.length) {
+        return res.status(400).json({ error: 'transactionIds array required' });
+      }
+
+      if (transactionIds.length > 50) {
+        return res.status(400).json({ error: 'Max 50 transactions at a time' });
+      }
+
+      // Only mark transactions that are in 'available' payout status
+      const { data: validTxs, error: fetchErr } = await supabase
+        .from('transactions')
+        .select('id, seller_id, product_title, seller_payout')
+        .in('id', transactionIds)
+        .eq('payout_status', 'available');
+
+      if (fetchErr) {
+        return res.status(400).json({ error: fetchErr.message });
+      }
+
+      if (!validTxs?.length) {
+        return res.status(400).json({ error: 'No transactions in "available" status to mark as paid' });
+      }
+
+      const updateData = {
+        status: 'paid',
+        payout_status: 'paid',
+        paid_at: new Date().toISOString()
+      };
+      if (sellerNote) updateData.payout_method = sellerNote;
+      if (adminNote) updateData.admin_note = adminNote;
+
+      const { error: updateErr } = await supabase
+        .from('transactions')
+        .update(updateData)
+        .in('id', validTxs.map(t => t.id));
+
+      if (updateErr) {
+        return res.status(400).json({ error: updateErr.message });
+      }
+
+      // Group by seller and send one notification per seller
+      const bySeller = {};
+      for (const tx of validTxs) {
+        if (!bySeller[tx.seller_id]) bySeller[tx.seller_id] = [];
+        bySeller[tx.seller_id].push(tx);
+      }
+
+      let notificationsSent = 0;
+      for (const [sellerId, txs] of Object.entries(bySeller)) {
+        const { data: seller } = await supabase
+          .from('sellers')
+          .select('email, name, phone')
+          .eq('id', sellerId)
+          .single();
+
+        if (!seller?.email) continue;
+
+        const totalPayout = txs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
+        const items = txs.map(t => t.product_title).join(', ');
+        const paymentMethod = sellerNote ? ` via ${sellerNote}` : '';
+
+        try {
+          await sendPayoutNotification(
+            seller.email,
+            seller.name,
+            txs.length === 1 ? txs[0].product_title : `${txs.length} items`,
+            totalPayout,
+            sellerNote
+          );
+          notificationsSent++;
+
+          // WhatsApp
+          if (seller.phone && !seller.phone.startsWith('NOPHONE') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
+            const to = seller.phone.replace(/\D/g, '');
+            await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to,
+                type: 'text',
+                text: { body: `Hi ${seller.name || 'there'}! Your payout of $${totalPayout.toFixed(2)} for ${txs.length} item(s) has been sent${paymentMethod}. Thank you for selling with The Phir Story!` }
+              })
+            });
+          }
+        } catch (e) {
+          console.error(`Bulk payout notification failed for ${seller.email}:`, e.message);
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        updated: validTxs.length,
+        skipped: transactionIds.length - validTxs.length,
+        notificationsSent
+      });
+    }
+
+    // EXPORT PAYOUTS AS CSV
+    if (action === 'export-payouts' && req.method === 'GET') {
+      const payoutStatus = req.query.payout_status || 'available';
+
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('payout_status', payoutStatus)
+        .order('created_at', { ascending: false });
+
+      // Get seller details
+      const sellerIds = [...new Set((transactions || []).map(t => t.seller_id))];
+      const { data: sellers } = await supabase
+        .from('sellers')
+        .select('id, name, email, paypal_email')
+        .in('id', sellerIds.length ? sellerIds : ['none']);
+
+      const sellersById = {};
+      for (const s of sellers || []) {
+        sellersById[s.id] = s;
+      }
+
+      // Generate CSV rows
+      const rows = (transactions || []).map(t => {
+        const seller = sellersById[t.seller_id] || {};
+        return [
+          seller.paypal_email || seller.email || '',
+          (t.seller_payout || 0).toFixed(2),
+          'USD',
+          `Payout for ${t.product_title || 'item'}`,
+          t.id,
+          seller.name || '',
+          t.product_title || '',
+          t.order_name || ''
+        ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+      });
+
+      const csv = ['Email,Amount,Currency,Note,TransactionID,SellerName,ProductTitle,OrderName', ...rows].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="payouts-${payoutStatus}-${new Date().toISOString().split('T')[0]}.csv"`);
+      return res.status(200).send(csv);
+    }
+
+    // SHIPPING ALERTS - items overdue for shipping
+    if (action === 'shipping-alerts' && req.method === 'GET') {
+      const now = new Date();
+
+      // Items where ship_by has passed and still pending
+      const { data: overdue } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('payout_status', 'pending_shipping')
+        .lt('ship_by', now.toISOString())
+        .order('ship_by', { ascending: true });
+
+      // Items with label but not shipped (label_created for 3+ days)
+      const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+      const { data: labelNotShipped } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('shipping_status', 'label_created')
+        .lt('created_at', threeDaysAgo.toISOString())
+        .order('created_at', { ascending: true });
+
+      // Get seller details
+      const allTxs = [...(overdue || []), ...(labelNotShipped || [])];
+      const sellerIds = [...new Set(allTxs.map(t => t.seller_id))];
+      const { data: sellers } = await supabase
+        .from('sellers')
+        .select('id, name, email, phone')
+        .in('id', sellerIds.length ? sellerIds : ['none']);
+
+      const sellersById = {};
+      for (const s of sellers || []) {
+        sellersById[s.id] = s;
+      }
+
+      return res.status(200).json({
+        success: true,
+        overdue: (overdue || []).map(t => ({ ...t, seller: sellersById[t.seller_id] || null })),
+        labelNotShipped: (labelNotShipped || []).map(t => ({ ...t, seller: sellersById[t.seller_id] || null }))
       });
     }
 
@@ -788,7 +998,7 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, mark-paid, test-transaction, test-notification' });
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, test-transaction, test-notification' });
 
   } catch (error) {
     console.error('Admin listings error:', error);

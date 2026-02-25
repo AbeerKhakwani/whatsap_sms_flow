@@ -23,11 +23,12 @@ export default async function handler(req, res) {
 
   try {
     // Find transactions that need shipping reminders
-    // - payout_status is pending_shipping
-    // - shipping_status is pending_label or label_created (not actually shipped)
-    // - last_reminder_sent is null OR more than 24 hours ago
-    const oneDayAgo = new Date();
-    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+    // Schedule: Day 3 (first reminder) + Day 4 (final reminder) after sale
+    // Skip concierge items (admin ships those)
+    // Max 2 reminders total
+    const now = new Date();
+    const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
     const { data: pendingShipments, error: queryError } = await supabase
       .from('transactions')
@@ -37,6 +38,9 @@ export default async function handler(req, res) {
         seller_payout,
         ship_by,
         reminder_count,
+        listing_type,
+        created_at,
+        shipping_label_url,
         seller_id,
         sellers (
           id,
@@ -47,6 +51,9 @@ export default async function handler(req, res) {
       `)
       .eq('payout_status', 'pending_shipping')
       .in('shipping_status', ['pending_label', 'label_created'])
+      .neq('listing_type', 'concierge')
+      .lt('reminder_count', 2)
+      .lt('created_at', threeDaysAgo.toISOString())
       .or(`last_reminder_sent.is.null,last_reminder_sent.lt.${oneDayAgo.toISOString()}`);
 
     if (queryError) {
@@ -83,6 +90,7 @@ export default async function handler(req, res) {
       }) : 'soon';
 
       // Determine urgency
+      const isLastReminder = (shipment.reminder_count || 0) >= 1;
       let urgencyText = '';
       if (daysRemaining !== null) {
         if (daysRemaining <= 0) {
@@ -93,6 +101,9 @@ export default async function handler(req, res) {
           urgencyText = `${daysRemaining} days remaining`;
         }
       }
+      if (isLastReminder) {
+        urgencyText = '⚠️ FINAL REMINDER - ' + urgencyText;
+      }
 
       try {
         // Send WhatsApp reminder
@@ -100,12 +111,16 @@ export default async function handler(req, res) {
           let phone = seller.phone.replace(/\D/g, '');
           if (!phone.startsWith('1') && phone.length === 10) phone = '1' + phone;
 
-          const waMessage = `📦 Shipping Reminder\n\n` +
+          const labelLine = shipment.shipping_label_url
+            ? `Your label is ready! Print it from your dashboard.`
+            : `Get your shipping label from your dashboard.`;
+          const waMessage = `📦 Shipping Reminder${isLastReminder ? ' (Final)' : ''}\n\n` +
             `Hi ${seller.name || 'there'}! Please ship "${shipment.product_title}".\n\n` +
             `Ship by: ${shipByFormatted}\n` +
             `${urgencyText}\n\n` +
+            `${labelLine}\n\n` +
             `💵 Your payout: $${shipment.seller_payout?.toFixed(0) || '0'}\n\n` +
-            `Get your label: https://sell.thephirstory.com/seller/profile?tab=sales`;
+            `Dashboard: https://sell.thephirstory.com/seller/profile?tab=sales`;
 
           await fetch(`https://graph.facebook.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
             method: 'POST',

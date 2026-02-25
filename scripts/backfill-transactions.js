@@ -161,6 +161,26 @@ async function backfillFromOrders() {
         continue;
       }
 
+      // Extract buyer address from order
+      const buyerAddress = order.shipping_address ? {
+        name: order.shipping_address.name,
+        street1: order.shipping_address.address1,
+        street2: order.shipping_address.address2 || '',
+        city: order.shipping_address.city,
+        state: order.shipping_address.province_code,
+        zip: order.shipping_address.zip,
+        country: order.shipping_address.country_code || 'US',
+        phone: order.shipping_address.phone || ''
+      } : null;
+
+      // Determine payout status based on order fulfillment
+      let payoutStatus = 'pending_shipping';
+      let shippingStatus = 'pending_label';
+      if (order.fulfillment_status === 'fulfilled') {
+        payoutStatus = 'in_transit';
+        shippingStatus = 'shipped';
+      }
+
       // Create transaction
       const transaction = {
         seller_id: seller.id,
@@ -172,7 +192,11 @@ async function backfillFromOrders() {
         seller_payout: sellerPayout,
         commission_rate: commissionRate,
         status: 'pending_payout',
+        payout_status: payoutStatus,
+        shipping_status: shippingStatus,
+        buyer_address: buyerAddress,
         customer_email: order.email,
+        ship_by: new Date(new Date(order.created_at).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         created_at: order.created_at
       };
 

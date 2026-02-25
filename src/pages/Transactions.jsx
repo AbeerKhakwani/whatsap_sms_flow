@@ -3,27 +3,38 @@ import { Link } from 'react-router-dom';
 import {
   DollarSign, Clock, CheckCircle, User, ExternalLink,
   Check, X, MessageSquare, Filter, RefreshCw, FileText,
-  Package, Truck, Printer
+  Package, Truck, Printer, Download, AlertTriangle
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState([]);
-  const [stats, setStats] = useState({ totalPending: 0, totalPaid: 0, pendingCount: 0, paidCount: 0 });
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // all, pending_shipping, in_transit, delivered, available, paid, contested
+  const [filter, setFilter] = useState('all');
 
-  // Mark paid state
-  const [markingPaid, setMarkingPaid] = useState(null); // transaction being marked (full object)
+  // Single mark paid
+  const [markingPaid, setMarkingPaid] = useState(null);
   const [sellerNote, setSellerNote] = useState('');
   const [adminNote, setAdminNote] = useState('');
   const [saving, setSaving] = useState(false);
   const sellerNoteRef = useRef(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkNote, setBulkNote] = useState('');
+  const [bulkAdminNote, setBulkAdminNote] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  // Alerts
+  const [alerts, setAlerts] = useState(null);
+
   useEffect(() => {
     fetchTransactions();
+    fetchAlerts();
   }, []);
 
   useEffect(() => {
@@ -39,7 +50,7 @@ export default function Transactions() {
       const data = await response.json();
       if (data.success) {
         setTransactions(data.transactions || []);
-        setStats(data.stats || { totalPending: 0, totalPaid: 0, pendingCount: 0, paidCount: 0 });
+        setStats(data.stats || null);
       }
     } catch (error) {
       console.error('Error fetching transactions:', error);
@@ -47,6 +58,19 @@ export default function Transactions() {
     setLoading(false);
   }
 
+  async function fetchAlerts() {
+    try {
+      const response = await fetch(`${API_URL}/api/admin-listings?action=shipping-alerts`);
+      const data = await response.json();
+      if (data.success) {
+        setAlerts(data);
+      }
+    } catch (error) {
+      console.error('Error fetching alerts:', error);
+    }
+  }
+
+  // Single mark paid
   function openMarkPaidModal(tx) {
     setMarkingPaid(tx);
     setSellerNote('');
@@ -77,35 +101,51 @@ export default function Transactions() {
 
       const data = await response.json();
       if (data.success) {
-        // Update local state
-        setTransactions(prev => prev.map(t =>
-          t.id === markingPaid.id
-            ? {
-                ...t,
-                status: 'paid',
-                payout_status: 'paid',
-                paid_at: new Date().toISOString(),
-                seller_note: sellerNote || t.seller_note,
-                admin_note: adminNote || t.admin_note
-              }
-            : t
-        ));
-        // Update stats
-        setStats(prev => ({
-          ...prev,
-          totalPending: prev.totalPending - (markingPaid.seller_payout || 0),
-          totalPaid: prev.totalPaid + (markingPaid.seller_payout || 0),
-          pendingCount: prev.pendingCount - 1,
-          paidCount: prev.paidCount + 1
-        }));
+        await fetchTransactions();
         closeMarkPaidModal();
       } else {
-        alert('Failed to mark as paid: ' + (data.error || 'Unknown error'));
+        alert('Failed: ' + (data.error || 'Unknown error'));
       }
     } catch (error) {
-      alert('Failed to mark as paid: ' + error.message);
+      alert('Failed: ' + error.message);
     }
     setSaving(false);
+  }
+
+  // Bulk mark paid
+  async function confirmBulkMarkPaid() {
+    setBulkSaving(true);
+    try {
+      const response = await fetch(`${API_URL}/api/admin-listings?action=bulk-mark-paid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionIds: [...selectedIds],
+          sellerNote: bulkNote || undefined,
+          adminNote: bulkAdminNote || undefined
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setSelectedIds(new Set());
+        setShowBulkModal(false);
+        setBulkNote('');
+        setBulkAdminNote('');
+        await fetchTransactions();
+        alert(`Marked ${data.updated} transaction(s) as paid. ${data.notificationsSent} notification(s) sent.`);
+      } else {
+        alert('Failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      alert('Failed: ' + error.message);
+    }
+    setBulkSaving(false);
+  }
+
+  // CSV export
+  function handleExport() {
+    window.open(`${API_URL}/api/admin-listings?action=export-payouts&payout_status=available`, '_blank');
   }
 
   function handleKeyDown(e) {
@@ -118,25 +158,45 @@ export default function Transactions() {
     }
   }
 
-  // Filter transactions based on payout_status (new) or status (legacy)
+  // Toggle selection
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    const availableIds = filteredTransactions
+      .filter(t => (t.payout_status || 'pending_shipping') === 'available')
+      .map(t => t.id);
+
+    if (availableIds.every(id => selectedIds.has(id))) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        availableIds.forEach(id => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        availableIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  }
+
+  // Filter
   const filteredTransactions = filter === 'all'
     ? transactions
     : transactions.filter(t => {
-        // Use payout_status if available, fallback to status for legacy
         const payoutStatus = t.payout_status || (t.status === 'paid' ? 'paid' : 'pending_shipping');
         return payoutStatus === filter;
       });
 
-  // Calculate stats by payout status
-  const payoutStats = transactions.reduce((acc, t) => {
-    const status = t.payout_status || (t.status === 'paid' ? 'paid' : 'pending_shipping');
-    if (!acc[status]) acc[status] = { count: 0, total: 0 };
-    acc[status].count++;
-    acc[status].total += t.seller_payout || 0;
-    return acc;
-  }, {});
-
-  // Helper to check if shipping is overdue
+  // Helpers
   function isShippingOverdue(tx) {
     if (!tx.ship_by) return false;
     const payoutStatus = tx.payout_status || 'pending_shipping';
@@ -144,20 +204,14 @@ export default function Transactions() {
     return new Date(tx.ship_by) < new Date();
   }
 
-  // Helper to get days until ship_by
   function getDaysUntilShipBy(tx) {
     if (!tx.ship_by) return null;
-    const shipBy = new Date(tx.ship_by);
-    const now = new Date();
-    const diffDays = Math.ceil((shipBy - now) / (1000 * 60 * 60 * 24));
-    return diffDays;
+    return Math.ceil((new Date(tx.ship_by) - new Date()) / (1000 * 60 * 60 * 24));
   }
 
-  // Format date
   function formatDate(dateStr) {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
   function formatDateTime(dateStr) {
@@ -172,10 +226,24 @@ export default function Transactions() {
       pending_label: { label: 'Awaiting Label', color: 'bg-amber-100 text-amber-700', icon: Package },
       label_created: { label: 'Label Ready', color: 'bg-blue-100 text-blue-700', icon: Printer },
       shipped: { label: 'Shipped', color: 'bg-purple-100 text-purple-700', icon: Truck },
-      delivered: { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle }
+      delivered: { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle },
+      failed: { label: 'Failed', color: 'bg-red-100 text-red-700', icon: X },
+      returned: { label: 'Returned', color: 'bg-red-100 text-red-700', icon: Package }
     };
     return badges[status] || badges.pending_label;
   }
+
+  // Pipeline config
+  const pipelineStages = [
+    { key: 'pending_shipping', label: 'Pending Ship', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
+    { key: 'in_transit', label: 'In Transit', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
+    { key: 'delivered', label: 'Delivered', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50' },
+    { key: 'available', label: 'Available', color: 'bg-green-500', textColor: 'text-green-700', bgLight: 'bg-green-50' },
+    { key: 'paid', label: 'Paid', color: 'bg-stone-400', textColor: 'text-stone-600', bgLight: 'bg-stone-50' }
+  ];
+
+  const pipeline = stats?.pipeline || {};
+  const totalAlerts = (alerts?.overdue?.length || 0) + (alerts?.labelNotShipped?.length || 0);
 
   if (loading) {
     return (
@@ -186,99 +254,185 @@ export default function Transactions() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-stone-900">Transactions</h1>
-        <button
-          onClick={fetchTransactions}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-200 transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" />
-          Refresh
-        </button>
+        <div>
+          <h1 className="text-2xl font-bold text-stone-900">Transactions</h1>
+          <p className="text-sm text-stone-500 mt-0.5">Track payouts from sale to settlement</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-stone-200 text-stone-600 rounded-lg hover:bg-stone-50 transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+          <button
+            onClick={() => { fetchTransactions(); fetchAlerts(); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-stone-100 text-stone-600 rounded-lg hover:bg-stone-200 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+        </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats Row */}
       <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white border border-stone-200 p-4 rounded-xl">
+          <div className="flex items-center gap-2 text-stone-500 text-xs uppercase tracking-wide">
+            <DollarSign className="w-3.5 h-3.5" />
+            Total GMV
+          </div>
+          <p className="text-2xl font-bold text-stone-900 mt-1">${(stats?.totalGMV || 0).toFixed(0)}</p>
+          <p className="text-xs text-stone-400 mt-0.5">{stats?.totalCount || 0} orders</p>
+        </div>
+        <div className="bg-white border border-stone-200 p-4 rounded-xl">
+          <div className="flex items-center gap-2 text-stone-500 text-xs uppercase tracking-wide">
+            <DollarSign className="w-3.5 h-3.5" />
+            Commission
+          </div>
+          <p className="text-2xl font-bold text-stone-900 mt-1">${(stats?.totalCommission || 0).toFixed(0)}</p>
+          <p className="text-xs text-stone-400 mt-0.5">
+            {stats?.totalGMV > 0 ? `${((stats.totalCommission / stats.totalGMV) * 100).toFixed(0)}% avg` : '0%'}
+          </p>
+        </div>
         <div className="bg-white border border-stone-200 p-4 rounded-xl">
           <div className="flex items-center gap-2 text-stone-500 text-xs uppercase tracking-wide">
             <Clock className="w-3.5 h-3.5" />
             Pending Payouts
           </div>
-          <p className="text-2xl font-bold text-amber-600 mt-1">${stats.totalPending.toFixed(2)}</p>
-          <p className="text-xs text-stone-400 mt-0.5">{stats.pendingCount} transaction{stats.pendingCount !== 1 ? 's' : ''}</p>
+          <p className="text-2xl font-bold text-amber-600 mt-1">${(stats?.totalPending || 0).toFixed(0)}</p>
+          <p className="text-xs text-stone-400 mt-0.5">
+            {(pipeline.pending_shipping?.count || 0) + (pipeline.in_transit?.count || 0) + (pipeline.delivered?.count || 0) + (pipeline.available?.count || 0)} items
+          </p>
         </div>
         <div className="bg-white border border-stone-200 p-4 rounded-xl">
           <div className="flex items-center gap-2 text-stone-500 text-xs uppercase tracking-wide">
             <CheckCircle className="w-3.5 h-3.5" />
             Paid Out
           </div>
-          <p className="text-2xl font-bold text-green-600 mt-1">${stats.totalPaid.toFixed(2)}</p>
-          <p className="text-xs text-stone-400 mt-0.5">{stats.paidCount} transaction{stats.paidCount !== 1 ? 's' : ''}</p>
-        </div>
-        <div className="bg-white border border-stone-200 p-4 rounded-xl">
-          <div className="flex items-center gap-2 text-stone-500 text-xs uppercase tracking-wide">
-            <DollarSign className="w-3.5 h-3.5" />
-            Total Revenue
-          </div>
-          <p className="text-2xl font-bold text-stone-900 mt-1">
-            ${transactions.reduce((sum, t) => sum + (t.sale_price || 0), 0).toFixed(2)}
-          </p>
-          <p className="text-xs text-stone-400 mt-0.5">{transactions.length} sale{transactions.length !== 1 ? 's' : ''}</p>
-        </div>
-        <div className="bg-white border border-stone-200 p-4 rounded-xl">
-          <div className="flex items-center gap-2 text-stone-500 text-xs uppercase tracking-wide">
-            <DollarSign className="w-3.5 h-3.5" />
-            Total Commission
-          </div>
-          <p className="text-2xl font-bold text-stone-900 mt-1">
-            ${transactions.reduce((sum, t) => sum + ((t.sale_price || 0) - (t.seller_payout || 0)), 0).toFixed(2)}
-          </p>
-          <p className="text-xs text-stone-400 mt-0.5">
-            {transactions.length > 0
-              ? `${((1 - transactions.reduce((sum, t) => sum + (t.seller_payout || 0), 0) / Math.max(1, transactions.reduce((sum, t) => sum + (t.sale_price || 0), 0))) * 100).toFixed(0)}% avg`
-              : '0% avg'
-            }
-          </p>
+          <p className="text-2xl font-bold text-green-600 mt-1">${(stats?.totalPaid || 0).toFixed(0)}</p>
+          <p className="text-xs text-stone-400 mt-0.5">{pipeline.paid?.count || 0} items</p>
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <Filter className="w-4 h-4 text-stone-400" />
-        <div className="flex bg-stone-100 rounded-lg p-0.5 flex-wrap">
-          {[
-            { value: 'all', label: 'All', color: '' },
-            { value: 'pending_shipping', label: 'Pending Ship', color: 'text-amber-600' },
-            { value: 'in_transit', label: 'In Transit', color: 'text-blue-600' },
-            { value: 'delivered', label: 'Delivered', color: 'text-purple-600' },
-            { value: 'available', label: 'Available', color: 'text-green-600' },
-            { value: 'paid', label: 'Paid', color: 'text-stone-600' },
-            { value: 'contested', label: 'Contested', color: 'text-red-600' }
-          ].map(option => {
-            const count = option.value === 'all' ? transactions.length : (payoutStats[option.value]?.count || 0);
+      {/* Pipeline Bar */}
+      <div className="bg-white border border-stone-200 rounded-xl p-4">
+        <div className="flex items-center gap-1 h-8 rounded-lg overflow-hidden bg-stone-100">
+          {pipelineStages.map(stage => {
+            const data = pipeline[stage.key] || { count: 0, total: 0 };
+            const totalItems = transactions.length || 1;
+            const widthPct = Math.max((data.count / totalItems) * 100, data.count > 0 ? 8 : 0);
+
+            if (data.count === 0) return null;
+
             return (
               <button
-                key={option.value}
-                onClick={() => setFilter(option.value)}
-                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  filter === option.value
-                    ? 'bg-white text-stone-900 shadow-sm font-medium'
-                    : 'text-stone-500 hover:text-stone-700'
+                key={stage.key}
+                onClick={() => setFilter(filter === stage.key ? 'all' : stage.key)}
+                className={`h-full flex items-center justify-center text-white text-xs font-medium transition-all hover:opacity-80 ${stage.color} ${
+                  filter === stage.key ? 'ring-2 ring-offset-1 ring-stone-900' : ''
                 }`}
+                style={{ width: `${widthPct}%`, minWidth: data.count > 0 ? '60px' : '0' }}
+                title={`${stage.label}: ${data.count} items, $${data.total.toFixed(0)}`}
               >
-                {option.label}
-                {count > 0 && option.value !== 'all' && (
-                  <span className={`ml-1 text-xs ${option.color}`}>({count})</span>
-                )}
+                {data.count}
               </button>
             );
           })}
         </div>
-        <span className="text-sm text-stone-400 ml-2">
-          {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
-        </span>
+        <div className="flex items-center gap-4 mt-2 text-xs text-stone-500 flex-wrap">
+          {pipelineStages.map(stage => {
+            const data = pipeline[stage.key] || { count: 0, total: 0 };
+            if (data.count === 0) return null;
+            return (
+              <button
+                key={stage.key}
+                onClick={() => setFilter(filter === stage.key ? 'all' : stage.key)}
+                className={`flex items-center gap-1.5 hover:text-stone-700 transition-colors ${
+                  filter === stage.key ? 'font-medium text-stone-900' : ''
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${stage.color}`}></span>
+                {stage.label}: {data.count} / ${data.total.toFixed(0)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Shipping Alerts Banner */}
+      {totalAlerts > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-900">
+                {alerts?.overdue?.length || 0} item{(alerts?.overdue?.length || 0) !== 1 ? 's' : ''} overdue for shipping
+                {(alerts?.labelNotShipped?.length || 0) > 0 && `, ${alerts.labelNotShipped.length} with label but not shipped`}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setFilter('pending_shipping')}
+            className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+          >
+            View
+          </button>
+        </div>
+      )}
+
+      {/* Action Bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Filter className="w-4 h-4 text-stone-400" />
+          <div className="flex bg-stone-100 rounded-lg p-0.5 flex-wrap">
+            {[
+              { value: 'all', label: 'All' },
+              { value: 'pending_shipping', label: 'Pending Ship' },
+              { value: 'in_transit', label: 'In Transit' },
+              { value: 'delivered', label: 'Delivered' },
+              { value: 'available', label: 'Available' },
+              { value: 'paid', label: 'Paid' },
+              { value: 'contested', label: 'Contested' }
+            ].map(option => {
+              const count = option.value === 'all' ? transactions.length : (pipeline[option.value]?.count || 0);
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => { setFilter(option.value); setSelectedIds(new Set()); }}
+                  className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                    filter === option.value
+                      ? 'bg-white text-stone-900 shadow-sm font-medium'
+                      : 'text-stone-500 hover:text-stone-700'
+                  }`}
+                >
+                  {option.label}
+                  {count > 0 && option.value !== 'all' && (
+                    <span className="ml-1 text-xs text-stone-400">({count})</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-sm text-stone-400 ml-2">
+            {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+
+        {/* Bulk actions */}
+        {selectedIds.size > 0 && (
+          <button
+            onClick={() => { setBulkNote(''); setBulkAdminNote(''); setShowBulkModal(true); }}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+          >
+            <DollarSign className="w-4 h-4" />
+            Bulk Mark Paid ({selectedIds.size})
+          </button>
+        )}
       </div>
 
       {/* Transactions Table */}
@@ -292,209 +446,221 @@ export default function Transactions() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-stone-100 bg-stone-50/50">
+                <th className="w-10 px-3 py-3">
+                  {filteredTransactions.some(t => (t.payout_status || 'pending_shipping') === 'available') && (
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredTransactions
+                          .filter(t => (t.payout_status || 'pending_shipping') === 'available')
+                          .every(t => selectedIds.has(t.id))
+                        && filteredTransactions.some(t => (t.payout_status || 'pending_shipping') === 'available')
+                      }
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-stone-300 text-green-600 focus:ring-green-500"
+                    />
+                  )}
+                </th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Date</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Order</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Product</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Seller</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">PayPal</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Sale</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Payout</th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Status</th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Shipping</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-stone-500 uppercase tracking-wide">Status</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100">
-              {filteredTransactions.map(tx => (
-                <tr key={tx.id} className="hover:bg-stone-50/50 transition-colors">
-                  <td className="px-4 py-3 text-sm text-stone-600">
-                    {formatDate(tx.created_at)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm font-medium text-stone-900">{tx.order_name || tx.order_id}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm text-stone-900 truncate max-w-[200px]" title={tx.product_title}>
-                      {tx.product_title}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {tx.seller ? (
-                      <Link
-                        to={`/admin/sellers/${tx.seller_id}`}
-                        className="flex items-center gap-2 hover:text-stone-700 transition-colors"
-                      >
-                        <div className="w-6 h-6 rounded-full bg-stone-200 flex items-center justify-center text-xs font-medium text-stone-600">
-                          {tx.seller.name?.charAt(0)?.toUpperCase() || '?'}
-                        </div>
-                        <div>
+              {filteredTransactions.map(tx => {
+                const payoutStatus = tx.payout_status || (tx.status === 'paid' ? 'paid' : 'pending_shipping');
+                const isAvailable = payoutStatus === 'available';
+                const overdue = isShippingOverdue(tx);
+                const daysLeft = getDaysUntilShipBy(tx);
+
+                return (
+                  <tr key={tx.id} className={`hover:bg-stone-50/50 transition-colors ${overdue ? 'bg-amber-50/50' : ''}`}>
+                    {/* Checkbox */}
+                    <td className="w-10 px-3 py-3">
+                      {isAvailable && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(tx.id)}
+                          onChange={() => toggleSelect(tx.id)}
+                          className="w-4 h-4 rounded border-stone-300 text-green-600 focus:ring-green-500"
+                        />
+                      )}
+                    </td>
+
+                    {/* Date */}
+                    <td className="px-4 py-3 text-sm text-stone-600">
+                      {formatDate(tx.created_at)}
+                    </td>
+
+                    {/* Order */}
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-medium text-stone-900">{tx.order_name || tx.order_id}</span>
+                    </td>
+
+                    {/* Product */}
+                    <td className="px-4 py-3">
+                      <div className="text-sm text-stone-900 truncate max-w-[180px]" title={tx.product_title}>
+                        {tx.product_title}
+                      </div>
+                      {tx.listing_type === 'concierge' && (
+                        <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-medium">Concierge</span>
+                      )}
+                    </td>
+
+                    {/* Seller */}
+                    <td className="px-4 py-3">
+                      {tx.seller ? (
+                        <Link
+                          to={`/admin/sellers/${tx.seller_id}`}
+                          className="flex items-center gap-2 hover:text-stone-700 transition-colors"
+                        >
+                          <div className="w-6 h-6 rounded-full bg-stone-200 flex items-center justify-center text-xs font-medium text-stone-600">
+                            {tx.seller.name?.charAt(0)?.toUpperCase() || '?'}
+                          </div>
                           <div className="text-sm font-medium text-stone-900">{tx.seller.name || 'Unknown'}</div>
-                          <div className="text-xs text-stone-400">{tx.seller.email}</div>
-                        </div>
-                      </Link>
-                    ) : (
-                      <span className="text-sm text-stone-400 italic">Unknown seller</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(2)}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(2)}</span>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {(() => {
-                      const payoutStatus = tx.payout_status || (tx.status === 'paid' ? 'paid' : 'pending_shipping');
-                      const daysLeft = getDaysUntilShipBy(tx);
-                      const overdue = isShippingOverdue(tx);
+                        </Link>
+                      ) : (
+                        <span className="text-sm text-stone-400 italic">Unknown</span>
+                      )}
+                    </td>
 
-                      const statusConfig = {
-                        pending_shipping: { label: 'Pending Ship', color: 'bg-amber-100 text-amber-700', icon: Clock },
-                        in_transit: { label: 'In Transit', color: 'bg-blue-100 text-blue-700', icon: Truck },
-                        delivered: { label: 'Delivered', color: 'bg-purple-100 text-purple-700', icon: Package },
-                        available: { label: 'Available', color: 'bg-green-100 text-green-700', icon: DollarSign },
-                        paid: { label: 'Paid Out', color: 'bg-stone-100 text-stone-700', icon: CheckCircle },
-                        contested: { label: 'Contested', color: 'bg-red-100 text-red-700', icon: X }
-                      };
+                    {/* PayPal */}
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-stone-500 truncate max-w-[120px] block" title={tx.seller?.paypal_email || tx.seller?.email}>
+                        {tx.seller?.paypal_email || tx.seller?.email || '-'}
+                      </span>
+                    </td>
 
-                      const config = statusConfig[payoutStatus] || statusConfig.pending_shipping;
-                      const IconComponent = config.icon;
+                    {/* Sale */}
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(0)}</span>
+                    </td>
 
-                      return (
-                        <div className="inline-flex flex-col items-center">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${overdue ? 'bg-red-100 text-red-700' : config.color}`}>
-                            <IconComponent className="w-3 h-3" />
-                            {overdue ? 'OVERDUE' : config.label}
-                          </span>
+                    {/* Payout */}
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(0)}</span>
+                    </td>
 
-                          {/* Ship-by countdown for pending_shipping */}
-                          {payoutStatus === 'pending_shipping' && tx.ship_by && (
-                            <span className={`text-[10px] mt-0.5 ${overdue ? 'text-red-600 font-medium' : daysLeft <= 2 ? 'text-amber-600' : 'text-stone-400'}`}>
-                              {overdue ? `${Math.abs(daysLeft)} days overdue` : daysLeft === 0 ? 'Due today' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} left`}
-                            </span>
-                          )}
-
-                          {/* Contest window countdown for delivered */}
-                          {payoutStatus === 'delivered' && tx.contest_window_ends && (
-                            <span className="text-[10px] text-purple-600 mt-0.5">
-                              Review ends {formatDate(tx.contest_window_ends)}
-                            </span>
-                          )}
-
-                          {/* Paid info */}
-                          {payoutStatus === 'paid' && tx.paid_at && (
-                            <span className="text-[10px] text-stone-400 mt-0.5">
-                              {formatDateTime(tx.paid_at)}
-                            </span>
-                          )}
-                          {payoutStatus === 'paid' && tx.seller_note && (
-                            <span className="text-[11px] text-green-600 mt-1">
-                              {tx.seller_note}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {(() => {
-                      const badge = getShippingBadge(tx.shipping_status);
-                      const IconComponent = badge.icon;
-                      return (
-                        <div className="inline-flex flex-col items-center">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${badge.color}`}>
-                            <IconComponent className="w-3 h-3" />
-                            {badge.label}
-                          </span>
-                          {tx.tracking_number && (
-                            <a
-                              href={`https://tools.usps.com/go/TrackConfirmAction?tLabels=${tx.tracking_number}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] text-blue-600 hover:underline mt-0.5"
-                            >
-                              {tx.tracking_number}
-                            </a>
-                          )}
-                          {tx.shipping_label_url && (
-                            <a
-                              href={tx.shipping_label_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] text-stone-500 hover:text-stone-700 mt-0.5 flex items-center gap-0.5"
-                            >
-                              <Printer className="w-3 h-3" />
-                              Label
-                            </a>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const payoutStatus = tx.payout_status || (tx.status === 'paid' ? 'paid' : 'pending_shipping');
-
-                      // Show "Mark Paid" for available transactions
-                      if (payoutStatus === 'available') {
+                    {/* Shipping */}
+                    <td className="px-4 py-3 text-center">
+                      {(() => {
+                        const badge = getShippingBadge(tx.shipping_status);
+                        const IconComponent = badge.icon;
                         return (
-                          <button
-                            onClick={() => openMarkPaidModal(tx)}
-                            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                          >
-                            <DollarSign className="w-3 h-3" />
-                            Mark Paid
-                          </button>
+                          <div className="inline-flex flex-col items-center">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${badge.color}`}>
+                              <IconComponent className="w-3 h-3" />
+                              {badge.label}
+                            </span>
+                            {tx.tracking_number && (
+                              <a
+                                href={`https://tools.usps.com/go/TrackConfirmAction?tLabels=${tx.tracking_number}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10px] text-blue-600 hover:underline mt-0.5"
+                              >
+                                {tx.tracking_number.slice(-8)}
+                              </a>
+                            )}
+                            {tx.shipping_label_url && !tx.tracking_number && (
+                              <a
+                                href={tx.shipping_label_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10px] text-stone-500 hover:text-stone-700 mt-0.5 flex items-center gap-0.5"
+                              >
+                                <Printer className="w-3 h-3" />
+                                Label
+                              </a>
+                            )}
+                          </div>
                         );
-                      }
+                      })()}
+                    </td>
 
-                      // Show PayPal email for paid transactions
-                      if (payoutStatus === 'paid' && tx.seller?.paypal_email) {
+                    {/* Payout Status */}
+                    <td className="px-4 py-3 text-center">
+                      {(() => {
+                        const statusConfig = {
+                          pending_shipping: { label: 'Pending Ship', color: 'bg-amber-100 text-amber-700', icon: Clock },
+                          in_transit: { label: 'In Transit', color: 'bg-blue-100 text-blue-700', icon: Truck },
+                          delivered: { label: 'Delivered', color: 'bg-purple-100 text-purple-700', icon: Package },
+                          available: { label: 'Available', color: 'bg-green-100 text-green-700', icon: DollarSign },
+                          paid: { label: 'Paid Out', color: 'bg-stone-100 text-stone-700', icon: CheckCircle },
+                          contested: { label: 'Contested', color: 'bg-red-100 text-red-700', icon: X }
+                        };
+                        const config = statusConfig[payoutStatus] || statusConfig.pending_shipping;
+                        const IconComponent = config.icon;
+
                         return (
-                          <span className="text-[10px] text-stone-400" title={tx.seller.paypal_email}>
-                            {tx.seller.paypal_email}
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${overdue ? 'bg-red-100 text-red-700' : config.color}`}>
+                              <IconComponent className="w-3 h-3" />
+                              {overdue ? 'OVERDUE' : config.label}
+                            </span>
+                            {payoutStatus === 'pending_shipping' && tx.ship_by && (
+                              <span className={`text-[10px] mt-0.5 ${overdue ? 'text-red-600 font-medium' : daysLeft <= 2 ? 'text-amber-600' : 'text-stone-400'}`}>
+                                {overdue ? `${Math.abs(daysLeft)}d overdue` : daysLeft === 0 ? 'Due today' : `${daysLeft}d left`}
+                              </span>
+                            )}
+                            {payoutStatus === 'delivered' && tx.contest_window_ends && (
+                              <span className="text-[10px] text-purple-600 mt-0.5">
+                                Review ends {formatDate(tx.contest_window_ends)}
+                              </span>
+                            )}
+                            {payoutStatus === 'paid' && tx.paid_at && (
+                              <span className="text-[10px] text-stone-400 mt-0.5">{formatDateTime(tx.paid_at)}</span>
+                            )}
+                            {payoutStatus === 'paid' && tx.seller_note && (
+                              <span className="text-[10px] text-green-600">{tx.seller_note}</span>
+                            )}
+                          </div>
                         );
-                      }
+                      })()}
+                    </td>
 
-                      // Show payout amount for other statuses
-                      if (payoutStatus !== 'paid') {
-                        return (
-                          <span className="text-[10px] text-stone-400">
-                            ${(tx.seller_payout || 0).toFixed(2)} pending
-                          </span>
-                        );
-                      }
-
-                      return null;
-                    })()}
-                  </td>
-                </tr>
-              ))}
+                    {/* Actions */}
+                    <td className="px-4 py-3">
+                      {isAvailable && (
+                        <button
+                          onClick={() => openMarkPaidModal(tx)}
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                        >
+                          <DollarSign className="w-3 h-3" />
+                          Pay
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
 
-      {/* Quick PayPal List for Pending */}
-      {stats.pendingCount > 0 && filter !== 'paid' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <h3 className="text-sm font-medium text-amber-800 mb-2 flex items-center gap-2">
-            <MessageSquare className="w-4 h-4" />
-            Quick Payout List
+      {/* Quick PayPal List for Available */}
+      {(pipeline.available?.count || 0) > 0 && (filter === 'all' || filter === 'available') && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+          <h3 className="text-sm font-medium text-green-800 mb-2 flex items-center gap-2">
+            <DollarSign className="w-4 h-4" />
+            Ready for Payout
           </h3>
           <div className="space-y-1">
             {Object.entries(
               transactions
-                .filter(t => t.status === 'pending_payout' && t.seller)
+                .filter(t => t.payout_status === 'available' && t.seller)
                 .reduce((acc, t) => {
                   const key = t.seller?.paypal_email || t.seller?.email || 'no-email';
                   if (!acc[key]) {
-                    acc[key] = {
-                      email: t.seller?.paypal_email || t.seller?.email,
-                      name: t.seller?.name,
-                      total: 0,
-                      count: 0
-                    };
+                    acc[key] = { email: t.seller?.paypal_email || t.seller?.email, name: t.seller?.name, total: 0, count: 0 };
                   }
                   acc[key].total += t.seller_payout || 0;
                   acc[key].count++;
@@ -502,11 +668,11 @@ export default function Transactions() {
                 }, {})
             ).map(([key, data]) => (
               <div key={key} className="flex items-center justify-between text-sm">
-                <span className="text-amber-900">
-                  {data.name || 'Unknown'} — <span className="text-amber-700">{data.email}</span>
+                <span className="text-green-900">
+                  {data.name || 'Unknown'} — <span className="text-green-700 font-mono text-xs">{data.email}</span>
                 </span>
-                <span className="font-medium text-amber-900">
-                  ${data.total.toFixed(2)} <span className="text-amber-600 text-xs">({data.count} item{data.count !== 1 ? 's' : ''})</span>
+                <span className="font-medium text-green-900">
+                  ${data.total.toFixed(2)} <span className="text-green-600 text-xs">({data.count} item{data.count !== 1 ? 's' : ''})</span>
                 </span>
               </div>
             ))}
@@ -514,7 +680,7 @@ export default function Transactions() {
         </div>
       )}
 
-      {/* Mark Paid Confirmation Modal */}
+      {/* Single Mark Paid Modal */}
       {showConfirmModal && markingPaid && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onKeyDown={handleKeyDown}>
@@ -522,9 +688,7 @@ export default function Transactions() {
               <h3 className="text-lg font-semibold text-stone-900">Confirm Payout</h3>
               <p className="text-sm text-stone-500 mt-1">Mark this transaction as paid</p>
             </div>
-
             <div className="p-5 space-y-4">
-              {/* Transaction Details */}
               <div className="bg-stone-50 rounded-lg p-4">
                 <div className="text-sm text-stone-600">{markingPaid.product_title}</div>
                 <div className="flex items-center justify-between mt-2">
@@ -538,8 +702,6 @@ export default function Transactions() {
                   </div>
                 )}
               </div>
-
-              {/* Seller Note */}
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1.5">
                   Payment Method <span className="text-stone-400 font-normal">(shown to seller)</span>
@@ -554,8 +716,6 @@ export default function Transactions() {
                   className="w-full px-4 py-3 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
                 />
               </div>
-
-              {/* Admin Note */}
               <div>
                 <label className="block text-sm font-medium text-stone-700 mb-1.5">
                   Admin Note <span className="text-stone-400 font-normal">(internal only)</span>
@@ -564,13 +724,12 @@ export default function Transactions() {
                   value={adminNote}
                   onChange={(e) => setAdminNote(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="e.g., PayPal transaction ID, reference number..."
+                  placeholder="e.g., PayPal transaction ID..."
                   rows={2}
                   className="w-full px-4 py-3 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-400 bg-stone-50"
                 />
               </div>
             </div>
-
             <div className="px-5 py-4 border-t border-stone-200 flex gap-3">
               <button
                 onClick={closeMarkPaidModal}
@@ -593,6 +752,100 @@ export default function Transactions() {
                   <>
                     <CheckCircle className="w-4 h-4" />
                     Confirm Paid
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Mark Paid Modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="px-5 py-4 border-b border-stone-200">
+              <h3 className="text-lg font-semibold text-stone-900">Bulk Mark as Paid</h3>
+              <p className="text-sm text-stone-500 mt-1">{selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''} selected</p>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Summary by seller */}
+              <div className="bg-stone-50 rounded-lg p-4 max-h-48 overflow-y-auto">
+                <div className="text-xs font-medium text-stone-500 uppercase mb-2">Payout Summary</div>
+                {Object.entries(
+                  transactions
+                    .filter(t => selectedIds.has(t.id))
+                    .reduce((acc, t) => {
+                      const name = t.seller?.name || 'Unknown';
+                      if (!acc[name]) acc[name] = { email: t.seller?.paypal_email || t.seller?.email || '', total: 0, items: [] };
+                      acc[name].total += t.seller_payout || 0;
+                      acc[name].items.push(t.product_title);
+                      return acc;
+                    }, {})
+                ).map(([name, data]) => (
+                  <div key={name} className="flex items-center justify-between py-1 text-sm">
+                    <div>
+                      <span className="font-medium text-stone-900">{name}</span>
+                      <span className="text-stone-400 text-xs ml-2">{data.email}</span>
+                    </div>
+                    <span className="font-bold text-green-600">${data.total.toFixed(2)}</span>
+                  </div>
+                ))}
+                <div className="border-t border-stone-200 mt-2 pt-2 flex justify-between text-sm font-bold">
+                  <span>Total</span>
+                  <span className="text-green-600">
+                    ${transactions.filter(t => selectedIds.has(t.id)).reduce((sum, t) => sum + (t.seller_payout || 0), 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                  Payment Method <span className="text-stone-400 font-normal">(shown to sellers)</span>
+                </label>
+                <input
+                  type="text"
+                  value={bulkNote}
+                  onChange={(e) => setBulkNote(e.target.value)}
+                  placeholder="e.g., PayPal Batch, Bank Transfer..."
+                  className="w-full px-4 py-3 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                  Admin Note <span className="text-stone-400 font-normal">(internal)</span>
+                </label>
+                <input
+                  type="text"
+                  value={bulkAdminNote}
+                  onChange={(e) => setBulkAdminNote(e.target.value)}
+                  placeholder="e.g., Batch #1234..."
+                  className="w-full px-4 py-3 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-400 bg-stone-50"
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-stone-200 flex gap-3">
+              <button
+                onClick={() => setShowBulkModal(false)}
+                disabled={bulkSaving}
+                className="flex-1 px-4 py-2.5 border border-stone-300 text-stone-700 rounded-lg hover:bg-stone-50 text-sm font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBulkMarkPaid}
+                disabled={bulkSaving}
+                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {bulkSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    Confirm & Notify ({selectedIds.size})
                   </>
                 )}
               </button>

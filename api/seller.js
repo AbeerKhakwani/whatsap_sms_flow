@@ -619,6 +619,7 @@ export default async function handler(req, res) {
           let sellerId = null;
           let sellerPayout = null;
           let commissionRate = 18;
+          let listingType = 'regular';
 
           try {
             const metafieldsRes = await fetch(
@@ -632,6 +633,7 @@ export default async function handler(req, res) {
               if (mf.namespace === 'seller' && mf.key === 'id') sellerId = mf.value;
               if (mf.namespace === 'pricing' && mf.key === 'seller_payout') sellerPayout = parseFloat(mf.value);
               if (mf.namespace === 'pricing' && mf.key === 'commission_rate') commissionRate = parseFloat(mf.value);
+              if (mf.namespace === 'seller' && mf.key === 'listing_type') listingType = mf.value || 'regular';
             }
           } catch (e) {
             console.log('Could not fetch metafields:', e.message);
@@ -689,6 +691,9 @@ export default async function handler(req, res) {
           } : null;
 
           // Create transaction record
+          const now = new Date();
+          const shipBy = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days to ship
+
           const transaction = {
             seller_id: seller.id,
             order_id: order.id.toString(),
@@ -699,10 +704,13 @@ export default async function handler(req, res) {
             seller_payout: sellerPayout,
             commission_rate: commissionRate,
             status: 'pending_payout',
+            payout_status: 'pending_shipping',
             shipping_status: 'pending_label',
+            listing_type: listingType,
             customer_email: order.email,
             buyer_address: buyerAddress,
-            created_at: new Date().toISOString()
+            ship_by: shipBy.toISOString(),
+            created_at: now.toISOString()
           };
 
           const { data: newTx, error: txError } = await supabase
@@ -718,18 +726,65 @@ export default async function handler(req, res) {
 
           console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
 
-          // NOTE: Labels are generated ON-DEMAND when seller clicks "Get Label"
-          // This avoids paying for labels that are never used
+          // Auto-generate shipping label (seller → buyer)
+          let labelData = null;
+          const isConcierge = newTx.listing_type === 'concierge';
 
-          // Send notifications to seller
+          if (!isConcierge && buyerAddress && seller.shipping_address) {
+            try {
+              const sellerForShipping = {
+                name: seller.shipping_address.full_name || seller.name,
+                address_line1: seller.shipping_address.street_address,
+                address_line2: seller.shipping_address.apartment || '',
+                city: seller.shipping_address.city,
+                state: seller.shipping_address.state,
+                zip: seller.shipping_address.postal_code,
+                phone: seller.phone || ''
+              };
+
+              console.log(`   📦 Auto-generating label: ${sellerForShipping.name} → ${buyerAddress.name}`);
+              labelData = await getShippingLabel(sellerForShipping, item.title, buyerAddress);
+
+              if (labelData?.labelUrl) {
+                await supabase.from('transactions').update({
+                  shipping_label_url: labelData.labelUrl,
+                  tracking_number: labelData.trackingNumber,
+                  carrier: labelData.carrier || 'USPS',
+                  shipping_service: labelData.service,
+                  shipping_status: 'label_created',
+                  shipment_provider_id: labelData.shipmentId || labelData.transactionId || null
+                }).eq('id', newTx.id);
+
+                // Fulfill Shopify order so buyer gets tracking email
+                try {
+                  await fulfillOrder(order.id.toString(), {
+                    tracking_number: labelData.trackingNumber,
+                    carrier: labelData.carrier || 'USPS'
+                  });
+                  console.log(`   📦 Shopify fulfilled — buyer gets tracking email`);
+                } catch (fulfillErr) {
+                  console.error(`   📦 Shopify fulfillment failed (non-blocking):`, fulfillErr.message);
+                }
+              }
+            } catch (labelErr) {
+              console.error(`   📦 Auto-label failed (non-blocking):`, labelErr.message);
+              // Sale still processes — seller can get label manually from dashboard
+            }
+          } else if (isConcierge) {
+            console.log(`   📦 Concierge item — skipping label generation`);
+          } else if (!seller.shipping_address) {
+            console.log(`   📦 Seller has no shipping address — label skipped`);
+          }
+
+          // Send notifications to seller (includes label if generated)
           await notifySellerOfSale(seller, {
             productTitle: item.title || product.title,
             salePrice,
             sellerPayout,
-            labelResult: null  // No auto-generated label
+            labelResult: labelData
           });
 
-          results.push({ sellerId: seller.id, productId, payout: sellerPayout, hasLabel: !!labelResult?.labelUrl });
+          results.push({ sellerId: seller.id, productId, payout: sellerPayout, hasLabel: !!labelData?.labelUrl });
 
         } catch (err) {
           console.error(`   Error processing product ${productId}:`, err.message);
@@ -896,6 +951,73 @@ export default async function handler(req, res) {
           error: err.message
         });
       }
+    }
+
+    // SHIPPO TRACKING WEBHOOK — auto-updates transaction shipping/payout status
+    // Register at: portal.goshippo.com/api-config/webhooks → track_updated event
+    if (action === 'shippo-webhook' && req.method === 'POST') {
+      const { event, data } = req.body || {};
+
+      // Shippo sends track_updated events with tracking data
+      if (event !== 'track_updated' || !data) {
+        return res.status(200).json({ ok: true });
+      }
+
+      const trackingNumber = data.tracking_number;
+      const status = data.tracking_status?.status;
+
+      if (!trackingNumber || !status) {
+        return res.status(200).json({ ok: true });
+      }
+
+      // Find transaction by tracking number
+      const { data: tx } = await supabase
+        .from('transactions')
+        .select('id, payout_status')
+        .eq('tracking_number', trackingNumber)
+        .maybeSingle();
+
+      if (!tx) {
+        console.log(`📦 Shippo webhook: unknown tracking ${trackingNumber}`);
+        return res.status(200).json({ ok: true });
+      }
+
+      // Don't update if already paid
+      if (tx.payout_status === 'paid') {
+        return res.status(200).json({ ok: true });
+      }
+
+      // Map Shippo tracking status → our status
+      // Shippo statuses: PRE_TRANSIT, TRANSIT, DELIVERED, RETURNED, FAILURE, UNKNOWN
+      const updates = {};
+      switch (status) {
+        case 'PRE_TRANSIT':
+          updates.shipping_status = 'label_created';
+          break;
+        case 'TRANSIT':
+          updates.shipping_status = 'shipped';
+          updates.payout_status = 'in_transit';
+          break;
+        case 'DELIVERED':
+          updates.shipping_status = 'delivered';
+          updates.payout_status = 'delivered';
+          updates.delivered_at = new Date().toISOString();
+          updates.contest_window_ends = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+          break;
+        case 'FAILURE':
+          updates.shipping_status = 'failed';
+          break;
+        case 'RETURNED':
+          updates.shipping_status = 'returned';
+          break;
+        default:
+          return res.status(200).json({ ok: true });
+      }
+
+      await supabase.from('transactions').update(updates).eq('id', tx.id);
+      console.log(`📦 Shippo tracking update: ${trackingNumber} → ${status}`);
+
+      return res.status(200).json({ ok: true });
     }
 
     // GET TRANSACTIONS for seller
@@ -1313,22 +1435,25 @@ export default async function handler(req, res) {
 
       try {
         console.log('🧪 Testing shipping label generation...');
-        console.log('   Easyship key:', process.env.EASYSHIP_API_KEY ? 'Set' : 'Not set');
+        console.log('   Shippo key:', process.env.SHIPPO_API_KEY ? 'Set' : 'Not set');
         console.log('   EasyPost key:', process.env.EASYPOST_API_KEY ? 'Set' : 'Not set');
+        console.log('   Easyship key:', process.env.EASYSHIP_API_KEY ? 'Set' : 'Not set');
 
         const result = await getShippingLabel(testSeller, 'Test Product - Blue Dress', testBuyer);
 
+        const provider = process.env.SHIPPO_API_KEY ? 'Shippo' : process.env.EASYPOST_API_KEY ? 'EasyPost' : process.env.EASYSHIP_API_KEY ? 'Easyship' : 'Manual';
         return res.status(200).json({
           success: true,
           message: 'Shipping test completed',
           result,
-          provider: process.env.EASYSHIP_API_KEY ? 'Easyship' : (process.env.EASYPOST_API_KEY ? 'EasyPost' : 'Manual')
+          provider
         });
       } catch (err) {
+        const provider = process.env.SHIPPO_API_KEY ? 'Shippo' : process.env.EASYPOST_API_KEY ? 'EasyPost' : process.env.EASYSHIP_API_KEY ? 'Easyship' : 'Manual';
         return res.status(500).json({
           success: false,
           error: err.message,
-          provider: process.env.EASYSHIP_API_KEY ? 'Easyship' : (process.env.EASYPOST_API_KEY ? 'EasyPost' : 'Manual')
+          provider
         });
       }
     }
