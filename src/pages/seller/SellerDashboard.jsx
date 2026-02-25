@@ -813,17 +813,37 @@ export default function SellerDashboard() {
                     )}
                   </div>
                   <div className="text-right flex flex-col items-end gap-1">
-                    {/* Always show Sold tag */}
-                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                      Sold
-                    </span>
+                    {/* Shipping status + action */}
+                    {item.shippingStatus === 'pending_label' && item.status !== 'SOLD_WITH_PAYOUT' ? (
+                      <a
+                        href="/seller/profile?tab=sales"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                      >
+                        📦 Get Shipping Label
+                      </a>
+                    ) : item.shippingStatus === 'label_created' ? (
+                      <a
+                        href="/seller/profile?tab=sales"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
+                      >
+                        🏷️ Label Ready — Print & Ship
+                      </a>
+                    ) : item.shippingStatus === 'shipped' ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        📦 Shipped
+                      </span>
+                    ) : item.shippingStatus === 'delivered' ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        ✅ Delivered
+                      </span>
+                    ) : null}
                     {/* Show Paid Out or Pending Payout tag */}
                     {item.status === 'SOLD_WITH_PAYOUT' ? (
                       <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                         Paid Out
                       </span>
                     ) : (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
                         Pending Payout
                       </span>
                     )}
