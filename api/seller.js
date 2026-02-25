@@ -1409,8 +1409,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // TEST SHIPPING - Test Easyship/EasyPost integration
-    if (action === 'test-shipping' && req.method === 'POST') {
+    // TEST SHIPPING - Test Shippo/EasyPost/Easyship integration
+    if (action === 'test-shipping') {
       const { getShippingLabel } = await import('../lib/shipping.js');
 
       // Test addresses
