@@ -435,6 +435,16 @@ export default function SellerProfile() {
         return;
       }
 
+      if (data.needsBuyerAddress) {
+        setError('Buyer address not found for this order. Please contact support.');
+        return;
+      }
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to generate shipping label');
+        return;
+      }
+
       if (data.labelUrl) {
         // Update the sold product in state with new label info
         setSoldProducts(prev => prev.map(p =>
@@ -442,15 +452,17 @@ export default function SellerProfile() {
             ? { ...p, shippingLabelUrl: data.labelUrl, trackingNumber: data.trackingNumber, shippingStatus: 'label_created' }
             : p
         ));
-        showSuccess('Shipping label sent to your email!');
+        showSuccess('Shipping label generated! Opening in new tab...');
         // Open the label in a new tab
         window.open(data.labelUrl, '_blank');
       } else if (data.message) {
         // Instructions only
         showSuccess('Shipping instructions sent to your email!');
+      } else {
+        setError(data.error || 'Could not generate label. Please try again.');
       }
     } catch (err) {
-      setError('Failed to request shipping label');
+      setError('Failed to request shipping label. Check your connection and try again.');
     } finally {
       setRequestingLabel(null);
     }
@@ -664,13 +676,15 @@ export default function SellerProfile() {
                         </span>
                       )}
 
-                      {/* Shipping Status */}
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${shippingBadge.color}`}>
-                        {shippingBadge.label}
-                      </span>
+                      {/* Shipping Status — hide "Ship Now" for already-paid-out items (legacy) */}
+                      {!(item.status === 'SOLD_WITH_PAYOUT' && shippingBadge.label === 'Ship Now') && (
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${shippingBadge.color}`}>
+                          {shippingBadge.label}
+                        </span>
+                      )}
 
-                      {/* Shipping Actions Dropdown - hide for fulfilled orders without labels */}
-                      {!isFulfilledWithoutLabel && (
+                      {/* Shipping Actions Dropdown - hide for fulfilled orders without labels and paid-out items */}
+                      {!isFulfilledWithoutLabel && item.status !== 'SOLD_WITH_PAYOUT' && (
                         <div className="relative">
                           <button
                             onClick={() => setOpenShippingMenu(openShippingMenu === item.id ? null : item.id)}
@@ -733,8 +747,8 @@ export default function SellerProfile() {
                     </div>
                   </div>
 
-                  {/* Shipping Call to Action for items without label (only if not already fulfilled) */}
-                  {!hasLabel && item.shippingStatus === 'pending_label' && !item.fulfilledAt && (
+                  {/* Shipping Call to Action for items without label (only if not already fulfilled or paid out) */}
+                  {!hasLabel && item.shippingStatus === 'pending_label' && !item.fulfilledAt && item.status !== 'SOLD_WITH_PAYOUT' && (
                     <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
