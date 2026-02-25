@@ -726,65 +726,14 @@ export default async function handler(req, res) {
 
           console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
 
-          // Auto-generate shipping label (seller → buyer)
-          let labelData = null;
-          const isConcierge = newTx.listing_type === 'concierge';
-
-          if (!isConcierge && buyerAddress && seller.shipping_address) {
-            try {
-              const sellerForShipping = {
-                name: seller.shipping_address.full_name || seller.name,
-                address_line1: seller.shipping_address.street_address,
-                address_line2: seller.shipping_address.apartment || '',
-                city: seller.shipping_address.city,
-                state: seller.shipping_address.state,
-                zip: seller.shipping_address.postal_code,
-                phone: seller.phone || ''
-              };
-
-              console.log(`   📦 Auto-generating label: ${sellerForShipping.name} → ${buyerAddress.name}`);
-              labelData = await getShippingLabel(sellerForShipping, item.title, buyerAddress);
-
-              if (labelData?.labelUrl) {
-                await supabase.from('transactions').update({
-                  shipping_label_url: labelData.labelUrl,
-                  tracking_number: labelData.trackingNumber,
-                  carrier: labelData.carrier || 'USPS',
-                  shipping_service: labelData.service,
-                  shipping_status: 'label_created',
-                  shipment_provider_id: labelData.shipmentId || labelData.transactionId || null
-                }).eq('id', newTx.id);
-
-                // Fulfill Shopify order so buyer gets tracking email
-                try {
-                  await fulfillOrder(order.id.toString(), {
-                    tracking_number: labelData.trackingNumber,
-                    carrier: labelData.carrier || 'USPS'
-                  });
-                  console.log(`   📦 Shopify fulfilled — buyer gets tracking email`);
-                } catch (fulfillErr) {
-                  console.error(`   📦 Shopify fulfillment failed (non-blocking):`, fulfillErr.message);
-                }
-              }
-            } catch (labelErr) {
-              console.error(`   📦 Auto-label failed (non-blocking):`, labelErr.message);
-              // Sale still processes — seller can get label manually from dashboard
-            }
-          } else if (isConcierge) {
-            console.log(`   📦 Concierge item — skipping label generation`);
-          } else if (!seller.shipping_address) {
-            console.log(`   📦 Seller has no shipping address — label skipped`);
-          }
-
-          // Send notifications to seller (includes label if generated)
+          // Notify seller — they'll generate their shipping label from the dashboard
           await notifySellerOfSale(seller, {
             productTitle: item.title || product.title,
             salePrice,
-            sellerPayout,
-            labelResult: labelData
+            sellerPayout
           });
 
-          results.push({ sellerId: seller.id, productId, payout: sellerPayout, hasLabel: !!labelData?.labelUrl });
+          results.push({ sellerId: seller.id, productId, payout: sellerPayout });
 
         } catch (err) {
           console.error(`   Error processing product ${productId}:`, err.message);
@@ -1468,7 +1417,7 @@ export default async function handler(req, res) {
 
 // Send sale notification to seller via WhatsApp and email
 async function notifySellerOfSale(seller, saleInfo) {
-  const { productTitle, salePrice, sellerPayout, labelResult } = saleInfo;
+  const { productTitle, salePrice, sellerPayout } = saleInfo;
   const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
   const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const RESEND_KEY = process.env.RESEND_API_KEY;
@@ -1476,8 +1425,8 @@ async function notifySellerOfSale(seller, saleInfo) {
   const waMessage = `🎉 Your item sold!\n\n` +
     `"${productTitle}" just sold for $${salePrice.toFixed(0)}!\n\n` +
     `💵 Your payout: $${sellerPayout.toFixed(0)}\n\n` +
-    `We'll process your payment within 7 days.\n\n` +
-    `View your dashboard: https://sell.thephirstory.com`;
+    `📦 Next step: Go to your dashboard to get your shipping label and ship your item.\n\n` +
+    `Dashboard: https://sell.thephirstory.com/seller/profile?tab=sales`;
 
   // Send WhatsApp
   if (seller.phone && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
@@ -1533,28 +1482,11 @@ async function notifySellerOfSale(seller, saleInfo) {
     const emailSubject = `🎉 Your item sold! - ${productTitle}`;
     const emailContent = `${productTitle} sold for $${salePrice.toFixed(2)}. Your payout: $${sellerPayout.toFixed(2)}`;
 
-    // Build shipping section if label is available
-    const shippingSection = labelResult?.labelUrl ? `
-      <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
-        <h2 style="margin: 0 0 12px 0; color: #166534;">📦 Ship Your Item</h2>
-        <p style="margin: 0 0 8px 0;">Your prepaid shipping label is ready!</p>
-        <p style="margin: 0 0 8px 0;"><strong>Tracking:</strong> ${labelResult.trackingNumber}</p>
-        <p style="margin: 0 0 16px 0;"><strong>Service:</strong> ${labelResult.carrier} ${labelResult.service}</p>
-        <a href="${labelResult.labelUrl}" style="display: inline-block; background: #166534; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin-right: 8px;">Print Label</a>
-      </div>
-      <div style="background: #fefce8; border: 1px solid #fde047; border-radius: 8px; padding: 16px; margin: 20px 0;">
-        <h3 style="margin: 0 0 8px 0; color: #854d0e;">📝 How to Ship</h3>
-        <ol style="margin: 0; padding-left: 20px; color: #713f12;">
-          <li>Print the shipping label above</li>
-          <li>Pack your item securely in a box or padded envelope</li>
-          <li>Attach the label to the outside of the package</li>
-          <li>Drop off at any USPS location or schedule a pickup</li>
-        </ol>
-      </div>
-    ` : `
+    const shippingSection = `
       <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <h3 style="margin: 0 0 8px 0; color: #9a3412;">📦 Next Step: Ship Your Item</h3>
-        <p style="margin: 0; color: #c2410c;">Visit your dashboard to get your shipping label and instructions.</p>
+        <p style="margin: 0 0 12px 0; color: #c2410c;">Go to <strong>My Sales</strong> in your dashboard to get your shipping label.</p>
+        <a href="https://sell.thephirstory.com/seller/profile?tab=sales" style="display: inline-block; background: #C91A2B; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px;">Get Shipping Label</a>
       </div>
     `;
 
