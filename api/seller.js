@@ -639,13 +639,10 @@ export default async function handler(req, res) {
             console.log('Could not fetch metafields:', e.message);
           }
 
-          if (!sellerEmail && !sellerId) {
-            console.log(`   Skipping product ${productId} - no seller info`);
-            continue;
-          }
-
-          // Find seller in database
+          // Find seller in database (if we have info)
           let seller = null;
+          let sellerMissing = false;
+
           if (sellerId) {
             const { data } = await supabase.from('sellers').select('*').eq('id', sellerId).single();
             seller = data;
@@ -655,8 +652,8 @@ export default async function handler(req, res) {
           }
 
           if (!seller) {
-            console.log(`   Seller not found for product ${productId}`);
-            continue;
+            sellerMissing = true;
+            console.log(`   ⚠️ Seller not found for product ${productId} — creating transaction anyway`);
           }
 
           // Check if transaction already exists
@@ -695,7 +692,7 @@ export default async function handler(req, res) {
           const shipBy = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days to ship
 
           const transaction = {
-            seller_id: seller.id,
+            seller_id: seller?.id || null,
             order_id: order.id.toString(),
             order_name: order.name,
             product_id: productId.toString(),
@@ -704,13 +701,16 @@ export default async function handler(req, res) {
             seller_payout: sellerPayout,
             commission_rate: commissionRate,
             status: 'pending_payout',
-            payout_status: 'pending_shipping',
-            shipping_status: 'pending_label',
+            payout_status: sellerMissing ? 'needs_attention' : 'pending_shipping',
+            shipping_status: sellerMissing ? 'needs_attention' : 'pending_label',
             listing_type: listingType,
             customer_email: order.email,
             buyer_address: buyerAddress,
             ship_by: shipBy.toISOString(),
-            created_at: now.toISOString()
+            created_at: now.toISOString(),
+            admin_note: sellerMissing
+              ? `⚠️ SELLER NOT FOUND — email: ${sellerEmail || 'none'}, id: ${sellerId || 'none'}`
+              : null
           };
 
           const { data: newTx, error: txError } = await supabase
@@ -724,16 +724,21 @@ export default async function handler(req, res) {
             continue;
           }
 
-          console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
+          if (sellerMissing) {
+            console.log(`   ⚠️ Created transaction for ${item.title} | SELLER MISSING | Payout: $${sellerPayout}`);
+            results.push({ sellerId: null, productId, payout: sellerPayout, sellerMissing: true });
+          } else {
+            console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
 
-          // Notify seller — they'll generate their shipping label from the dashboard
-          await notifySellerOfSale(seller, {
-            productTitle: item.title || product.title,
-            salePrice,
-            sellerPayout
-          });
+            // Notify seller — they'll generate their shipping label from the dashboard
+            await notifySellerOfSale(seller, {
+              productTitle: item.title || product.title,
+              salePrice,
+              sellerPayout
+            });
 
-          results.push({ sellerId: seller.id, productId, payout: sellerPayout });
+            results.push({ sellerId: seller.id, productId, payout: sellerPayout });
+          }
 
         } catch (err) {
           console.error(`   Error processing product ${productId}:`, err.message);

@@ -460,8 +460,8 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: error.message });
       }
 
-      // Get seller details for each transaction
-      const sellerIds = [...new Set((transactions || []).map(t => t.seller_id))];
+      // Get seller details for each transaction (filter nulls for needs_attention txns)
+      const sellerIds = [...new Set((transactions || []).map(t => t.seller_id).filter(Boolean))];
       const { data: sellers } = await supabase
         .from('sellers')
         .select('id, name, email, phone, paypal_email')
@@ -479,7 +479,7 @@ export default async function handler(req, res) {
 
       // Pipeline stats (counts + totals by payout_status)
       const pipeline = {};
-      for (const status of ['pending_shipping', 'in_transit', 'delivered', 'available', 'paid', 'contested']) {
+      for (const status of ['needs_attention', 'pending_shipping', 'in_transit', 'delivered', 'available', 'paid', 'contested']) {
         const items = enriched.filter(t => t.payout_status === status);
         pipeline[status] = {
           count: items.length,

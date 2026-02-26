@@ -228,13 +228,15 @@ export default function Transactions() {
       shipped: { label: 'Shipped', color: 'bg-purple-100 text-purple-700', icon: Truck },
       delivered: { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle },
       failed: { label: 'Failed', color: 'bg-red-100 text-red-700', icon: X },
-      returned: { label: 'Returned', color: 'bg-red-100 text-red-700', icon: Package }
+      returned: { label: 'Returned', color: 'bg-red-100 text-red-700', icon: Package },
+      needs_attention: { label: '⚠️ Needs Attention', color: 'bg-red-100 text-red-700', icon: AlertTriangle }
     };
     return badges[status] || badges.pending_label;
   }
 
   // Pipeline config
   const pipelineStages = [
+    { key: 'needs_attention', label: '⚠️ Attention', color: 'bg-red-500', textColor: 'text-red-700', bgLight: 'bg-red-50' },
     { key: 'pending_shipping', label: 'Pending Ship', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
     { key: 'in_transit', label: 'In Transit', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
     { key: 'delivered', label: 'Delivered', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50' },
@@ -243,6 +245,7 @@ export default function Transactions() {
   ];
 
   const pipeline = stats?.pipeline || {};
+  const needsAttentionCount = pipeline.needs_attention?.count || 0;
   const totalAlerts = (alerts?.overdue?.length || 0) + (alerts?.labelNotShipped?.length || 0);
 
   if (loading) {
@@ -364,6 +367,29 @@ export default function Transactions() {
         </div>
       </div>
 
+      {/* Needs Attention Banner */}
+      {needsAttentionCount > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-red-900">
+                {needsAttentionCount} transaction{needsAttentionCount !== 1 ? 's' : ''} with missing seller — needs manual review
+              </p>
+              <p className="text-xs text-red-600 mt-0.5">
+                Items sold but seller wasn't found in Shopify metafields or database
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setFilter('needs_attention')}
+            className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Review
+          </button>
+        </div>
+      )}
+
       {/* Shipping Alerts Banner */}
       {totalAlerts > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
@@ -392,6 +418,7 @@ export default function Transactions() {
           <div className="flex bg-stone-100 rounded-lg p-0.5 flex-wrap">
             {[
               { value: 'all', label: 'All' },
+              { value: 'needs_attention', label: '⚠️ Attention' },
               { value: 'pending_shipping', label: 'Pending Ship' },
               { value: 'in_transit', label: 'In Transit' },
               { value: 'delivered', label: 'Delivered' },
@@ -481,7 +508,7 @@ export default function Transactions() {
                 const daysLeft = getDaysUntilShipBy(tx);
 
                 return (
-                  <tr key={tx.id} className={`hover:bg-stone-50/50 transition-colors ${overdue ? 'bg-amber-50/50' : ''}`}>
+                  <tr key={tx.id} className={`hover:bg-stone-50/50 transition-colors ${payoutStatus === 'needs_attention' ? 'bg-red-50/50' : overdue ? 'bg-amber-50/50' : ''}`}>
                     {/* Checkbox */}
                     <td className="w-10 px-3 py-3">
                       {isAvailable && (
@@ -526,6 +553,20 @@ export default function Transactions() {
                           </div>
                           <div className="text-sm font-medium text-stone-900">{tx.seller.name || 'Unknown'}</div>
                         </Link>
+                      ) : payoutStatus === 'needs_attention' ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center">
+                            <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                          </div>
+                          <div>
+                            <div className="text-sm font-medium text-red-700">Seller Not Found</div>
+                            {tx.admin_note && (
+                              <div className="text-[10px] text-red-500 max-w-[160px] truncate" title={tx.admin_note}>
+                                {tx.admin_note.replace('⚠️ SELLER NOT FOUND — ', '')}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         <span className="text-sm text-stone-400 italic">Unknown</span>
                       )}
@@ -594,7 +635,8 @@ export default function Transactions() {
                           delivered: { label: 'Delivered', color: 'bg-purple-100 text-purple-700', icon: Package },
                           available: { label: 'Available', color: 'bg-green-100 text-green-700', icon: DollarSign },
                           paid: { label: 'Paid Out', color: 'bg-stone-100 text-stone-700', icon: CheckCircle },
-                          contested: { label: 'Contested', color: 'bg-red-100 text-red-700', icon: X }
+                          contested: { label: 'Contested', color: 'bg-red-100 text-red-700', icon: X },
+                          needs_attention: { label: 'Seller Not Found', color: 'bg-red-100 text-red-700', icon: AlertTriangle }
                         };
                         const config = statusConfig[payoutStatus] || statusConfig.pending_shipping;
                         const IconComponent = config.icon;
