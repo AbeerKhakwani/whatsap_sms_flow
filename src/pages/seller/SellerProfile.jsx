@@ -608,6 +608,22 @@ export default function SellerProfile() {
           <span className="text-sm text-gray-500">{soldProducts.length} items sold</span>
         </div>
 
+        {/* Error/Success Messages */}
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {success && (
+          <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm flex items-center gap-2">
+            <Check className="w-4 h-4" />
+            {success}
+          </div>
+        )}
+
         {soldProducts.length === 0 ? (
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
             <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
