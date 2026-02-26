@@ -750,6 +750,7 @@ export default async function handler(req, res) {
     // GET SHIPPING LABEL or instructions
     if (action === 'shipping-label' && req.method === 'POST') {
       const { email, productId, productTitle, transactionId, buyerAddress } = req.body;
+      console.log('📦 shipping-label request:', { email, productTitle, transactionId, hasBuyerAddress: !!buyerAddress });
 
       if (!email) {
         return res.status(400).json({ error: 'Email required' });
@@ -784,6 +785,7 @@ export default async function handler(req, res) {
           zip: seller.shipping_address.postal_code,
           phone: seller.phone || ''
         };
+        console.log('📦 Seller address:', sellerForShipping);
 
         // Get buyer address from transaction if not provided
         let finalBuyerAddress = buyerAddress;
@@ -794,7 +796,7 @@ export default async function handler(req, res) {
             .eq('id', transactionId)
             .single();
 
-          console.log('📦 Transaction lookup:', { transactionId, tx, txError });
+          console.log('📦 Transaction lookup:', { transactionId, tx: tx ? { buyer_address: !!tx.buyer_address, order_id: tx.order_id } : null, txError });
           finalBuyerAddress = tx?.buyer_address;
 
           // If no buyer address stored, try to get from Shopify order
