@@ -701,68 +701,67 @@ export default function SellerProfile() {
                         </span>
                       )}
 
-                      {/* Shipping Actions Dropdown - hide for fulfilled orders without labels and paid-out items */}
+                      {/* Shipping Actions — inline buttons when label exists, dropdown for get label */}
                       {!isFulfilledWithoutLabel && item.status !== 'SOLD_WITH_PAYOUT' && (
-                        <div className="relative">
-                          <button
-                            onClick={() => setOpenShippingMenu(openShippingMenu === item.id ? null : item.id)}
-                            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
-                          >
-                            <MoreVertical className="w-5 h-5" />
-                          </button>
+                        hasLabel ? (
+                          <div className="flex flex-col items-end gap-1.5">
+                            <a
+                              href={item.shippingLabelUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              Print Label
+                            </a>
+                            {item.trackingNumber && (
+                              <a
+                                href={`https://tools.usps.com/go/TrackConfirmAction?tLabels=${item.trackingNumber}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition"
+                              >
+                                <Truck className="w-3.5 h-3.5" />
+                                Track Shipment
+                              </a>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <button
+                              onClick={() => setOpenShippingMenu(openShippingMenu === item.id ? null : item.id)}
+                              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                            >
+                              <MoreVertical className="w-5 h-5" />
+                            </button>
 
-                          {openShippingMenu === item.id && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-40"
-                              onClick={() => setOpenShippingMenu(null)}
-                            />
-                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                              {hasLabel ? (
-                                <>
-                                  <a
-                                    href={item.shippingLabelUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                    onClick={() => setOpenShippingMenu(null)}
+                            {openShippingMenu === item.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-40"
+                                onClick={() => setOpenShippingMenu(null)}
+                              />
+                              <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                                {isAddressValid() ? (
+                                  <button
+                                    onClick={() => handleRequestLabel(item)}
+                                    disabled={requestingLabel === item.id}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full disabled:opacity-50"
                                   >
-                                    <Printer className="w-4 h-4" />
-                                    Print Label
-                                  </a>
-                                  {item.trackingNumber && (
-                                    <a
-                                      href={`https://tools.usps.com/go/TrackConfirmAction?tLabels=${item.trackingNumber}`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                                      onClick={() => setOpenShippingMenu(null)}
-                                    >
-                                      <Truck className="w-4 h-4" />
-                                      Track Package
-                                    </a>
-                                  )}
-                                </>
-                              ) : isAddressValid() ? (
-                                <button
-                                  onClick={() => handleRequestLabel(item)}
-                                  disabled={requestingLabel === item.id}
-                                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full disabled:opacity-50"
-                                >
-                                  {requestingLabel === item.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Printer className="w-4 h-4" />
-                                  )}
-                                  Get Shipping Label
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => { setOpenShippingMenu(null); setActiveTab('profile'); }}
-                                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full"
-                                >
-                                  <MapPin className="w-4 h-4" />
-                                  Add Address First
+                                    {requestingLabel === item.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Printer className="w-4 h-4" />
+                                    )}
+                                    Get Shipping Label
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => { setOpenShippingMenu(null); setActiveTab('profile'); }}
+                                    className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full"
+                                  >
+                                    <MapPin className="w-4 h-4" />
+                                    Add Address First
                                 </button>
                               )}
                             </div>
