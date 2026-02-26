@@ -611,20 +611,20 @@ export default async function handler(req, res) {
         if (!productId) continue;
 
         try {
-          // Get product with metafields
-          const product = await getProduct(productId);
-
-          // Fetch metafields separately
+          // Fetch metafields for seller info + pricing
           let sellerEmail = null;
           let sellerId = null;
           let sellerPayout = null;
           let commissionRate = 18;
           let listingType = 'regular';
+          let productTitle = item.title; // Use line_item title (always available from webhook)
 
           try {
+            const shopifyUrl = process.env.VITE_SHOPIFY_STORE_URL || process.env.SHOPIFY_STORE_URL;
+            const shopifyToken = process.env.VITE_SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_ACCESS_TOKEN;
             const metafieldsRes = await fetch(
-              `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${productId}/metafields.json`,
-              { headers: { 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN } }
+              `https://${shopifyUrl}/admin/api/2024-10/products/${productId}/metafields.json`,
+              { headers: { 'X-Shopify-Access-Token': shopifyToken } }
             );
             const { metafields } = await metafieldsRes.json();
 
@@ -696,7 +696,7 @@ export default async function handler(req, res) {
             order_id: order.id.toString(),
             order_name: order.name,
             product_id: productId.toString(),
-            product_title: item.title || product.title,
+            product_title: productTitle,
             sale_price: salePrice,
             seller_payout: sellerPayout,
             commission_rate: commissionRate,
@@ -732,7 +732,7 @@ export default async function handler(req, res) {
 
             // Notify seller — they'll generate their shipping label from the dashboard
             await notifySellerOfSale(seller, {
-              productTitle: item.title || product.title,
+              productTitle,
               salePrice,
               sellerPayout
             });
