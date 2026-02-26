@@ -741,7 +741,7 @@ export default function SellerProfile() {
                                     </a>
                                   )}
                                 </>
-                              ) : (
+                              ) : isAddressValid() ? (
                                 <button
                                   onClick={() => handleRequestLabel(item)}
                                   disabled={requestingLabel === item.id}
@@ -754,6 +754,14 @@ export default function SellerProfile() {
                                   )}
                                   Get Shipping Label
                                 </button>
+                              ) : (
+                                <button
+                                  onClick={() => { setOpenShippingMenu(null); setActiveTab('profile'); }}
+                                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 w-full"
+                                >
+                                  <MapPin className="w-4 h-4" />
+                                  Add Address First
+                                </button>
                               )}
                             </div>
                           </>
@@ -765,28 +773,46 @@ export default function SellerProfile() {
 
                   {/* Shipping Call to Action for items without label (only if not already fulfilled or paid out) */}
                   {!hasLabel && item.shippingStatus === 'pending_label' && !item.fulfilledAt && item.status !== 'SOLD_WITH_PAYOUT' && (
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Package className="w-4 h-4 text-amber-600" />
-                          <span className="text-sm text-amber-800">Ship this item to get paid</span>
+                    isAddressValid() ? (
+                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Package className="w-4 h-4 text-amber-600" />
+                            <span className="text-sm text-amber-800">Ship this item to get paid</span>
+                          </div>
+                          <button
+                            onClick={() => handleRequestLabel(item)}
+                            disabled={requestingLabel === item.id}
+                            className="px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {requestingLabel === item.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Printer className="w-4 h-4" />
+                                Get Label
+                              </>
+                            )}
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleRequestLabel(item)}
-                          disabled={requestingLabel === item.id}
-                          className="px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
-                        >
-                          {requestingLabel === item.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <Printer className="w-4 h-4" />
-                              Get Label
-                            </>
-                          )}
-                        </button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-blue-600" />
+                            <span className="text-sm text-blue-800">Add your shipping address to get a label</span>
+                          </div>
+                          <button
+                            onClick={() => setActiveTab('profile')}
+                            className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                          >
+                            <MapPin className="w-4 h-4" />
+                            Add Address
+                          </button>
+                        </div>
+                      </div>
+                    )
                   )}
                 </div>
               );
