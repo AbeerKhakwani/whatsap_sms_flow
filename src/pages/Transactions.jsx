@@ -824,7 +824,7 @@ export default function Transactions() {
                 ) : (
                   <>
                     <CheckCircle className="w-4 h-4" />
-                    {skipNotification ? 'Mark Paid (Silent)' : 'Confirm Paid'}
+                    {skipNotification ? 'Mark Paid (Silent)' : 'Confirm & Notify'}
                   </>
                 )}
               </button>

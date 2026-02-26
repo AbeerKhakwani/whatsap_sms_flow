@@ -660,29 +660,6 @@ export default function SellerDashboard() {
           )}
         </div>
 
-        {/* Payouts Summary */}
-        <div className="mt-8 bg-white rounded-lg border border-gray-200">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <h2 className="font-medium text-gray-900">Earnings Summary</h2>
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <p className="text-sm text-gray-500">Total Earned</p>
-                <p className="text-3xl font-bold text-gray-900">${seller?.totalEarnings?.toFixed(0) || 0}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Pending Payout</p>
-                <p className="text-3xl font-bold text-amber-600">${seller?.pendingPayout?.toFixed(0) || 0}</p>
-              </div>
-            </div>
-            {seller?.pendingPayout > 0 && (
-              <p className="text-sm text-gray-500 mt-4">
-                Pending payouts will be processed within 7 business days after the item is marked as sold.
-              </p>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Edit Modal */}
