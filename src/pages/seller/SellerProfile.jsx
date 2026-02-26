@@ -445,6 +445,11 @@ export default function SellerProfile() {
         return;
       }
 
+      if (data.labelFailed) {
+        setError(`Label generation failed: ${data.labelError || 'Unknown error'}. Please try again.`);
+        return;
+      }
+
       if (data.labelUrl) {
         // Update the sold product in state with new label info
         setSoldProducts(prev => prev.map(p =>
@@ -455,11 +460,8 @@ export default function SellerProfile() {
         showSuccess('Shipping label generated! Opening in new tab...');
         // Open the label in a new tab
         window.open(data.labelUrl, '_blank');
-      } else if (data.message) {
-        // Instructions only
-        showSuccess('Shipping instructions sent to your email!');
       } else {
-        setError(data.error || 'Could not generate label. Please try again.');
+        setError(data.error || data.labelError || 'Could not generate label. Please try again.');
       }
     } catch (err) {
       setError('Failed to request shipping label. Check your connection and try again.');

@@ -891,13 +891,11 @@ export default async function handler(req, res) {
           ...labelResult
         });
       } catch (err) {
-        // Fall back to instructions if label generation fails
+        console.error('📦 Label generation failed:', err.message);
         return res.status(200).json({
-          success: true,
-          type: 'instructions',
-          message: getShippingInstructions(seller, productTitle),
-          warehouseAddress: WAREHOUSE_ADDRESS,
-          error: err.message
+          success: false,
+          labelFailed: true,
+          labelError: err.message
         });
       }
     }
