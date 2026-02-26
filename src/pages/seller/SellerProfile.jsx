@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
-import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User, DollarSign, Check, ChevronRight, Package, Tag, CreditCard, Lock, Printer, Truck, ExternalLink, MoreVertical } from 'lucide-react';
+import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User, DollarSign, Check, ChevronRight, Package, Tag, CreditCard, Lock, Printer, Truck, ExternalLink, MoreVertical, CheckCircle, Clock, RotateCcw, XCircle, Camera, Trash2 } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
+import SellerLayout from './SellerLayout';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Tab configuration
 const TABS = [
+  { id: 'listings', label: 'My Listings', icon: Package, comingSoon: false },
   { id: 'sales', label: 'My Sales', icon: Package, comingSoon: false },
   { id: 'balance', label: 'My Balance', icon: DollarSign, comingSoon: false },
   { id: 'offers', label: 'My Offers', icon: Tag, comingSoon: true },
@@ -29,6 +31,18 @@ export default function SellerProfile() {
     paid: 0,
     contested: 0
   });
+
+  // Listings state (for My Listings tab)
+  const [listings, setListings] = useState([]);
+  const [listingsStats, setListingsStats] = useState({ total: 0, draft: 0, active: 0, sold: 0 });
+  const [editingListing, setEditingListing] = useState(null);
+  const [editForm, setEditForm] = useState({ title: '', price: '', condition: '', description: '' });
+  const [existingImages, setExistingImages] = useState([]);
+  const [imagesToDelete, setImagesToDelete] = useState([]);
+  const [newPhotos, setNewPhotos] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+  const [togglingStatus, setTogglingStatus] = useState(null);
 
   // Shipping action states
   const [openShippingMenu, setOpenShippingMenu] = useState(null);
@@ -111,11 +125,13 @@ export default function SellerProfile() {
           }
         }
 
-        // Fetch sold products and balance breakdown
+        // Fetch sold products, listings, and balance breakdown
         const sellerRes = await fetch(`/api/seller?action=listings&email=${encodeURIComponent(storedEmail)}`);
         const sellerData = await sellerRes.json();
         if (sellerData.success) {
           setSoldProducts(sellerData.soldProducts || []);
+          setListings(sellerData.listings || []);
+          setListingsStats(sellerData.stats || { total: 0, draft: 0, active: 0, sold: 0 });
           if (sellerData.balanceBreakdown) {
             setBalanceBreakdown(sellerData.balanceBreakdown);
           }
@@ -601,6 +617,394 @@ export default function SellerProfile() {
     );
   }
 
+  // ============ LISTINGS HELPERS ============
+  function openEditModal(listing) {
+    setEditingListing(listing);
+    setEditForm({
+      title: listing.title,
+      price: listing.price,
+      condition: listing.condition || '',
+      description: listing.description || ''
+    });
+    setExistingImages(listing.images || []);
+    setImagesToDelete([]);
+    setNewPhotos([]);
+    setUploadProgress('');
+  }
+
+  function markImageForDeletion(image) {
+    setImagesToDelete(prev => [...prev, image]);
+    setExistingImages(prev => prev.filter(img => img.id !== image.id));
+  }
+
+  function removeNewPhoto(index) {
+    setNewPhotos(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function handlePhotoSelect(e) {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setNewPhotos(prev => [...prev, {
+          preview: ev.target.result,
+          file,
+          base64: ev.target.result.split(',')[1]
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleSaveEdit() {
+    if (!editingListing) return;
+    setSaving(true);
+    try {
+      const response = await fetch('/api/seller?action=update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: seller?.email,
+          productId: editingListing.id,
+          title: editForm.title,
+          price: parseFloat(editForm.price),
+          condition: editForm.condition,
+          description: editForm.description
+        })
+      });
+      const data = await response.json();
+      if (!data.success) {
+        alert(data.error || 'Failed to save');
+        setSaving(false);
+        return;
+      }
+
+      if (imagesToDelete.length > 0) {
+        for (let i = 0; i < imagesToDelete.length; i++) {
+          setUploadProgress(`Removing photo ${i + 1} of ${imagesToDelete.length}...`);
+          try {
+            await fetch('/api/product-image?action=delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ productId: editingListing.id, imageId: imagesToDelete[i].id })
+            });
+          } catch (err) { console.error('Photo delete error:', err); }
+        }
+      }
+
+      const finalImages = [...existingImages];
+      if (newPhotos.length > 0) {
+        for (let i = 0; i < newPhotos.length; i++) {
+          setUploadProgress(`Uploading photo ${i + 1} of ${newPhotos.length}...`);
+          try {
+            const photoRes = await fetch('/api/product-image?action=add', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                productId: editingListing.id,
+                base64: newPhotos[i].base64,
+                filename: newPhotos[i].file?.name || `photo-${i + 1}.jpg`
+              })
+            });
+            const photoData = await photoRes.json();
+            if (photoData.success) {
+              finalImages.push({ id: photoData.imageId, src: newPhotos[i].preview });
+            }
+          } catch (err) { console.error('Photo upload error:', err); }
+        }
+      }
+
+      setListings(prev =>
+        prev.map(l =>
+          l.id === editingListing.id
+            ? { ...l, title: editForm.title, price: parseFloat(editForm.price), condition: editForm.condition, description: editForm.description, images: finalImages, image: finalImages[0]?.src || l.image }
+            : l
+        )
+      );
+      setEditingListing(null);
+      setUploadProgress('');
+    } catch (error) {
+      alert('Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleListingStatus(listing) {
+    const isDelisted = listing.tags?.includes('delisted');
+    const action = isDelisted ? 'relist' : 'delist';
+    setTogglingStatus(listing.id);
+    try {
+      const response = await fetch(`/api/seller?action=${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: seller?.email, productId: listing.id })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setListings(prev =>
+          prev.map(l => {
+            if (l.id !== listing.id) return l;
+            const newTags = action === 'delist'
+              ? [...(l.tags || []), 'delisted']
+              : (l.tags || []).filter(t => t !== 'delisted');
+            return { ...l, status: data.status, tags: newTags };
+          })
+        );
+        if (action === 'delist') {
+          setListingsStats(prev => ({ ...prev, active: prev.active - 1, draft: prev.draft + 1 }));
+        } else {
+          setListingsStats(prev => ({ ...prev, active: prev.active + 1, draft: prev.draft - 1 }));
+        }
+      } else {
+        alert(`Failed to ${action}: ` + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      alert(`Failed to ${action}: ` + error.message);
+    } finally {
+      setTogglingStatus(null);
+    }
+  }
+
+  function getStatusBadge(listing) {
+    if (listing.isSold) {
+      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Sold</span>;
+    }
+    if (listing.tags?.includes('delisted')) {
+      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">Delisted</span>;
+    }
+    const styles = { draft: 'bg-yellow-100 text-yellow-800', active: 'bg-green-100 text-green-800', archived: 'bg-gray-100 text-gray-800' };
+    const labels = { draft: 'Pending Review', active: 'Live', archived: 'Archived' };
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[listing.status] || styles.draft}`}>
+        {labels[listing.status] || listing.status}
+      </span>
+    );
+  }
+
+  // ============ RENDER MY LISTINGS TAB ============
+  function renderListingsContent() {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-gray-900">My Listings</h2>
+          <Link
+            to="/submit"
+            className="flex items-center gap-2 bg-[#C91A2B] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#a81523] transition"
+          >
+            <Plus className="w-4 h-4" />
+            Submit Listing
+          </Link>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg border border-gray-200 p-3">
+            <p className="text-2xl font-semibold text-gray-900">{listingsStats.total}</p>
+            <p className="text-sm text-gray-500">Total</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-3">
+            <p className="text-2xl font-semibold text-yellow-600">{listingsStats.draft}</p>
+            <p className="text-sm text-gray-500">Pending</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-3">
+            <p className="text-2xl font-semibold text-green-600">{listingsStats.active}</p>
+            <p className="text-sm text-gray-500">Live</p>
+          </div>
+          <div className="bg-white rounded-lg border border-gray-200 p-3">
+            <p className="text-2xl font-semibold text-blue-600">{listingsStats.sold}</p>
+            <p className="text-sm text-gray-500">Sold</p>
+          </div>
+        </div>
+
+        {/* Listings */}
+        <div className="bg-white rounded-lg border border-gray-200">
+          {listings.length === 0 ? (
+            <div className="p-12 text-center">
+              <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
+              <p className="text-gray-500 mb-4">No listings yet</p>
+              <Link
+                to="/submit"
+                className="inline-flex items-center gap-2 bg-[#C91A2B] text-white px-4 py-2 rounded-lg hover:bg-[#a81523] transition"
+              >
+                Submit your first listing
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {listings.map((listing) => (
+                <div key={listing.id} className="p-4 flex items-start gap-4 hover:bg-gray-50">
+                  {/* Image */}
+                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                    {listing.image ? (
+                      <img src={getThumbnail(listing.image)} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-400">
+                        <Package className="w-6 h-6" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-medium text-gray-900 truncate">{listing.title}</h3>
+                      {getStatusBadge(listing)}
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <span>{listing.size}</span>
+                      <span>{listing.condition}</span>
+                    </div>
+                    {listing.isSold ? (
+                      <div className="mt-2 flex items-center gap-4 text-xs">
+                        <span className="text-gray-500">Sold for: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span></span>
+                        <span className="text-green-600 font-medium">You earned: ${listing.sellerPayout?.toFixed(2)}</span>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+                        <span className="text-gray-500">Listed: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span></span>
+                        <span className="text-gray-500">You'll get: <span className="font-medium text-green-600">${listing.sellerPayout?.toFixed(2)}</span></span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    {!listing.isSold && (
+                      <button onClick={() => openEditModal(listing)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition">
+                        <Edit2 className="w-3.5 h-3.5" />
+                        Edit
+                      </button>
+                    )}
+                    {!listing.isSold && listing.status === 'active' && !listing.tags?.includes('delisted') && (
+                      <button
+                        onClick={() => toggleListingStatus(listing)}
+                        disabled={togglingStatus === listing.id}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition text-gray-600 hover:text-red-600 hover:bg-red-50 ${togglingStatus === listing.id ? 'opacity-50' : ''}`}
+                      >
+                        {togglingStatus === listing.id ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                        Delist
+                      </button>
+                    )}
+                    {!listing.isSold && listing.tags?.includes('delisted') && (
+                      <button
+                        onClick={() => toggleListingStatus(listing)}
+                        disabled={togglingStatus === listing.id}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition text-gray-600 hover:text-green-600 hover:bg-green-50 ${togglingStatus === listing.id ? 'opacity-50' : ''}`}
+                      >
+                        {togglingStatus === listing.id ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                        Relist
+                      </button>
+                    )}
+                    {listing.status === 'active' && listing.handle && (
+                      <a href={`https://thephirstory.com/products/${listing.handle}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        View
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ============ RENDER EDIT LISTING MODAL ============
+  function renderEditModal() {
+    if (!editingListing) return null;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-lg my-8">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <h3 className="font-medium text-gray-900">Edit Listing</h3>
+            <button onClick={() => setEditingListing(null)} className="text-gray-400 hover:text-gray-600">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              <input type="text" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Price ($)</label>
+                <input type="number" value={editForm.price} onChange={(e) => setEditForm({ ...editForm, price: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
+                <select value={editForm.condition} onChange={(e) => setEditForm({ ...editForm, condition: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none">
+                  <option value="">Select...</option>
+                  <option value="New with tags">New with tags</option>
+                  <option value="Like new">Like new</option>
+                  <option value="Excellent">Excellent</option>
+                  <option value="Good">Good</option>
+                  <option value="Fair">Fair</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none resize-none" placeholder="Describe your item..." />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Photos</label>
+              {existingImages.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-2">Current photos (tap to remove):</p>
+                  <div className="flex flex-wrap gap-2">
+                    {existingImages.map((img, idx) => (
+                      <div key={img.id || idx} className="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100 group">
+                        <img src={img.src || img} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                        <button type="button" onClick={() => markImageForDeletion(img)} className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                          <Trash2 className="w-5 h-5 text-white" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {newPhotos.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-2">New photos to add:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {newPhotos.map((photo, idx) => (
+                      <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100">
+                        <img src={photo.preview} alt={`New ${idx + 1}`} className="w-full h-full object-cover" />
+                        <button type="button" onClick={() => removeNewPhoto(idx)} className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <input type="file" accept="image/*" multiple onChange={handlePhotoSelect} className="hidden" id="edit-photo-input" />
+              <button type="button" onClick={() => document.getElementById('edit-photo-input')?.click()} className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-green-500 hover:text-green-600 transition">
+                <Camera className="w-5 h-5" />
+                <span>Add More Photos</span>
+              </button>
+            </div>
+          </div>
+          <div className="px-4 py-3 border-t border-gray-200">
+            {uploadProgress && <p className="text-sm text-green-600 mb-2 text-center">{uploadProgress}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setEditingListing(null)} disabled={saving} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition">Cancel</button>
+              <button onClick={handleSaveEdit} disabled={saving} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition">
+                {saving ? (uploadProgress || 'Saving...') : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ============ RENDER MY SALES TAB ============
   function renderSalesContent() {
     return (
@@ -768,6 +1172,7 @@ export default function SellerProfile() {
                           </>
                           )}
                         </div>
+                      )
                       )}
                     </div>
                   </div>
@@ -1343,6 +1748,8 @@ export default function SellerProfile() {
   // ============ RENDER CONTENT FOR ACTIVE TAB ============
   function renderTabContent() {
     switch (activeTab) {
+      case 'listings':
+        return renderListingsContent();
       case 'sales':
         return renderSalesContent();
       case 'balance':
@@ -1358,96 +1765,25 @@ export default function SellerProfile() {
 
   // ============ MAIN RENDER ============
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 md:pb-0">
-      {/* Header - Desktop */}
-      <header className="bg-white border-b border-gray-200 hidden md:block sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link to="/">
-              <img src="/logo.svg" alt="The Phir Story" className="h-8" />
-            </Link>
-            <span className="text-sm text-gray-500 border-l border-gray-200 pl-3">My Account</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              to="/submit"
-              className="flex items-center gap-2 bg-[#C91A2B] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#a81523] transition"
-            >
-              <Plus className="w-4 h-4" />
-              Submit Listing
-            </Link>
-            <Link
-              to="/"
-              className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition"
-            >
-              <Home className="w-4 h-4" />
-              <span className="text-sm">Dashboard</span>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Header - Mobile */}
-      <header className="bg-white border-b border-gray-200 md:hidden sticky top-0 z-40">
-        <div className="px-4 py-3 flex items-center justify-between">
-          {isMobile && activeTab ? (
-            <button
-              onClick={handleBackToMenu}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg -ml-2"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          ) : (
-            <Link to="/" className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg -ml-2">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-          )}
-          <span className="font-medium text-gray-900">
-            {activeTab ? TABS.find(t => t.id === activeTab)?.label || 'My Account' : 'My Account'}
-          </span>
-          <div className="w-10" />
-        </div>
-      </header>
-
-      {/* Bottom Nav - Mobile */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 safe-area-pb">
-        <div className="flex items-center justify-around py-2">
-          <Link to="/" className="flex flex-col items-center py-2 px-4 text-gray-500">
-            <Home className="w-6 h-6" />
-            <span className="text-xs mt-1">Home</span>
-          </Link>
-          <Link
-            to="/submit"
-            className="flex flex-col items-center py-2 px-6 -mt-4 bg-[#C91A2B] text-white rounded-full shadow-lg"
-          >
-            <Plus className="w-7 h-7" />
-            <span className="text-xs mt-0.5 font-medium">Sell</span>
-          </Link>
-          <div className="flex flex-col items-center py-2 px-4 text-[#C91A2B]">
-            <User className="w-6 h-6" />
-            <span className="text-xs mt-1 font-medium">Profile</span>
-          </div>
-        </div>
-      </nav>
-
-      {/* Desktop Layout */}
-      <div className="hidden md:flex">
-        {renderSidebar()}
-        <main className="flex-1 p-6 max-w-4xl">
-          {renderTabContent()}
-        </main>
+    <SellerLayout seller={seller} email={seller?.email} onLogout={handleLogout}>
+      {/* Desktop: render tab content directly (sidebar is in SellerLayout) */}
+      <div className="hidden md:block">
+        {renderTabContent()}
       </div>
 
-      {/* Mobile Layout */}
+      {/* Mobile: show tab menu or tab content */}
       <div className="md:hidden">
         {!activeTab ? (
           renderMobileMenu()
         ) : (
-          <main className="p-4">
+          <div className="p-4">
             {renderTabContent()}
-          </main>
+          </div>
         )}
       </div>
-    </div>
+
+      {/* Edit Listing Modal (for My Listings tab) */}
+      {renderEditModal()}
+    </SellerLayout>
   );
 }

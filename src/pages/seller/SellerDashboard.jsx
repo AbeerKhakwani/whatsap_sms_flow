@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2 } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
+import SellerLayout from './SellerLayout';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -25,7 +26,6 @@ export default function SellerDashboard() {
 
   // Address modal state
   const [showAddressModal, setShowAddressModal] = useState(false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
   const [shippingAddress, setShippingAddress] = useState({
     full_name: '',
@@ -375,194 +375,8 @@ export default function SellerDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 md:pb-0">
-      {/* Header - Desktop */}
-      <header className="bg-white border-b border-gray-200 hidden md:block">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="The Phir Story" className="h-8" />
-            <span className="text-sm text-gray-500 border-l border-gray-200 pl-3">Seller Portal</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              to="/submit"
-              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition"
-            >
-              <Plus className="w-4 h-4" />
-              Submit Listing
-            </Link>
-
-            {/* Profile Dropdown - Desktop */}
-            <div className="relative">
-              <button
-                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                className="flex items-center gap-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition"
-              >
-                <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                  <User className="w-4 h-4" />
-                </div>
-                <span className="text-sm max-w-[150px] truncate">{email}</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {showProfileMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowProfileMenu(false)}
-                  />
-                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
-                    <div className="px-4 py-2 border-b border-gray-100">
-                      <p className="text-sm font-medium text-gray-900 truncate">{email}</p>
-                      <p className="text-xs text-gray-500">Seller Account</p>
-                    </div>
-                    <Link
-                      to="/seller/profile?tab=sales"
-                      className="flex items-center justify-between px-4 py-3 text-gray-700 hover:bg-gray-50"
-                      onClick={() => setShowProfileMenu(false)}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Package className="w-4 h-4" />
-                        <span>My Sales</span>
-                      </div>
-                    </Link>
-                    <div
-                      className="flex items-center justify-between px-4 py-3 text-gray-400 cursor-not-allowed"
-                    >
-                      <div className="flex items-center gap-3">
-                        <DollarSign className="w-4 h-4" />
-                        <span>My Balance</span>
-                      </div>
-                      <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
-                    </div>
-                    <div
-                      className="flex items-center justify-between px-4 py-3 text-gray-400 cursor-not-allowed"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Clock className="w-4 h-4" />
-                        <span>My Offers</span>
-                      </div>
-                      <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
-                    </div>
-                    <Link
-                      to="/seller/profile?tab=profile"
-                      className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
-                      onClick={() => setShowProfileMenu(false)}
-                    >
-                      <User className="w-4 h-4" />
-                      <span>Profile Settings</span>
-                    </Link>
-                    <div className="border-t border-gray-100" />
-                    <button
-                      onClick={() => { setShowProfileMenu(false); handleLogout(); }}
-                      className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Header - Mobile */}
-      <header className="bg-white border-b border-gray-200 md:hidden sticky top-0 z-40">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="w-10" /> {/* Spacer for centering */}
-          <img src="/logo.svg" alt="The Phir Story" className="h-7" />
-          <div className="relative">
-            <button
-              onClick={() => setShowProfileMenu(!showProfileMenu)}
-              className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200"
-            >
-              <User className="w-5 h-5" />
-            </button>
-
-            {/* Profile Dropdown */}
-            {showProfileMenu && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setShowProfileMenu(false)}
-                />
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                  <Link
-                    to="/seller/profile?tab=sales"
-                    className="flex items-center justify-between px-4 py-3 text-gray-700 hover:bg-gray-50"
-                    onClick={() => setShowProfileMenu(false)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Package className="w-4 h-4" />
-                      <span>My Sales</span>
-                    </div>
-                  </Link>
-                  <div className="flex items-center justify-between px-4 py-3 text-gray-400">
-                    <div className="flex items-center gap-3">
-                      <DollarSign className="w-4 h-4" />
-                      <span>My Balance</span>
-                    </div>
-                    <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
-                  </div>
-                  <div className="flex items-center justify-between px-4 py-3 text-gray-400">
-                    <div className="flex items-center gap-3">
-                      <Clock className="w-4 h-4" />
-                      <span>My Offers</span>
-                    </div>
-                    <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">Soon</span>
-                  </div>
-                  <Link
-                    to="/seller/profile?tab=profile"
-                    className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
-                    onClick={() => setShowProfileMenu(false)}
-                  >
-                    <User className="w-4 h-4" />
-                    <span>Profile Settings</span>
-                  </Link>
-                  <div className="border-t border-gray-100" />
-                  <button
-                    onClick={() => { setShowProfileMenu(false); handleLogout(); }}
-                    className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    <span>Sign Out</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Bottom Nav - Mobile */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 safe-area-pb">
-        <div className="flex items-center justify-around py-2">
-          <Link to="/" className="flex flex-col items-center py-2 px-4 text-[#C91A2B]">
-            <Home className="w-6 h-6" />
-            <span className="text-xs mt-1 font-medium">Home</span>
-          </Link>
-          <Link
-            to="/submit"
-            className="flex flex-col items-center py-2 px-6 -mt-4 bg-[#C91A2B] text-white rounded-full shadow-lg"
-          >
-            <Plus className="w-7 h-7" />
-            <span className="text-xs mt-0.5 font-medium">Sell</span>
-          </Link>
-          <Link
-            to="/seller/profile"
-            className="flex flex-col items-center py-2 px-4 text-gray-500"
-          >
-            <User className="w-6 h-6" />
-            <span className="text-xs mt-1">Profile</span>
-          </Link>
-        </div>
-      </nav>
-
-      <main className="max-w-6xl mx-auto px-4 py-8">
+    <SellerLayout seller={seller} email={email} onLogout={handleLogout}>
+      <div className="px-4 py-8 md:px-0 md:py-0">
         {/* Earnings Banner */}
         {seller && (
           <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4 mb-6">
@@ -633,76 +447,76 @@ export default function SellerDashboard() {
           </div>
         </div>
 
-        {/* Sold Items Section */}
-        {soldProducts.length > 0 && (
-          <div className="mb-8 bg-white rounded-lg border border-gray-200">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-medium text-gray-900">Items Sold</h2>
-              <span className="text-sm text-gray-500">{soldProducts.length} items</span>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {soldProducts.map((item, idx) => (
-                <div key={idx} className="p-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-medium text-gray-900">{item.title}</h3>
-                    <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
-                      {item.brand && <span>{item.brand}</span>}
-                      <span>Sold for ${item.retailPrice}</span>
-                      <span className="text-green-600 font-medium">You earned ${item.earnings?.toFixed(0)}</span>
-                    </div>
-                    {/* Show payment note under the item */}
-                    {item.status === 'SOLD_WITH_PAYOUT' && item.paymentNote && (
-                      <p className="text-xs text-green-600 mt-2">
-                        {item.paymentNote}
-                      </p>
-                    )}
+        {/* Latest Sold Item */}
+        {soldProducts.length > 0 && (() => {
+          const latest = soldProducts[0];
+          return (
+            <div className="mb-8 bg-white rounded-lg border border-gray-200">
+              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <h2 className="font-medium text-gray-900">Latest Sale</h2>
+                <Link
+                  to="/seller/profile?tab=sales"
+                  className="text-sm text-green-600 hover:text-green-700 font-medium flex items-center gap-1"
+                >
+                  View all {soldProducts.length} sales
+                  <ChevronRight className="w-4 h-4" />
+                </Link>
+              </div>
+              <div className="p-4 flex items-center justify-between">
+                <div>
+                  <h3 className="font-medium text-gray-900">{latest.title}</h3>
+                  <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
+                    {latest.brand && <span>{latest.brand}</span>}
+                    <span>Sold for ${latest.retailPrice}</span>
+                    <span className="text-green-600 font-medium">You earned ${latest.earnings?.toFixed(0)}</span>
                   </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    {/* Shipping status + action */}
-                    {item.shippingStatus === 'pending_label' && item.status !== 'SOLD_WITH_PAYOUT' ? (
-                      <a
-                        href="/seller/profile?tab=sales"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-                      >
-                        📦 Get Shipping Label
-                      </a>
-                    ) : item.shippingStatus === 'label_created' ? (
-                      <a
-                        href="/seller/profile?tab=sales"
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
-                      >
-                        🏷️ Label Ready — Print & Ship
-                      </a>
-                    ) : item.shippingStatus === 'shipped' ? (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                        📦 Shipped
-                      </span>
-                    ) : item.shippingStatus === 'delivered' ? (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        ✅ Delivered
-                      </span>
-                    ) : null}
-                    {/* Show Paid Out or Pending Payout tag */}
-                    {item.status === 'SOLD_WITH_PAYOUT' ? (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Paid Out
-                      </span>
-                    ) : (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                        Pending Payout
-                      </span>
-                    )}
-                    {item.status === 'SOLD_WITH_PAYOUT' && item.paidAt && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        {new Date(item.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </p>
-                    )}
-                  </div>
+                  {latest.status === 'SOLD_WITH_PAYOUT' && latest.paymentNote && (
+                    <p className="text-xs text-green-600 mt-2">{latest.paymentNote}</p>
+                  )}
                 </div>
-              ))}
+                <div className="text-right flex flex-col items-end gap-1">
+                  {latest.shippingStatus === 'pending_label' && latest.status !== 'SOLD_WITH_PAYOUT' ? (
+                    <Link
+                      to="/seller/profile?tab=sales"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                    >
+                      📦 Get Shipping Label
+                    </Link>
+                  ) : latest.shippingStatus === 'label_created' ? (
+                    <Link
+                      to="/seller/profile?tab=sales"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
+                    >
+                      🏷️ Label Ready — Print & Ship
+                    </Link>
+                  ) : latest.shippingStatus === 'shipped' ? (
+                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                      📦 Shipped
+                    </span>
+                  ) : latest.shippingStatus === 'delivered' ? (
+                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      ✅ Delivered
+                    </span>
+                  ) : null}
+                  {latest.status === 'SOLD_WITH_PAYOUT' ? (
+                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Paid Out
+                    </span>
+                  ) : (
+                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      Pending Payout
+                    </span>
+                  )}
+                  {latest.status === 'SOLD_WITH_PAYOUT' && latest.paidAt && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      {new Date(latest.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Listings */}
         <div className="bg-white rounded-lg border border-gray-200">
@@ -869,7 +683,7 @@ export default function SellerDashboard() {
             )}
           </div>
         </div>
-      </main>
+      </div>
 
       {/* Edit Modal */}
       {editingListing && (
@@ -1116,6 +930,6 @@ export default function SellerDashboard() {
           </div>
         </div>
       )}
-    </div>
+    </SellerLayout>
   );
 }
