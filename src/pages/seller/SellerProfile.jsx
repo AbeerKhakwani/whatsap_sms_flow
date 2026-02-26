@@ -436,7 +436,7 @@ export default function SellerProfile() {
       }
 
       if (data.needsBuyerAddress) {
-        setError('Buyer address not found for this order. Please contact support.');
+        setError(data.error || 'This is an older order — the buyer\'s address is not on file. New orders will have labels available automatically.');
         return;
       }
 

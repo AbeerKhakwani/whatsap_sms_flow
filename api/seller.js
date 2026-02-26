@@ -836,7 +836,7 @@ export default async function handler(req, res) {
 
         if (!finalBuyerAddress) {
           return res.status(400).json({
-            error: 'Buyer address not found. This order may be too old.',
+            error: 'This is an older order from before shipping labels were enabled. The buyer\'s address is not on file. New orders will have labels available automatically.',
             needsBuyerAddress: true
           });
         }
