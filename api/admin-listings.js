@@ -630,7 +630,7 @@ export default async function handler(req, res) {
 
     // BULK MARK TRANSACTIONS AS PAID
     if (action === 'bulk-mark-paid' && req.method === 'POST') {
-      const { transactionIds, sellerNote, adminNote } = req.body;
+      const { transactionIds, sellerNote, adminNote, skipNotification } = req.body;
 
       if (!transactionIds?.length) {
         return res.status(400).json({ error: 'transactionIds array required' });
@@ -640,12 +640,19 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Max 50 transactions at a time' });
       }
 
-      // Only mark transactions that are in 'available' payout status
-      const { data: validTxs, error: fetchErr } = await supabase
+      // Allow marking any non-paid status (not just 'available') when silent
+      let query = supabase
         .from('transactions')
-        .select('id, seller_id, product_title, seller_payout')
-        .in('id', transactionIds)
-        .eq('payout_status', 'available');
+        .select('id, seller_id, product_title, seller_payout, payout_status')
+        .in('id', transactionIds);
+
+      if (!skipNotification) {
+        query = query.eq('payout_status', 'available');
+      } else {
+        query = query.neq('payout_status', 'paid');
+      }
+
+      const { data: validTxs, error: fetchErr } = await query;
 
       if (fetchErr) {
         return res.status(400).json({ error: fetchErr.message });
@@ -672,56 +679,58 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: updateErr.message });
       }
 
-      // Group by seller and send one notification per seller
-      const bySeller = {};
-      for (const tx of validTxs) {
-        if (!bySeller[tx.seller_id]) bySeller[tx.seller_id] = [];
-        bySeller[tx.seller_id].push(tx);
-      }
-
+      // Send notifications (unless silent)
       let notificationsSent = 0;
-      for (const [sellerId, txs] of Object.entries(bySeller)) {
-        const { data: seller } = await supabase
-          .from('sellers')
-          .select('email, name, phone')
-          .eq('id', sellerId)
-          .single();
+      if (!skipNotification) {
+        const bySeller = {};
+        for (const tx of validTxs) {
+          if (!tx.seller_id) continue;
+          if (!bySeller[tx.seller_id]) bySeller[tx.seller_id] = [];
+          bySeller[tx.seller_id].push(tx);
+        }
 
-        if (!seller?.email) continue;
+        for (const [sellerId, txs] of Object.entries(bySeller)) {
+          const { data: seller } = await supabase
+            .from('sellers')
+            .select('email, name, phone')
+            .eq('id', sellerId)
+            .single();
 
-        const totalPayout = txs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
-        const items = txs.map(t => t.product_title).join(', ');
-        const paymentMethod = sellerNote ? ` via ${sellerNote}` : '';
+          if (!seller?.email) continue;
 
-        try {
-          await sendPayoutNotification(
-            seller.email,
-            seller.name,
-            txs.length === 1 ? txs[0].product_title : `${txs.length} items`,
-            totalPayout,
-            sellerNote
-          );
-          notificationsSent++;
+          const totalPayout = txs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
+          const paymentMethod = sellerNote ? ` via ${sellerNote}` : '';
 
-          // WhatsApp
-          if (seller.phone && !seller.phone.startsWith('NOPHONE') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-            const to = seller.phone.replace(/\D/g, '');
-            await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                messaging_product: 'whatsapp',
-                to,
-                type: 'text',
-                text: { body: `Hi ${seller.name || 'there'}! Your payout of $${totalPayout.toFixed(2)} for ${txs.length} item(s) has been sent${paymentMethod}. Thank you for selling with The Phir Story!` }
-              })
-            });
+          try {
+            await sendPayoutNotification(
+              seller.email,
+              seller.name,
+              txs.length === 1 ? txs[0].product_title : `${txs.length} items`,
+              totalPayout,
+              sellerNote
+            );
+            notificationsSent++;
+
+            // WhatsApp
+            if (seller.phone && !seller.phone.startsWith('NOPHONE') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
+              const to = seller.phone.replace(/\D/g, '');
+              await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  messaging_product: 'whatsapp',
+                  to,
+                  type: 'text',
+                  text: { body: `Hi ${seller.name || 'there'}! Your payout of $${totalPayout.toFixed(2)} for ${txs.length} item(s) has been sent${paymentMethod}. Thank you for selling with The Phir Story!` }
+                })
+              });
+            }
+          } catch (e) {
+            console.error(`Bulk payout notification failed for ${seller.email}:`, e.message);
           }
-        } catch (e) {
-          console.error(`Bulk payout notification failed for ${seller.email}:`, e.message);
         }
       }
 
@@ -729,7 +738,8 @@ export default async function handler(req, res) {
         success: true,
         updated: validTxs.length,
         skipped: transactionIds.length - validTxs.length,
-        notificationsSent
+        notificationsSent,
+        silent: !!skipNotification
       });
     }
 

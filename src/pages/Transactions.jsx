@@ -21,6 +21,7 @@ export default function Transactions() {
   const [saving, setSaving] = useState(false);
   const sellerNoteRef = useRef(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [skipNotification, setSkipNotification] = useState(false);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -28,6 +29,7 @@ export default function Transactions() {
   const [bulkNote, setBulkNote] = useState('');
   const [bulkAdminNote, setBulkAdminNote] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkSkipNotification, setBulkSkipNotification] = useState(false);
 
   // Alerts
   const [alerts, setAlerts] = useState(null);
@@ -71,10 +73,11 @@ export default function Transactions() {
   }
 
   // Single mark paid
-  function openMarkPaidModal(tx) {
+  function openMarkPaidModal(tx, silent = false) {
     setMarkingPaid(tx);
     setSellerNote('');
     setAdminNote('');
+    setSkipNotification(silent);
     setShowConfirmModal(true);
   }
 
@@ -83,6 +86,7 @@ export default function Transactions() {
     setMarkingPaid(null);
     setSellerNote('');
     setAdminNote('');
+    setSkipNotification(false);
   }
 
   async function confirmMarkAsPaid() {
@@ -95,7 +99,8 @@ export default function Transactions() {
         body: JSON.stringify({
           transactionId: markingPaid.id,
           sellerNote: sellerNote || undefined,
-          adminNote: adminNote || undefined
+          adminNote: adminNote || undefined,
+          skipNotification: skipNotification || undefined
         })
       });
 
@@ -122,7 +127,8 @@ export default function Transactions() {
         body: JSON.stringify({
           transactionIds: [...selectedIds],
           sellerNote: bulkNote || undefined,
-          adminNote: bulkAdminNote || undefined
+          adminNote: bulkAdminNote || undefined,
+          skipNotification: bulkSkipNotification || undefined
         })
       });
 
@@ -132,8 +138,9 @@ export default function Transactions() {
         setShowBulkModal(false);
         setBulkNote('');
         setBulkAdminNote('');
+        setBulkSkipNotification(false);
         await fetchTransactions();
-        alert(`Marked ${data.updated} transaction(s) as paid. ${data.notificationsSent} notification(s) sent.`);
+        alert(`Marked ${data.updated} transaction(s) as paid.${bulkSkipNotification ? '' : ` ${data.notificationsSent} notification(s) sent.`}`);
       } else {
         alert('Failed: ' + (data.error || 'Unknown error'));
       }
@@ -670,15 +677,27 @@ export default function Transactions() {
 
                     {/* Actions */}
                     <td className="px-4 py-3">
-                      {isAvailable && (
-                        <button
-                          onClick={() => openMarkPaidModal(tx)}
-                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                        >
-                          <DollarSign className="w-3 h-3" />
-                          Pay
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {isAvailable && (
+                          <button
+                            onClick={() => openMarkPaidModal(tx)}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          >
+                            <DollarSign className="w-3 h-3" />
+                            Pay
+                          </button>
+                        )}
+                        {payoutStatus !== 'paid' && !isAvailable && (
+                          <button
+                            onClick={() => openMarkPaidModal(tx, true)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-stone-300 text-stone-500 rounded-lg hover:bg-stone-50 transition-colors"
+                            title="Mark as paid without notifying seller"
+                          >
+                            <Check className="w-3 h-3" />
+                            Silent Pay
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -771,6 +790,16 @@ export default function Transactions() {
                   className="w-full px-4 py-3 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-400 bg-stone-50"
                 />
               </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={skipNotification}
+                  onChange={(e) => setSkipNotification(e.target.checked)}
+                  className="w-4 h-4 rounded border-stone-300 text-stone-600 focus:ring-stone-500"
+                />
+                <span className="text-sm text-stone-600">Skip seller notification</span>
+                <span className="text-xs text-stone-400">(no WhatsApp/email)</span>
+              </label>
             </div>
             <div className="px-5 py-4 border-t border-stone-200 flex gap-3">
               <button
@@ -783,7 +812,9 @@ export default function Transactions() {
               <button
                 onClick={confirmMarkAsPaid}
                 disabled={saving}
-                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                className={`flex-1 px-4 py-2.5 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${
+                  skipNotification ? 'bg-stone-600 hover:bg-stone-700' : 'bg-green-600 hover:bg-green-700'
+                }`}
               >
                 {saving ? (
                   <>
@@ -793,7 +824,7 @@ export default function Transactions() {
                 ) : (
                   <>
                     <CheckCircle className="w-4 h-4" />
-                    Confirm Paid
+                    {skipNotification ? 'Mark Paid (Silent)' : 'Confirm Paid'}
                   </>
                 )}
               </button>
@@ -865,10 +896,20 @@ export default function Transactions() {
                   className="w-full px-4 py-3 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-400 bg-stone-50"
                 />
               </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={bulkSkipNotification}
+                  onChange={(e) => setBulkSkipNotification(e.target.checked)}
+                  className="w-4 h-4 rounded border-stone-300 text-stone-600 focus:ring-stone-500"
+                />
+                <span className="text-sm text-stone-600">Skip seller notifications</span>
+                <span className="text-xs text-stone-400">(no WhatsApp/email)</span>
+              </label>
             </div>
             <div className="px-5 py-4 border-t border-stone-200 flex gap-3">
               <button
-                onClick={() => setShowBulkModal(false)}
+                onClick={() => { setShowBulkModal(false); setBulkSkipNotification(false); }}
                 disabled={bulkSaving}
                 className="flex-1 px-4 py-2.5 border border-stone-300 text-stone-700 rounded-lg hover:bg-stone-50 text-sm font-medium disabled:opacity-50"
               >
@@ -877,7 +918,9 @@ export default function Transactions() {
               <button
                 onClick={confirmBulkMarkPaid}
                 disabled={bulkSaving}
-                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                className={`flex-1 px-4 py-2.5 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${
+                  bulkSkipNotification ? 'bg-stone-600 hover:bg-stone-700' : 'bg-green-600 hover:bg-green-700'
+                }`}
               >
                 {bulkSaving ? (
                   <>
@@ -887,7 +930,7 @@ export default function Transactions() {
                 ) : (
                   <>
                     <CheckCircle className="w-4 h-4" />
-                    Confirm & Notify ({selectedIds.size})
+                    {bulkSkipNotification ? `Mark Paid Silent (${selectedIds.size})` : `Confirm & Notify (${selectedIds.size})`}
                   </>
                 )}
               </button>

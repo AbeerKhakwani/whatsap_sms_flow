@@ -633,6 +633,77 @@ export default function SellerDashboard() {
           </div>
         </div>
 
+        {/* Sold Items Section */}
+        {soldProducts.length > 0 && (
+          <div className="mb-8 bg-white rounded-lg border border-gray-200">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="font-medium text-gray-900">Items Sold</h2>
+              <span className="text-sm text-gray-500">{soldProducts.length} items</span>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {soldProducts.map((item, idx) => (
+                <div key={idx} className="p-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium text-gray-900">{item.title}</h3>
+                    <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
+                      {item.brand && <span>{item.brand}</span>}
+                      <span>Sold for ${item.retailPrice}</span>
+                      <span className="text-green-600 font-medium">You earned ${item.earnings?.toFixed(0)}</span>
+                    </div>
+                    {/* Show payment note under the item */}
+                    {item.status === 'SOLD_WITH_PAYOUT' && item.paymentNote && (
+                      <p className="text-xs text-green-600 mt-2">
+                        {item.paymentNote}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    {/* Shipping status + action */}
+                    {item.shippingStatus === 'pending_label' && item.status !== 'SOLD_WITH_PAYOUT' ? (
+                      <a
+                        href="/seller/profile?tab=sales"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                      >
+                        📦 Get Shipping Label
+                      </a>
+                    ) : item.shippingStatus === 'label_created' ? (
+                      <a
+                        href="/seller/profile?tab=sales"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
+                      >
+                        🏷️ Label Ready — Print & Ship
+                      </a>
+                    ) : item.shippingStatus === 'shipped' ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        📦 Shipped
+                      </span>
+                    ) : item.shippingStatus === 'delivered' ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        ✅ Delivered
+                      </span>
+                    ) : null}
+                    {/* Show Paid Out or Pending Payout tag */}
+                    {item.status === 'SOLD_WITH_PAYOUT' ? (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        Paid Out
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                        Pending Payout
+                      </span>
+                    )}
+                    {item.status === 'SOLD_WITH_PAYOUT' && item.paidAt && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(item.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Listings */}
         <div className="bg-white rounded-lg border border-gray-200">
           <div className="px-4 py-3 border-b border-gray-200">
@@ -774,77 +845,6 @@ export default function SellerDashboard() {
             </div>
           )}
         </div>
-
-        {/* Sold Items Section */}
-        {soldProducts.length > 0 && (
-          <div className="mt-8 bg-white rounded-lg border border-gray-200">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-medium text-gray-900">Items Sold</h2>
-              <span className="text-sm text-gray-500">{soldProducts.length} items</span>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {soldProducts.map((item, idx) => (
-                <div key={idx} className="p-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-medium text-gray-900">{item.title}</h3>
-                    <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
-                      {item.brand && <span>{item.brand}</span>}
-                      <span>Sold for ${item.retailPrice}</span>
-                      <span className="text-green-600 font-medium">You earned ${item.earnings?.toFixed(0)}</span>
-                    </div>
-                    {/* Show payment note under the item */}
-                    {item.status === 'SOLD_WITH_PAYOUT' && item.paymentNote && (
-                      <p className="text-xs text-green-600 mt-2">
-                        {item.paymentNote}
-                      </p>
-                    )}
-                  </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    {/* Shipping status + action */}
-                    {item.shippingStatus === 'pending_label' && item.status !== 'SOLD_WITH_PAYOUT' ? (
-                      <a
-                        href="/seller/profile?tab=sales"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-                      >
-                        📦 Get Shipping Label
-                      </a>
-                    ) : item.shippingStatus === 'label_created' ? (
-                      <a
-                        href="/seller/profile?tab=sales"
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
-                      >
-                        🏷️ Label Ready — Print & Ship
-                      </a>
-                    ) : item.shippingStatus === 'shipped' ? (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                        📦 Shipped
-                      </span>
-                    ) : item.shippingStatus === 'delivered' ? (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        ✅ Delivered
-                      </span>
-                    ) : null}
-                    {/* Show Paid Out or Pending Payout tag */}
-                    {item.status === 'SOLD_WITH_PAYOUT' ? (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Paid Out
-                      </span>
-                    ) : (
-                      <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                        Pending Payout
-                      </span>
-                    )}
-                    {item.status === 'SOLD_WITH_PAYOUT' && item.paidAt && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        {new Date(item.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Payouts Summary */}
         <div className="mt-8 bg-white rounded-lg border border-gray-200">
