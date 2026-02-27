@@ -7,7 +7,10 @@ import { createClient } from '@supabase/supabase-js';
 import { getProduct, updateProduct, fulfillOrder } from '../lib/shopify.js';
 import { validateUpdate } from '../lib/security.js';
 import { getShippingLabel, getShippingInstructions, WAREHOUSE_ADDRESS } from '../lib/shipping.js';
-import { logMessage, getSellerMessages } from '../lib/messages.js';
+import { getSellerMessages } from '../lib/messages.js';
+import { sendEmail } from '../lib/send-email.js';
+import { sendWhatsApp } from '../lib/send-whatsapp.js';
+import { itemSoldInlineEmail, shippingLabelEmail } from '../lib/email.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
@@ -1423,239 +1426,62 @@ export default async function handler(req, res) {
 // Send sale notification to seller via WhatsApp and email
 async function notifySellerOfSale(seller, saleInfo) {
   const { productTitle, salePrice, sellerPayout } = saleInfo;
-  const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
-  const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const RESEND_KEY = process.env.RESEND_API_KEY;
-
-  const waMessage = `🎉 Your item sold!\n\n` +
-    `"${productTitle}" just sold for $${salePrice.toFixed(0)}!\n\n` +
-    `💵 Your payout: $${sellerPayout.toFixed(0)}\n\n` +
-    `📦 Next step: Go to your dashboard to get your shipping label and ship your item.\n\n` +
-    `Dashboard: https://sell.thephirstory.com/seller/profile?tab=sales`;
+  const metadata = { productTitle, salePrice, payout: sellerPayout };
 
   // Send WhatsApp
-  if (seller.phone && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-    try {
-      let phone = seller.phone.replace(/\D/g, '');
-      if (!phone.startsWith('1') && phone.length === 10) phone = '1' + phone;
-
-      const waRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        // Template: "Great news! 🎉 Your {{1}} just sold for ${{2}}! We'll send your earnings within 5 business days."
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'template',
-          template: {
-            name: 'item_sold',
-            language: { code: 'en_US' },
-            components: [
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: productTitle },
-                  { type: 'text', text: salePrice.toFixed(0) }
-                ]
-              }
-            ]
-          }
-        })
-      });
-
-      if (waRes.ok) {
-        console.log(`   📱 WhatsApp sent to ${seller.phone}`);
-        await logMessage({
-          sellerId: seller.id,
-          type: 'whatsapp',
-          recipient: seller.phone,
-          content: waMessage,
-          context: 'item_sold',
-          metadata: { productTitle, salePrice, payout: sellerPayout }
-        });
-      }
-    } catch (err) {
-      console.error(`   WhatsApp failed:`, err.message);
-    }
+  if (seller.phone) {
+    await sendWhatsApp({
+      sellerId: seller.id,
+      to: seller.phone,
+      template: 'item_sold',
+      params: [productTitle, salePrice.toFixed(0)],
+      context: 'item_sold',
+      metadata,
+      textPreview: `🎉 Your item "${productTitle}" sold for $${salePrice.toFixed(0)}! Your payout: $${sellerPayout.toFixed(0)}`
+    });
   }
 
   // Send email
-  if (seller.email && RESEND_KEY) {
-    const emailSubject = `🎉 Your item sold! - ${productTitle}`;
-    const emailContent = `${productTitle} sold for $${salePrice.toFixed(2)}. Your payout: $${sellerPayout.toFixed(2)}`;
-
-    const shippingSection = `
-      <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin: 20px 0;">
-        <h3 style="margin: 0 0 8px 0; color: #9a3412;">📦 Next Step: Ship Your Item</h3>
-        <p style="margin: 0 0 12px 0; color: #c2410c;">Go to <strong>My Sales</strong> in your dashboard to get your shipping label.</p>
-        <a href="https://sell.thephirstory.com/seller/profile?tab=sales" style="display: inline-block; background: #C91A2B; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px;">Get Shipping Label</a>
-      </div>
-    `;
-
-    try {
-      const emailRes = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${RESEND_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: 'The Phir Story <noreply@send.thephirstory.com>',
-          to: seller.email,
-          subject: emailSubject,
-          html: `
-            <div style="font-family: sans-serif; max-width: 600px;">
-              <h1 style="color: #16a34a;">🎉 Congratulations${seller.name ? `, ${seller.name}` : ''}!</h1>
-              <p>Your item <strong>${productTitle}</strong> just sold for $${salePrice.toFixed(2)}!</p>
-              <p style="font-size: 24px; color: #16a34a;"><strong>Your payout: $${sellerPayout.toFixed(2)}</strong></p>
-              ${shippingSection}
-              <p>We'll process your payment within 7 business days after we receive the item.</p>
-              <a href="https://sell.thephirstory.com" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px;">View Dashboard</a>
-            </div>
-          `
-        })
-      });
-
-      if (emailRes.ok) {
-        console.log(`   📧 Email sent to ${seller.email}`);
-        await logMessage({
-          sellerId: seller.id,
-          type: 'email',
-          recipient: seller.email,
-          subject: emailSubject,
-          content: emailContent,
-          context: 'item_sold',
-          metadata: { productTitle, salePrice, payout: sellerPayout }
-        });
-      }
-    } catch (err) {
-      console.error(`   Email failed:`, err.message);
-    }
+  if (seller.email) {
+    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, salePrice, sellerPayout);
+    await sendEmail({
+      sellerId: seller.id,
+      to: seller.email,
+      subject,
+      html,
+      context: 'item_sold',
+      metadata
+    });
   }
 }
 
 // Send shipping label to seller via WhatsApp and email
 async function sendShippingLabel(seller, labelResult, productTitle) {
-  const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
-  const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const RESEND_KEY = process.env.RESEND_API_KEY;
-
-  const waMessage = `📦 Shipping Label Ready!\n\n` +
-    `For: "${productTitle}"\n\n` +
-    `Tracking: ${labelResult.trackingNumber}\n` +
-    `Carrier: ${labelResult.carrier} ${labelResult.service}\n` +
-    `Est. Delivery: ${labelResult.estimatedDelivery}\n\n` +
-    `Print your label:\n${labelResult.labelUrl}\n\n` +
-    `Drop off at any USPS location or schedule pickup.`;
+  const metadata = { productTitle, trackingNumber: labelResult.trackingNumber, carrier: labelResult.carrier };
 
   // Send WhatsApp
-  if (seller.phone && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-    try {
-      let phone = seller.phone.replace(/\D/g, '');
-      if (!phone.startsWith('1') && phone.length === 10) phone = '1' + phone;
-
-      const waRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phone,
-          type: 'template',
-          template: {
-            name: 'shipping_label',
-            language: { code: 'en_US' },
-            components: [
-              {
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: productTitle },
-                  { type: 'text', text: labelResult.trackingNumber },
-                  { type: 'text', text: `${labelResult.carrier} ${labelResult.service}` },
-                  { type: 'text', text: labelResult.labelUrl }
-                ]
-              }
-            ]
-          }
-        })
-      });
-
-      if (waRes.ok) {
-        console.log(`   📱 Shipping label sent to ${seller.phone}`);
-        await logMessage({
-          sellerId: seller.id,
-          type: 'whatsapp',
-          recipient: seller.phone,
-          content: waMessage,
-          context: 'shipping_label',
-          metadata: { productTitle, trackingNumber: labelResult.trackingNumber, carrier: labelResult.carrier }
-        });
-      }
-    } catch (err) {
-      console.error(`   WhatsApp shipping label failed:`, err.message);
-    }
+  if (seller.phone) {
+    await sendWhatsApp({
+      sellerId: seller.id,
+      to: seller.phone,
+      template: 'shipping_label',
+      params: [productTitle, labelResult.trackingNumber, `${labelResult.carrier} ${labelResult.service}`, labelResult.labelUrl],
+      context: 'shipping_label',
+      metadata,
+      textPreview: `📦 Shipping label ready for "${productTitle}". Tracking: ${labelResult.trackingNumber}`
+    });
   }
 
-  // Send email with label PDF
-  if (seller.email && RESEND_KEY) {
-    const emailSubject = `📦 Your Shipping Label - ${productTitle}`;
-    const emailContent = `Shipping label for ${productTitle}. Tracking: ${labelResult.trackingNumber}. ${labelResult.carrier} ${labelResult.service}.`;
-
-    try {
-      await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${RESEND_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: 'The Phir Story <noreply@send.thephirstory.com>',
-          to: seller.email,
-          subject: emailSubject,
-          html: `
-            <div style="font-family: sans-serif; max-width: 500px;">
-              <h1 style="color: #2563eb;">📦 Your Shipping Label is Ready!</h1>
-              <p>Here's your prepaid shipping label for <strong>${productTitle}</strong>.</p>
-
-              <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                <p style="margin: 4px 0;"><strong>Tracking:</strong> ${labelResult.trackingNumber}</p>
-                <p style="margin: 4px 0;"><strong>Carrier:</strong> ${labelResult.carrier} ${labelResult.service}</p>
-                <p style="margin: 4px 0;"><strong>Est. Delivery:</strong> ${labelResult.estimatedDelivery}</p>
-              </div>
-
-              <a href="${labelResult.labelUrl}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin: 8px 0;">Print Shipping Label</a>
-
-              <h3 style="margin-top: 24px;">Next Steps:</h3>
-              <ol>
-                <li>Print the label (or show QR code at USPS)</li>
-                <li>Pack your item securely</li>
-                <li>Drop off at any USPS location</li>
-              </ol>
-
-              <p style="color: #6b7280; font-size: 14px;">We'll notify you when your item arrives at our warehouse!</p>
-            </div>
-          `
-        })
-      });
-      console.log(`   📧 Shipping label email sent to ${seller.email}`);
-
-      // Log email message
-      await logMessage({
-        sellerId: seller.id,
-        type: 'email',
-        recipient: seller.email,
-        subject: emailSubject,
-        content: emailContent,
-        context: 'shipping_label',
-        metadata: { productTitle, trackingNumber: labelResult.trackingNumber, carrier: labelResult.carrier }
-      });
-    } catch (err) {
-      console.error(`   Email shipping label failed:`, err.message);
-    }
+  // Send email
+  if (seller.email) {
+    const { subject, html } = shippingLabelEmail(seller.name, productTitle, labelResult);
+    await sendEmail({
+      sellerId: seller.id,
+      to: seller.email,
+      subject,
+      html,
+      context: 'shipping_label',
+      metadata
+    });
   }
 }

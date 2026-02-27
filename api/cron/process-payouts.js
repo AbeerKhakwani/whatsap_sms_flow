@@ -3,6 +3,9 @@
 // Vercel Cron: runs at 10 AM daily
 
 import { createClient } from '@supabase/supabase-js';
+import { sendEmail } from '../../lib/send-email.js';
+import { sendWhatsApp } from '../../lib/send-whatsapp.js';
+import { payoutAvailableEmail } from '../../lib/email.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -82,61 +85,29 @@ export default async function handler(req, res) {
         // Notify seller
         if (seller) {
           try {
+            const metadata = { productTitle: transaction.product_title, payout: transaction.seller_payout };
+
             // Send WhatsApp
-            if (seller.phone && process.env.WHATSAPP_ACCESS_TOKEN) {
-              let phone = seller.phone.replace(/\D/g, '');
-              if (!phone.startsWith('1') && phone.length === 10) phone = '1' + phone;
-
-              const waMessage = `💰 Payout Available!\n\n` +
-                `Hi ${seller.name || 'there'}! Great news!\n\n` +
-                `Your sale of "${transaction.product_title}" is complete.\n\n` +
-                `$${transaction.seller_payout?.toFixed(0) || '0'} is now available for payout!\n\n` +
-                `We'll send your payment within 5 business days.`;
-
-              await fetch(`https://graph.facebook.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp',
-                  to: phone,
-                  type: 'text',
-                  text: { body: waMessage }
-                })
+            if (seller.phone) {
+              await sendWhatsApp({
+                sellerId: seller.id,
+                to: seller.phone,
+                textBody: `💰 Payout Available!\n\nHi ${seller.name || 'there'}! Great news!\n\nYour sale of "${transaction.product_title}" is complete.\n\n$${transaction.seller_payout?.toFixed(0) || '0'} is now available for payout!\n\nWe'll send your payment within 5 business days.`,
+                context: 'payout_available',
+                metadata
               });
             }
 
             // Send email
-            if (seller.email && process.env.RESEND_API_KEY) {
-              await fetch('https://api.resend.com/emails', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  from: 'The Phir Story <noreply@send.thephirstory.com>',
-                  to: seller.email,
-                  subject: `💰 Your payout is ready! - ${transaction.product_title}`,
-                  html: `
-                    <div style="font-family: sans-serif; max-width: 500px;">
-                      <h1 style="color: #16a34a;">💰 Payout Available!</h1>
-                      <p>Hi ${seller.name || 'there'},</p>
-                      <p>Great news! Your sale of <strong>${transaction.product_title}</strong> is complete.</p>
-
-                      <div style="background: #dcfce7; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
-                        <p style="margin: 0; font-size: 14px; color: #166534;">Available for payout</p>
-                        <p style="margin: 8px 0 0; font-size: 32px; font-weight: bold; color: #16a34a;">$${transaction.seller_payout?.toFixed(2) || '0.00'}</p>
-                      </div>
-
-                      <p>We'll send your payment within 5 business days to your registered payment method.</p>
-
-                      <a href="https://sell.thephirstory.com/seller/profile?tab=sales" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin-top: 16px;">View My Sales</a>
-                    </div>
-                  `
-                })
+            if (seller.email) {
+              const { subject, html } = payoutAvailableEmail(seller.name, transaction.product_title, transaction.seller_payout);
+              await sendEmail({
+                sellerId: seller.id,
+                to: seller.email,
+                subject,
+                html,
+                context: 'payout_available',
+                metadata
               });
             }
 

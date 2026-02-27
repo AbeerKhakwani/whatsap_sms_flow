@@ -2,7 +2,9 @@
 // Auth endpoint - handles seller login with email/phone verification
 
 import { createClient } from '@supabase/supabase-js';
-import { sendVerificationCode, sendWelcomeEmail, sendListingApproved } from '../lib/email.js';
+import { verificationCodeEmail, welcomeEmail, listingApprovedEmail } from '../lib/email.js';
+import { sendEmail } from '../lib/send-email.js';
+import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import {
   generateCode,
   storeVerificationCode,
@@ -15,9 +17,6 @@ const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
-
-const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
-const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -94,7 +93,8 @@ export default async function handler(req, res) {
         });
       } else if (email) {
         console.log('📧 Attempting to send email to:', email);
-        const sent = await sendVerificationCode(email, code);
+        const vcTemplate = verificationCodeEmail(code);
+        const sent = await sendEmail({ to: email, subject: vcTemplate.subject, html: vcTemplate.html, context: 'verification_code' });
         console.log('📧 Email result:', JSON.stringify(sent));
         if (!sent || !sent.success) {
           console.error('📧 Email failed:', sent?.error);
@@ -156,7 +156,8 @@ export default async function handler(req, res) {
 
         // Send welcome email if we have email
         if (seller.email) {
-          await sendWelcomeEmail(seller.email, seller.name);
+          const weTemplate = welcomeEmail(seller.name);
+          await sendEmail({ to: seller.email, subject: weTemplate.subject, html: weTemplate.html, context: 'welcome' });
         }
       } else {
         // Existing seller - update phone if provided and not set
@@ -240,24 +241,24 @@ export default async function handler(req, res) {
       let message = '';
 
       switch (type) {
-        case 'code':
-          result = await sendVerificationCode(email, '123456');
+        case 'code': {
+          const vcT = verificationCodeEmail('123456');
+          result = await sendEmail({ to: email, subject: vcT.subject, html: vcT.html, context: 'verification_code' });
           message = 'Verification code email sent';
           break;
-        case 'approved':
-          result = await sendListingApproved(
-            email,
-            'Test Seller',
-            'Beautiful Maria B Kurta - Size M',
-            'https://thephirstory.com/products/test',
-            82.00
-          );
+        }
+        case 'approved': {
+          const laT = listingApprovedEmail('Test Seller', 'Beautiful Maria B Kurta - Size M', 'https://thephirstory.com/products/test', 82.00);
+          result = await sendEmail({ to: email, subject: laT.subject, html: laT.html, context: 'listing_approved' });
           message = 'Listing approved email sent';
           break;
-        case 'welcome':
-          result = await sendWelcomeEmail(email, 'Test Seller');
+        }
+        case 'welcome': {
+          const weT = welcomeEmail('Test Seller');
+          result = await sendEmail({ to: email, subject: weT.subject, html: weT.html, context: 'welcome' });
           message = 'Welcome email sent';
           break;
+        }
         default:
           return res.status(400).json({
             error: 'Invalid type. Use: code, approved, or welcome'
@@ -441,7 +442,8 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Failed to generate code' });
       }
 
-      const sent = await sendVerificationCode(newEmail, code);
+      const vcTemplate2 = verificationCodeEmail(code);
+      const sent = await sendEmail({ to: newEmail, subject: vcTemplate2.subject, html: vcTemplate2.html, context: 'verification_code' });
       if (!sent || !sent.success) {
         return res.status(500).json({ error: 'Failed to send verification email' });
       }
@@ -630,54 +632,15 @@ async function findSeller(identifier) {
  * Send verification code via WhatsApp using approved template
  */
 async function sendWhatsAppCode(phone, code) {
-  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.error('WhatsApp not configured');
-    return false;
-  }
-
-  const to = phone.replace(/\D/g, '');
-
-  try {
-    const response = await fetch(
-      `https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to,
-          type: 'template',
-          template: {
-            name: 'login_code',
-            language: { code: 'en_US' },
-            components: [
-              {
-                type: 'body',
-                parameters: [{ type: 'text', text: code }]
-              },
-              {
-                type: 'button',
-                sub_type: 'url',
-                index: '0',
-                parameters: [{ type: 'text', text: code }]
-              }
-            ]
-          }
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('WhatsApp error:', error);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.error('WhatsApp send error:', error);
-    return false;
-  }
+  const result = await sendWhatsApp({
+    to: phone,
+    template: 'login_code',
+    components: [
+      { type: 'body', parameters: [{ type: 'text', text: code }] },
+      { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] }
+    ],
+    context: 'login_code',
+    textPreview: `Login code: ${code}`
+  });
+  return result.success;
 }

@@ -2,8 +2,9 @@
 // Consolidated admin listing actions: get-pending, approve, reject
 
 import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct } from '../lib/shopify.js';
-import { sendListingApproved, sendPayoutNotification, sendListingRejected } from '../lib/email.js';
-import { logMessage } from '../lib/messages.js';
+import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail } from '../lib/email.js';
+import { sendEmail } from '../lib/send-email.js';
+import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { getSellerEmail, getSellerPayout } from '../lib/metafield-helpers.js';
 import { createClient } from '@supabase/supabase-js';
 
@@ -12,8 +13,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
-const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const STORE_URL = process.env.VITE_SHOPIFY_STORE_URL?.replace('.myshopify.com', '');
 
 export default async function handler(req, res) {
@@ -249,36 +248,24 @@ export default async function handler(req, res) {
       }
 
       if (!skipNotification && sellerEmail) {
-        try {
-          const emailSent = await sendListingApproved(sellerEmail, seller?.name || null, product.title, productUrl, sellerPayout);
-          if (emailSent && seller?.id) {
-            await logMessage({
-              sellerId: seller.id,
-              type: 'email',
-              recipient: sellerEmail,
-              subject: 'Your listing is now live!',
-              content: `Listing "${product.title}" approved. Payout: $${sellerPayout.toFixed(2)}. View: ${productUrl}`,
-              context: 'listing_approved',
-              metadata: { productId: product.id, productTitle: product.title, payout: sellerPayout }
-            });
-          }
-        } catch (e) { console.error('Email error:', e); }
+        const sellerId = seller?.id;
+        const metadata = { productId: product.id, productTitle: product.title, payout: sellerPayout };
 
-        if (seller?.phone && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-          try {
-            const waMessage = `${seller.name ? `Hi ${seller.name}! ` : ''}Great news! Your listing "${product.title}" is now live on The Phir Story.\n\nWhen it sells, you'll receive $${sellerPayout.toFixed(2)}.\n\nView: ${productUrl}`;
-            const waSent = await sendWhatsAppApproval(seller.phone, seller.name, product.title, productUrl, sellerPayout);
-            if (waSent) {
-              await logMessage({
-                sellerId: seller.id,
-                type: 'whatsapp',
-                recipient: seller.phone,
-                content: waMessage,
-                context: 'listing_approved',
-                metadata: { productId: product.id, productTitle: product.title, payout: sellerPayout }
-              });
-            }
-          } catch (e) { console.error('WhatsApp error:', e); }
+        // Send email
+        const { subject, html } = listingApprovedEmail(seller?.name, product.title, productUrl, sellerPayout);
+        await sendEmail({ sellerId, to: sellerEmail, subject, html, context: 'listing_approved', metadata });
+
+        // Send WhatsApp
+        if (seller?.phone) {
+          await sendWhatsApp({
+            sellerId,
+            to: seller.phone,
+            template: 'listing_approved',
+            params: [product.title],
+            context: 'listing_approved',
+            metadata,
+            textPreview: `Your listing "${product.title}" is now live on The Phir Story!`
+          });
         }
       }
 
@@ -335,64 +322,22 @@ export default async function handler(req, res) {
 
       // Send notifications if we found the seller
       if (!skipNotification && seller && reason) {
+        const metadata = { productId: shopifyProductId, productTitle, reason, note };
+
         // Send email
-        try {
-          const emailSent = await sendListingRejected(
-            seller.email,
-            seller.name,
-            productTitle,
-            reason,
-            note || null
-          );
+        const { subject, html } = listingRejectedEmail(seller.name, productTitle, reason, note || null);
+        await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'listing_rejected', metadata });
 
-          if (emailSent) {
-            await logMessage({
-              sellerId: seller.id,
-              type: 'email',
-              recipient: seller.email,
-              subject: 'Update on your listing',
-              content: `Listing "${productTitle}" was not approved. Reason: ${reason}${note ? ` - ${note}` : ''}`,
-              context: 'listing_rejected',
-              metadata: { productId: shopifyProductId, productTitle, reason, note }
-            });
-          }
-        } catch (e) {
-          console.error('Rejection email error:', e);
-        }
-
-        // Send WhatsApp if seller has phone
-        if (seller.phone && !seller.phone.startsWith('NOPHONE') && !seller.phone.startsWith('RESET_') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-          try {
-            const to = seller.phone.replace(/\D/g, '');
-            const waMessage = `Hi${seller.name ? ` ${seller.name}` : ''}! We reviewed your listing "${productTitle}" but can't approve it at this time.\n\nReason: ${reason}${note ? `\n${note}` : ''}\n\nYou're welcome to submit a new listing addressing these concerns. Questions? Just reply here!`;
-
-            const waRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                messaging_product: 'whatsapp',
-                to,
-                type: 'text',
-                text: { body: waMessage }
-              })
-            });
-
-            if (waRes.ok) {
-              await logMessage({
-                sellerId: seller.id,
-                type: 'whatsapp',
-                recipient: seller.phone,
-                content: waMessage,
-                context: 'listing_rejected',
-                metadata: { productId: shopifyProductId, productTitle, reason, note }
-              });
-            }
-          } catch (e) {
-            console.error('WhatsApp rejection error:', e);
-          }
+        // Send WhatsApp (text message — no rejection template)
+        if (seller.phone && !seller.phone.startsWith('NOPHONE') && !seller.phone.startsWith('RESET_')) {
+          const waMessage = `Hi${seller.name ? ` ${seller.name}` : ''}! We reviewed your listing "${productTitle}" but can't approve it at this time.\n\nReason: ${reason}${note ? `\n${note}` : ''}\n\nYou're welcome to submit a new listing addressing these concerns. Questions? Just reply here!`;
+          await sendWhatsApp({
+            sellerId: seller.id,
+            to: seller.phone,
+            textBody: waMessage,
+            context: 'listing_rejected',
+            metadata
+          });
         }
       }
 
@@ -547,73 +492,24 @@ export default async function handler(req, res) {
 
         if (seller?.email) {
           try {
-            const paymentMethod = sellerNote ? ` (${sellerNote})` : '';
-            const emailContent = `Payout of $${data.seller_payout?.toFixed(2)} for "${data.product_title}" has been sent${paymentMethod}.`;
+            const metadata = { transactionId: data.id, productTitle: data.product_title, payout: data.seller_payout, paymentMethod: sellerNote };
 
-            const emailSent = await sendPayoutNotification(
-              seller.email,
-              seller.name,
-              data.product_title,
-              data.seller_payout,
-              sellerNote
-            );
+            // Send email
+            const { subject, html } = payoutNotificationEmail(seller.name, data.product_title, data.seller_payout, sellerNote);
+            const emailResult = await sendEmail({ sellerId: data.seller_id, to: seller.email, subject, html, context: 'payout_sent', metadata });
+            if (emailResult.success) notificationSent = true;
 
-            if (emailSent) {
-              notificationSent = true;
-              await logMessage({
+            // Send WhatsApp
+            if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
+              await sendWhatsApp({
                 sellerId: data.seller_id,
-                type: 'email',
-                recipient: seller.email,
-                subject: 'Your payout has been sent!',
-                content: emailContent,
+                to: seller.phone,
+                template: 'payout_sent',
+                params: [seller.name || 'there', `$${data.seller_payout?.toFixed(2)}`, data.product_title, sellerNote ? ` via ${sellerNote}` : ''],
                 context: 'payout_sent',
-                metadata: { transactionId: data.id, productTitle: data.product_title, payout: data.seller_payout, paymentMethod: sellerNote }
+                metadata,
+                textPreview: `Your payout of $${data.seller_payout?.toFixed(2)} for "${data.product_title}" has been sent.`
               });
-            }
-
-            // Also send WhatsApp if seller has phone
-            if (seller.phone && !seller.phone.startsWith('NOPHONE') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-              const to = seller.phone.replace(/\D/g, '');
-              const waMessage = `Hi ${seller.name || 'there'}! Your payout of $${data.seller_payout?.toFixed(2)} for "${data.product_title}" has been sent${paymentMethod}.`;
-
-              const waRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp',
-                  to,
-                  type: 'template',
-                  template: {
-                    name: 'payout_sent',
-                    language: { code: 'en_US' },
-                    components: [
-                      {
-                        type: 'body',
-                        parameters: [
-                          { type: 'text', text: seller.name || 'there' },
-                          { type: 'text', text: `$${data.seller_payout?.toFixed(2)}` },
-                          { type: 'text', text: data.product_title },
-                          { type: 'text', text: sellerNote ? ` via ${sellerNote}` : '' }
-                        ]
-                      }
-                    ]
-                  }
-                })
-              });
-
-              if (waRes.ok) {
-                await logMessage({
-                  sellerId: data.seller_id,
-                  type: 'whatsapp',
-                  recipient: seller.phone,
-                  content: waMessage,
-                  context: 'payout_sent',
-                  metadata: { transactionId: data.id, productTitle: data.product_title, payout: data.seller_payout, paymentMethod: sellerNote }
-                });
-              }
             }
           } catch (e) {
             console.error('Payout notification error:', e);
@@ -702,30 +598,21 @@ export default async function handler(req, res) {
           const paymentMethod = sellerNote ? ` via ${sellerNote}` : '';
 
           try {
-            await sendPayoutNotification(
-              seller.email,
-              seller.name,
-              txs.length === 1 ? txs[0].product_title : `${txs.length} items`,
-              totalPayout,
-              sellerNote
-            );
+            const itemDesc = txs.length === 1 ? txs[0].product_title : `${txs.length} items`;
+            const metadata = { totalPayout, itemCount: txs.length, paymentMethod: sellerNote };
+
+            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, sellerNote);
+            await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
             // WhatsApp
-            if (seller.phone && !seller.phone.startsWith('NOPHONE') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-              const to = seller.phone.replace(/\D/g, '');
-              await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp',
-                  to,
-                  type: 'text',
-                  text: { body: `Hi ${seller.name || 'there'}! Your payout of $${totalPayout.toFixed(2)} for ${txs.length} item(s) has been sent${paymentMethod}. Thank you for selling with The Phir Story!` }
-                })
+            if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
+              await sendWhatsApp({
+                sellerId,
+                to: seller.phone,
+                textBody: `Hi ${seller.name || 'there'}! Your payout of $${totalPayout.toFixed(2)} for ${txs.length} item(s) has been sent${paymentMethod}. Thank you for selling with The Phir Story!`,
+                context: 'payout_sent',
+                metadata
               });
             }
           } catch (e) {
@@ -905,98 +792,57 @@ export default async function handler(req, res) {
         sellerPayout: 123,
         productUrl: 'https://thephirstory.com/products/test'
       };
+      const testMeta = { test: true, ...testData };
 
       // Send WhatsApp
-      if (seller.phone && !seller.phone.startsWith('NOPHONE') && WHATSAPP_TOKEN && WHATSAPP_PHONE_ID) {
-        try {
-          const phone = seller.phone.replace(/\D/g, '');
-          let templateName, parameters;
+      if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
+        let templateName, templateParams;
+        if (type === 'listing_approved') {
+          templateName = 'listing_approved';
+          templateParams = [testData.productTitle];
+        } else if (type === 'item_sold') {
+          templateName = 'item_sold';
+          templateParams = [testData.productTitle, testData.salePrice.toFixed(0)];
+        } else if (type === 'payout_sent') {
+          templateName = 'payout_sent';
+          templateParams = [seller.name || 'there', `$${testData.sellerPayout.toFixed(2)}`, testData.productTitle, ' via PayPal'];
+        }
 
-          if (type === 'listing_approved') {
-            // Template: "Your {{1}} has been approved and is now live on The Phir Story! 🎉"
-            templateName = 'listing_approved';
-            parameters = [
-              { type: 'text', text: testData.productTitle }
-            ];
-          } else if (type === 'item_sold') {
-            // Template: "Great news! 🎉 Your {{1}} just sold for ${{2}}! We'll send your earnings within 5 business days."
-            templateName = 'item_sold';
-            parameters = [
-              { type: 'text', text: testData.productTitle },
-              { type: 'text', text: testData.salePrice.toFixed(0) }
-            ];
-          } else if (type === 'payout_sent') {
-            templateName = 'payout_sent';
-            parameters = [
-              { type: 'text', text: seller.name || 'there' },
-              { type: 'text', text: `$${testData.sellerPayout.toFixed(2)}` },
-              { type: 'text', text: testData.productTitle },
-              { type: 'text', text: ' via PayPal' }
-            ];
-          }
-
-          const waRes = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              to: phone,
-              type: 'template',
-              template: {
-                name: templateName,
-                language: { code: 'en_US' },
-                components: [{ type: 'body', parameters }]
-              }
-            })
+        if (templateName) {
+          const waResult = await sendWhatsApp({
+            sellerId: seller.id,
+            to: seller.phone,
+            template: templateName,
+            params: templateParams,
+            context: type,
+            metadata: testMeta,
+            textPreview: `[TEST] ${type} notification`
           });
-
-          const waData = await waRes.json();
-          results.whatsapp = waRes.ok ? 'sent' : waData.error?.message || 'failed';
-
-          if (waRes.ok) {
-            await logMessage({
-              sellerId: seller.id,
-              type: 'whatsapp',
-              recipient: seller.phone,
-              content: `[TEST] ${type} notification`,
-              context: type,
-              metadata: { test: true, ...testData }
-            });
-          }
-        } catch (e) {
-          results.whatsapp = e.message;
+          results.whatsapp = waResult.success ? 'sent' : waResult.error || 'failed';
         }
       }
 
-      // Send Email (using Resend)
+      // Send Email
       if (seller.email) {
-        try {
-          if (type === 'listing_approved') {
-            const sent = await sendListingApproved(seller.email, seller.name, testData.productTitle, testData.productUrl, testData.sellerPayout);
-            results.email = sent ? 'sent' : 'failed';
-          } else if (type === 'payout_sent') {
-            const sent = await sendPayoutNotification(seller.email, seller.name, testData.productTitle, testData.sellerPayout, 'PayPal (test)');
-            results.email = sent ? 'sent' : 'failed';
-          } else {
-            results.email = 'no email template for this type';
-          }
+        let emailTemplate;
+        if (type === 'listing_approved') {
+          emailTemplate = listingApprovedEmail(seller.name, testData.productTitle, testData.productUrl, testData.sellerPayout);
+        } else if (type === 'payout_sent') {
+          emailTemplate = payoutNotificationEmail(seller.name, testData.productTitle, testData.sellerPayout, 'PayPal (test)');
+        }
 
-          if (results.email === 'sent') {
-            await logMessage({
-              sellerId: seller.id,
-              type: 'email',
-              recipient: seller.email,
-              subject: `[TEST] ${type}`,
-              content: `Test ${type} notification`,
-              context: type,
-              metadata: { test: true, ...testData }
-            });
-          }
-        } catch (e) {
-          results.email = e.message;
+        if (emailTemplate) {
+          const emailResult = await sendEmail({
+            sellerId: seller.id,
+            to: seller.email,
+            subject: emailTemplate.subject,
+            html: emailTemplate.html,
+            context: type,
+            metadata: testMeta
+          });
+          results.email = emailResult.success ? 'sent' : emailResult.error || 'failed';
+        } else {
+          results.email = 'no email template for this type';
         }
       }
 
@@ -1016,34 +862,3 @@ export default async function handler(req, res) {
   }
 }
 
-async function sendWhatsAppApproval(phone, name, title, url, payout) {
-  // Template: "Your {{1}} has been approved and is now live on The Phir Story! 🎉"
-  // Only 1 parameter: product title
-  const to = phone.replace(/\D/g, '');
-
-  const res = await fetch(`https://graph.facebook.com/v18.0/${WHATSAPP_PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to,
-      type: 'template',
-      template: {
-        name: 'listing_approved',
-        language: { code: 'en_US' },
-        components: [
-          {
-            type: 'body',
-            parameters: [
-              { type: 'text', text: title }
-            ]
-          }
-        ]
-      }
-    })
-  });
-  return res.ok;
-}

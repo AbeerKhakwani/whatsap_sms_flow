@@ -3,6 +3,9 @@
 // Vercel Cron: runs at 9 AM daily
 
 import { createClient } from '@supabase/supabase-js';
+import { sendEmail } from '../../lib/send-email.js';
+import { sendWhatsApp } from '../../lib/send-whatsapp.js';
+import { shippingReminderEmail } from '../../lib/email.js';
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -105,12 +108,11 @@ export default async function handler(req, res) {
         urgencyText = '⚠️ FINAL REMINDER - ' + urgencyText;
       }
 
+      const metadata = { productTitle: shipment.product_title, daysRemaining, isLastReminder };
+
       try {
         // Send WhatsApp reminder
-        if (seller.phone && process.env.WHATSAPP_ACCESS_TOKEN) {
-          let phone = seller.phone.replace(/\D/g, '');
-          if (!phone.startsWith('1') && phone.length === 10) phone = '1' + phone;
-
+        if (seller.phone) {
           const labelLine = shipment.shipping_label_url
             ? `Your label is ready! Print it from your dashboard.`
             : `Get your shipping label from your dashboard.`;
@@ -122,57 +124,27 @@ export default async function handler(req, res) {
             `💵 Your payout: $${shipment.seller_payout?.toFixed(0) || '0'}\n\n` +
             `Dashboard: https://sell.thephirstory.com/seller/profile?tab=sales`;
 
-          await fetch(`https://graph.facebook.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              to: phone,
-              type: 'text',
-              text: { body: waMessage }
-            })
+          await sendWhatsApp({
+            sellerId: seller.id,
+            to: seller.phone,
+            textBody: waMessage,
+            context: 'shipping_reminder',
+            metadata
           });
-          console.log(`  📱 WhatsApp sent to ${seller.phone} for "${shipment.product_title}"`);
         }
 
         // Send email reminder
-        if (seller.email && process.env.RESEND_API_KEY) {
-          const emailSubject = daysRemaining <= 0
-            ? `⚠️ Overdue: Please ship "${shipment.product_title}"`
-            : `📦 Reminder: Ship "${shipment.product_title}" by ${shipByFormatted}`;
-
-          await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              from: 'The Phir Story <noreply@send.thephirstory.com>',
-              to: seller.email,
-              subject: emailSubject,
-              html: `
-                <div style="font-family: sans-serif; max-width: 500px;">
-                  <h2>📦 Shipping Reminder</h2>
-                  <p>Hi ${seller.name || 'there'},</p>
-                  <p>Please ship your item: <strong>${shipment.product_title}</strong></p>
-
-                  <div style="background: ${daysRemaining <= 0 ? '#fee2e2' : '#fef3c7'}; padding: 16px; border-radius: 8px; margin: 20px 0;">
-                    <p style="margin: 0; font-weight: bold;">Ship by: ${shipByFormatted}</p>
-                    <p style="margin: 8px 0 0; color: ${daysRemaining <= 0 ? '#dc2626' : '#92400e'};">${urgencyText}</p>
-                  </div>
-
-                  <p style="font-size: 18px; color: #16a34a;"><strong>Your payout: $${shipment.seller_payout?.toFixed(2) || '0.00'}</strong></p>
-
-                  <a href="https://sell.thephirstory.com/seller/profile?tab=sales" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin-top: 16px;">Get Shipping Label</a>
-                </div>
-              `
-            })
+        if (seller.email) {
+          const dashboardUrl = 'https://sell.thephirstory.com/seller/profile?tab=sales';
+          const { subject, html } = shippingReminderEmail(seller.name, shipment.product_title, daysRemaining, dashboardUrl);
+          await sendEmail({
+            sellerId: seller.id,
+            to: seller.email,
+            subject,
+            html,
+            context: 'shipping_reminder',
+            metadata
           });
-          console.log(`  📧 Email sent to ${seller.email} for "${shipment.product_title}"`);
         }
 
         // Update reminder tracking

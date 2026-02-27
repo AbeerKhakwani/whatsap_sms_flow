@@ -614,6 +614,11 @@ export default function SellerDetail() {
                       }`}>
                         {msg.type === 'whatsapp' ? 'WhatsApp' : 'Email'}
                       </span>
+                      {msg.status === 'failed' && (
+                        <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-700">
+                          Failed
+                        </span>
+                      )}
                       {msg.context && (
                         <span className="text-xs text-stone-500 capitalize">
                           {msg.context.replace(/_/g, ' ')}
