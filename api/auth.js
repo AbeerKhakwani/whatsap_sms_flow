@@ -1,7 +1,6 @@
 // api/auth.js
 // Auth endpoint - handles seller login with email/phone verification
 
-import { createClient } from '@supabase/supabase-js';
 import { verificationCodeEmail, welcomeEmail, listingApprovedEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
@@ -12,20 +11,11 @@ import {
   generateSellerToken,
   verifyToken
 } from '../lib/auth-utils.js';
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+import { supabase } from '../lib/supabase-admin.js';
+import { cors } from '../lib/cors.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (cors(req, res, 'POST, OPTIONS')) return;
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });

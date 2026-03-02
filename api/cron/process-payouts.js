@@ -2,15 +2,10 @@
 // Daily cron job to process payouts after contest window expires
 // Vercel Cron: runs at 10 AM daily
 
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../lib/supabase-admin.js';
 import { sendEmail } from '../../lib/send-email.js';
 import { sendWhatsApp } from '../../lib/send-whatsapp.js';
 import { payoutAvailableEmail } from '../../lib/email.js';
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
 
 export default async function handler(req, res) {
   // Verify this is a cron request

@@ -2,15 +2,10 @@
 // Daily cron job to remind sellers to ship their items
 // Vercel Cron: runs at 9 AM daily
 
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../lib/supabase-admin.js';
 import { sendEmail } from '../../lib/send-email.js';
 import { sendWhatsApp } from '../../lib/send-whatsapp.js';
 import { shippingReminderEmail } from '../../lib/email.js';
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
 
 export default async function handler(req, res) {
   // Verify this is a cron request (Vercel adds this header)

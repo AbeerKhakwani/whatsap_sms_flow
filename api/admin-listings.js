@@ -5,24 +5,15 @@ import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCo
 import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
-import { getSellerEmail, getSellerPayout } from '../lib/metafield-helpers.js';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+import { supabase } from '../lib/supabase-admin.js';
+import { cors } from '../lib/cors.js';
+import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue, extractPricing, upsertMetafield } from '../lib/shopify-metafields.js';
+import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
 
 const STORE_URL = process.env.VITE_SHOPIFY_STORE_URL?.replace('.myshopify.com', '');
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (cors(req, res)) return;
 
   const { action } = req.query;
 
@@ -42,34 +33,14 @@ export default async function handler(req, res) {
         const variant = product.variants?.[0] || {};
         const tags = product.tags?.split(', ') || [];
 
-        // Fetch metafields to get seller email
-        const productWithMetafields = await getProduct(product.id, true);
-        const sellerEmail = getSellerEmail(productWithMetafields);
-        const sellerPayout = getSellerPayout(productWithMetafields) || 0;
+        // Fetch metafields to get seller email + pricing
+        const metafields = await fetchMetafields(product.id);
+        const sellerEmail = getSellerEmail(metafields);
+        const sellerId = getSellerId(metafields);
+        const { commissionRate, sellerPayout } = extractPricing(metafields, variant.price);
 
-        // Get commission rate from metafields
-        const commissionMetafield = productWithMetafields.metafields?.find(m => m.namespace === 'pricing' && m.key === 'commission_rate');
-        const commissionRate = commissionMetafield?.value ? parseInt(commissionMetafield.value) : 18;
-
-        let seller = null;
-        if (sellerEmail) {
-          const { data } = await supabase
-            .from('sellers')
-            .select('id, name, email, phone')
-            .ilike('email', sellerEmail.toLowerCase())
-            .maybeSingle();
-          seller = data;
-        }
-
-        // Fallback: find seller who has this product in their shopify_product_ids
-        if (!seller) {
-          const { data } = await supabase
-            .from('sellers')
-            .select('id, name, email, phone')
-            .contains('shopify_product_ids', [product.id.toString()])
-            .maybeSingle();
-          seller = data;
-        }
+        // Find seller in DB (try ID, email, then product ID fallback)
+        const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone');
 
         return {
           id: product.id,
@@ -133,49 +104,12 @@ export default async function handler(req, res) {
           const commission = parseInt(updates.commission) || 18;
           const variant = productBefore.variants?.[0];
           const askingPrice = parseFloat(variant?.price) || 0;
-          const sellerPayout = (askingPrice - 10) * ((100 - commission) / 100); // Subtract $10 fee, then apply commission
+          const sellerPayout = (askingPrice - 10) * ((100 - commission) / 100);
 
-          // Update metafields via REST API
-          await fetch(
-            `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${shopifyProductId}/metafields.json`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
-              },
-              body: JSON.stringify({
-                metafield: {
-                  namespace: 'pricing',
-                  key: 'commission_rate',
-                  value: commission.toString(),
-                  type: 'number_integer'
-                }
-              })
-            }
-          );
-
-          await fetch(
-            `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${shopifyProductId}/metafields.json`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
-              },
-              body: JSON.stringify({
-                metafield: {
-                  namespace: 'pricing',
-                  key: 'seller_payout',
-                  value: JSON.stringify({
-                    amount: sellerPayout.toFixed(2),
-                    currency_code: 'USD'
-                  }),
-                  type: 'money'
-                }
-              })
-            }
-          );
+          const existingMf = await fetchMetafields(shopifyProductId);
+          await upsertMetafield(shopifyProductId, existingMf, 'pricing', 'commission_rate', commission.toString(), 'number_integer');
+          await upsertMetafield(shopifyProductId, existingMf, 'pricing', 'seller_payout',
+            JSON.stringify({ amount: sellerPayout.toFixed(2), currency_code: 'USD' }), 'money');
 
           // Update inventory item cost
           if (variant?.inventory_item_id) {
@@ -206,10 +140,10 @@ export default async function handler(req, res) {
 
       const product = await approveDraft(shopifyProductId);
 
-      // Try metafield first, then fall back to Supabase lookup
-      let sellerEmail = getSellerEmail(productBefore);
+      // Get seller email + payout from metafields
+      let sellerEmail = getSellerEmail(productBefore.metafields);
+      const sellerIdMF = getSellerId(productBefore.metafields);
 
-      // Get updated payout if commission was changed
       let sellerPayout;
       if (updates?.commission !== undefined) {
         const commission = parseInt(updates.commission) || 18;
@@ -217,35 +151,14 @@ export default async function handler(req, res) {
         const askingPrice = parseFloat(variant?.price) || 0;
         sellerPayout = (askingPrice - 10) * ((100 - commission) / 100);
       } else {
-        sellerPayout = getSellerPayout(productBefore) || 0;
+        const pricing = extractPricing(productBefore.metafields, productBefore.variants?.[0]?.price);
+        sellerPayout = pricing.sellerPayout;
       }
       const productUrl = `https://${STORE_URL}.com/products/${product.handle}`;
 
-      let seller = null;
-
-      // First try: lookup by metafield email
-      if (sellerEmail) {
-        const { data } = await supabase
-          .from('sellers')
-          .select('*')
-          .ilike('email', sellerEmail.toLowerCase())
-          .maybeSingle();
-        seller = data;
-      }
-
-      // Fallback: find seller who has this product in their shopify_product_ids
-      if (!seller) {
-        const { data } = await supabase
-          .from('sellers')
-          .select('*')
-          .contains('shopify_product_ids', [shopifyProductId.toString()])
-          .maybeSingle();
-        seller = data;
-        if (seller) {
-          sellerEmail = seller.email;
-          console.log(`📧 Found seller via product ID lookup: ${seller.email}`);
-        }
-      }
+      // Find seller in DB (try ID, email, then product ID fallback)
+      const seller = await resolveSellerFromProduct(sellerEmail, sellerIdMF, shopifyProductId);
+      if (seller && !sellerEmail) sellerEmail = seller.email;
 
       if (!skipNotification && sellerEmail) {
         const sellerId = seller?.id;
@@ -289,33 +202,11 @@ export default async function handler(req, res) {
       const productBefore = await getProduct(shopifyProductId);
       const productTitle = productBefore.title;
 
-      // Try metafield first, then fall back to Supabase lookup
-      let sellerEmail = getSellerEmail(productBefore);
-      let seller = null;
-
-      // First try: lookup by metafield email
-      if (sellerEmail) {
-        const { data } = await supabase
-          .from('sellers')
-          .select('*')
-          .ilike('email', sellerEmail.toLowerCase())
-          .maybeSingle();
-        seller = data;
-      }
-
-      // Fallback: find seller who has this product in their shopify_product_ids
-      if (!seller) {
-        const { data } = await supabase
-          .from('sellers')
-          .select('*')
-          .contains('shopify_product_ids', [shopifyProductId.toString()])
-          .maybeSingle();
-        seller = data;
-        if (seller) {
-          sellerEmail = seller.email;
-          console.log(`📧 Found seller via product ID lookup: ${seller.email}`);
-        }
-      }
+      // Find seller from metafields + DB lookup
+      let sellerEmail = getSellerEmail(productBefore.metafields);
+      const sellerIdMF = getSellerId(productBefore.metafields);
+      const seller = await resolveSellerFromProduct(sellerEmail, sellerIdMF, shopifyProductId);
+      if (seller && !sellerEmail) sellerEmail = seller.email;
 
       // Delete the draft
       await deleteProduct(shopifyProductId);

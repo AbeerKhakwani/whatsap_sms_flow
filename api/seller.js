@@ -3,7 +3,6 @@
 // Also handles Shopify order webhooks
 
 import crypto from 'crypto';
-import { createClient } from '@supabase/supabase-js';
 import { getProduct, updateProduct, fulfillOrder } from '../lib/shopify.js';
 import { validateUpdate } from '../lib/security.js';
 import { getShippingLabel, getShippingInstructions, WAREHOUSE_ADDRESS } from '../lib/shipping.js';
@@ -11,20 +10,12 @@ import { getSellerMessages } from '../lib/messages.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { itemSoldInlineEmail, shippingLabelEmail } from '../lib/email.js';
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+import { supabase } from '../lib/supabase-admin.js';
+import { cors } from '../lib/cors.js';
+import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (cors(req, res)) return;
 
   const { action } = req.query;
 
@@ -88,24 +79,7 @@ export default async function handler(req, res) {
       const { products } = await productsRes.json();
 
       // PARALLEL FETCH: Get all metafields at once
-      const metafieldPromises = (products || []).map(async (product) => {
-        try {
-          const res = await fetch(
-            `https://${SHOPIFY_URL}/admin/api/2024-10/products/${product.id}/metafields.json`,
-            { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
-          );
-          const { metafields } = await res.json();
-          return { productId: product.id, metafields: metafields || [] };
-        } catch (e) {
-          return { productId: product.id, metafields: [] };
-        }
-      });
-
-      const allMetafields = await Promise.all(metafieldPromises);
-      const metafieldsByProduct = {};
-      for (const { productId, metafields } of allMetafields) {
-        metafieldsByProduct[productId] = metafields;
-      }
+      const metafieldsByProduct = await fetchMetafieldsBatch((products || []).map(p => p.id));
 
       // Process all products
       for (const product of products || []) {
@@ -113,30 +87,8 @@ export default async function handler(req, res) {
         const metafields = metafieldsByProduct[product.id] || [];
 
         // Extract pricing from metafields
-        let commissionRate = 18;
-        let sellerAskingPrice = null;
-        let sellerPayout = null;
-
-        for (const mf of metafields) {
-          if (mf.namespace === 'pricing' && mf.key === 'commission_rate') {
-            commissionRate = parseFloat(mf.value) || 18;
-          }
-          if (mf.namespace === 'pricing' && mf.key === 'seller_asking_price') {
-            sellerAskingPrice = parseFloat(mf.value) || null;
-          }
-          if (mf.namespace === 'pricing' && mf.key === 'seller_payout') {
-            sellerPayout = parseFloat(mf.value) || null;
-          }
-        }
-
-        // Fallback calculation if metafields not set
         const price = parseFloat(variant.price) || 0;
-        if (sellerAskingPrice === null) {
-          sellerAskingPrice = Math.max(0, price - 10);
-        }
-        if (sellerPayout === null) {
-          sellerPayout = sellerAskingPrice * ((100 - commissionRate) / 100);
-        }
+        const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, price);
 
         // Check if sold (0 inventory or archived)
         const inventory = variant.inventory_quantity ?? 0;
@@ -341,45 +293,7 @@ export default async function handler(req, res) {
 
         // If price changed, update pricing metafields
         if (safeData.price !== undefined) {
-          // Update metafields
-          const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
-          const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
-
-          // Get existing metafields to read product's commission rate
-          const mfRes = await fetch(
-            `https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}/metafields.json`,
-            { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
-          );
-          const { metafields } = await mfRes.json();
-
-          // Use product's commission rate, fallback to seller's default, then 18%
-          const existingCommission = metafields?.find(m => m.namespace === 'pricing' && m.key === 'commission_rate')?.value;
-          const commissionRate = parseFloat(existingCommission) || seller.commission_rate || 18;
-
-          const newPrice = parseFloat(safeData.price);
-          const askingPrice = Math.max(0, newPrice - 10); // Remove $10 fee
-          const payout = askingPrice * (1 - commissionRate / 100);
-
-          // Helper to update or create metafield
-          async function setMetafield(namespace, key, value, type = 'number_decimal') {
-            const existing = (metafields || []).find(m => m.namespace === namespace && m.key === key);
-            if (existing) {
-              await fetch(`https://${SHOPIFY_URL}/admin/api/2024-10/metafields/${existing.id}.json`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-                body: JSON.stringify({ metafield: { id: existing.id, value: value.toString() } })
-              });
-            } else {
-              await fetch(`https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}/metafields.json`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-                body: JSON.stringify({ metafield: { namespace, key, value: value.toString(), type } })
-              });
-            }
-          }
-
-          await setMetafield('pricing', 'seller_asking_price', askingPrice.toFixed(2));
-          await setMetafield('pricing', 'seller_payout', payout.toFixed(2));
+          await updatePricingMetafields(productId, safeData.price, seller.commission_rate || 18);
         }
       }
 
@@ -392,13 +306,8 @@ export default async function handler(req, res) {
 
       // Get updated payout for response - re-fetch metafields for accurate data
       const finalPrice = parseFloat(updatedProduct.variants?.[0]?.price) || 0;
-      const finalMfRes = await fetch(
-        `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products/${productId}/metafields.json`,
-        { headers: { 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN } }
-      );
-      const { metafields: finalMf } = await finalMfRes.json();
-      const sellerAskingPrice = parseFloat(finalMf?.find(m => m.namespace === 'pricing' && m.key === 'seller_asking_price')?.value) || Math.max(0, finalPrice - 10);
-      const sellerPayout = parseFloat(finalMf?.find(m => m.namespace === 'pricing' && m.key === 'seller_payout')?.value) || sellerAskingPrice * 0.82;
+      const finalMf = await fetchMetafields(productId);
+      const { sellerAskingPrice, sellerPayout } = extractPricing(finalMf, finalPrice);
 
       return res.status(200).json({
         success: true,
@@ -504,64 +413,23 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Product IDs required' });
       }
 
-      const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
-      const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
-
       // BATCH FETCH: Get all products in one API call
       const productsRes = await fetch(
-        `https://${SHOPIFY_URL}/admin/api/2024-10/products.json?ids=${ids.join(',')}&limit=250`,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+        `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/products.json?ids=${ids.join(',')}&limit=250`,
+        { headers: { 'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN } }
       );
       const { products: shopifyProducts } = await productsRes.json();
 
       // PARALLEL FETCH: Get all metafields at once
-      const metafieldPromises = (shopifyProducts || []).map(async (product) => {
-        try {
-          const res = await fetch(
-            `https://${SHOPIFY_URL}/admin/api/2024-10/products/${product.id}/metafields.json`,
-            { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
-          );
-          const { metafields } = await res.json();
-          return { productId: product.id, metafields: metafields || [] };
-        } catch (e) {
-          return { productId: product.id, metafields: [] };
-        }
-      });
-
-      const allMetafields = await Promise.all(metafieldPromises);
-      const metafieldsByProduct = {};
-      for (const { productId, metafields } of allMetafields) {
-        metafieldsByProduct[productId] = metafields;
-      }
+      const metafieldsByProduct = await fetchMetafieldsBatch((shopifyProducts || []).map(p => p.id));
 
       // Process all products
       const products = (shopifyProducts || []).map(product => {
         const variant = product.variants?.[0] || {};
         const metafields = metafieldsByProduct[product.id] || [];
 
-        let commissionRate = 18;
-        let sellerAskingPrice = null;
-        let sellerPayout = null;
-
-        for (const mf of metafields) {
-          if (mf.namespace === 'pricing' && mf.key === 'commission_rate') {
-            commissionRate = parseFloat(mf.value) || 18;
-          }
-          if (mf.namespace === 'pricing' && mf.key === 'seller_asking_price') {
-            sellerAskingPrice = parseFloat(mf.value) || null;
-          }
-          if (mf.namespace === 'pricing' && mf.key === 'seller_payout') {
-            sellerPayout = parseFloat(mf.value) || null;
-          }
-        }
-
         const price = parseFloat(variant.price) || 0;
-        if (sellerAskingPrice === null) {
-          sellerAskingPrice = Math.max(0, price - 10);
-        }
-        if (sellerPayout === null) {
-          sellerPayout = sellerAskingPrice * ((100 - commissionRate) / 100);
-        }
+        const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, price);
 
         const inventory = variant.inventory_quantity ?? 0;
         const isSold = inventory === 0 && product.status === 'active';
@@ -623,21 +491,13 @@ export default async function handler(req, res) {
           let productTitle = item.title; // Use line_item title (always available from webhook)
 
           try {
-            const shopifyUrl = process.env.VITE_SHOPIFY_STORE_URL || process.env.SHOPIFY_STORE_URL;
-            const shopifyToken = process.env.VITE_SHOPIFY_ACCESS_TOKEN || process.env.SHOPIFY_ACCESS_TOKEN;
-            const metafieldsRes = await fetch(
-              `https://${shopifyUrl}/admin/api/2024-10/products/${productId}/metafields.json`,
-              { headers: { 'X-Shopify-Access-Token': shopifyToken } }
-            );
-            const { metafields } = await metafieldsRes.json();
-
-            for (const mf of metafields || []) {
-              if (mf.namespace === 'seller' && mf.key === 'email') sellerEmail = mf.value;
-              if (mf.namespace === 'seller' && mf.key === 'id') sellerId = mf.value;
-              if (mf.namespace === 'pricing' && mf.key === 'seller_payout') sellerPayout = parseFloat(mf.value);
-              if (mf.namespace === 'pricing' && mf.key === 'commission_rate') commissionRate = parseFloat(mf.value);
-              if (mf.namespace === 'seller' && mf.key === 'listing_type') listingType = mf.value || 'regular';
-            }
+            const metafields = await fetchMetafields(productId);
+            sellerEmail = getSellerEmail(metafields);
+            sellerId = getSellerId(metafields);
+            sellerPayout = parseFloat(getMetafieldValue(metafields, 'pricing', 'seller_payout')) || null;
+            commissionRate = parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18;
+            const listingTypeVal = getMetafieldValue(metafields, 'seller', 'listing_type');
+            if (listingTypeVal) listingType = listingTypeVal;
           } catch (e) {
             console.log('Could not fetch metafields:', e.message);
           }
@@ -1117,38 +977,12 @@ export default async function handler(req, res) {
       }
 
       // Update Shopify metafields
-      const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
-      const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+      const metafields = await fetchMetafields(productId);
 
-      // Get existing metafields
-      const metafieldsRes = await fetch(
-        `https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}/metafields.json`,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
-      );
-      const { metafields } = await metafieldsRes.json();
-
-      // Update or create seller metafields
-      async function setMetafield(namespace, key, value, type = 'single_line_text_field') {
-        const existing = (metafields || []).find(m => m.namespace === namespace && m.key === key);
-        if (existing) {
-          await fetch(`https://${SHOPIFY_URL}/admin/api/2024-10/metafields/${existing.id}.json`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-            body: JSON.stringify({ metafield: { id: existing.id, value: value.toString() } })
-          });
-        } else {
-          await fetch(`https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}/metafields.json`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
-            body: JSON.stringify({ metafield: { namespace, key, value: value.toString(), type } })
-          });
-        }
-      }
-
-      await setMetafield('seller', 'email', toSeller.email);
-      await setMetafield('seller', 'id', toSeller.id);
+      await upsertMetafield(productId, metafields, 'seller', 'email', toSeller.email, 'single_line_text_field');
+      await upsertMetafield(productId, metafields, 'seller', 'id', toSeller.id, 'single_line_text_field');
       if (toSeller.phone) {
-        await setMetafield('seller', 'phone', toSeller.phone);
+        await upsertMetafield(productId, metafields, 'seller', 'phone', toSeller.phone, 'single_line_text_field');
       }
 
       // Remove from old seller's product list
