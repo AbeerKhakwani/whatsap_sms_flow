@@ -11,14 +11,9 @@
  */
 
 import crypto from 'crypto';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase-admin.js';
 
 const PRIVATE_KEY = process.env.WHATSAPP_PRIVATE_KEY?.replace(/\\n/g, '\n');
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
 
 // ============ ENCRYPTION/DECRYPTION ============
 
@@ -89,70 +84,58 @@ function encryptResponse(response, aesKey, iv) {
 // ============ FLOW ACTION HANDLERS ============
 
 /**
- * Handle INIT action - return initial screen with pre-filled data
+ * Handle INIT action - return initial screen with pre-filled data.
+ * The Supabase lookup is best-effort with a 3s timeout — if it's slow
+ * we return an empty form rather than letting Meta's 10s deadline pass.
  */
-async function handleInit(decryptedData, aesKey) {
+async function handleInit(decryptedData) {
   const { flow_token } = decryptedData;
   console.log('🚀 INIT with flow_token:', flow_token);
 
-  let prefillData = {
-    brand: '',
-    pieces: '',
-    size: '',
-    condition: '',
-    price: '',
-    chest: '',
-    hip: '',
-    color: '',
-    fabric: '',
-    notes: ''
+  const emptyForm = {
+    brand: '', pieces: '', size: '', condition: '', price: '',
+    chest: '', hip: '', color: '', fabric: '', notes: ''
   };
 
-  // flow_token format: "prefill_{phone}" or "fresh_{phone}"
-  if (flow_token?.startsWith('prefill_')) {
-    // Extract phone and normalize (add + prefix if missing)
-    let phone = flow_token.replace('prefill_', '');
-    if (!phone.startsWith('+')) {
-      phone = '+' + phone;
-    }
-    console.log('📋 Looking up pre-fill data for phone:', phone);
-
-    // Look up the conversation context for extracted data
-    const { data: conv, error } = await supabase
-      .from('sms_conversations')
-      .select('context')
-      .eq('phone_number', phone)
-      .single();
-
-    console.log('📋 DB lookup result:', conv ? 'found' : 'not found', error?.message || '');
-
-    console.log('📋 Context data:', JSON.stringify(conv?.context || {}));
-
-    if (conv?.context?.extracted_data) {
-      const extracted = conv.context.extracted_data;
-      console.log('📋 Extracted data:', JSON.stringify(extracted));
-      prefillData = {
-        brand: extracted.designer || '',
-        pieces: extracted.pieces || '',
-        size: extracted.size || '',
-        condition: extracted.condition || '',
-        price: extracted.asking_price?.toString() || '',
-        chest: extracted.chest?.toString() || '',
-        hip: extracted.hip?.toString() || '',
-        color: extracted.color || '',
-        fabric: extracted.fabric || '',
-        notes: extracted.notes || ''
-      };
-      console.log('✅ Pre-filling with:', JSON.stringify(prefillData));
-    } else {
-      console.log('⚠️ No extracted_data found in context');
-    }
+  // flow_token format: "prefill_{phone}_{timestamp}" or "fresh_{phone}"
+  if (!flow_token?.startsWith('prefill_')) {
+    return { screen: 'REQUIRED_DETAILS', data: emptyForm };
   }
 
-  return {
-    screen: 'REQUIRED_DETAILS',
-    data: prefillData
-  };
+  // Extract phone: strip "prefill_" prefix and optional "_timestamp" suffix
+  let phone = flow_token.replace('prefill_', '').replace(/_\d+$/, '');
+  if (!phone.startsWith('+')) phone = '+' + phone;
+
+  // Best-effort prefill with 3s timeout — never block the flow
+  try {
+    const dbStart = Date.now();
+    const result = await Promise.race([
+      supabase.from('sms_conversations').select('context').eq('phone_number', phone).single(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 3000))
+    ]);
+    console.log(`📋 DB lookup: ${Date.now() - dbStart}ms`);
+
+    const extracted = result.data?.context?.extracted_data;
+    if (extracted) {
+      console.log('✅ Pre-filling form');
+      return {
+        screen: 'REQUIRED_DETAILS',
+        data: {
+          brand: extracted.designer || '', pieces: extracted.pieces || '',
+          size: extracted.size || '', condition: extracted.condition || '',
+          price: extracted.asking_price?.toString() || '',
+          chest: extracted.chest?.toString() || '', hip: extracted.hip?.toString() || '',
+          color: extracted.color || '', fabric: extracted.fabric || '',
+          notes: extracted.notes || ''
+        }
+      };
+    }
+    console.log('⚠️ No extracted_data in context');
+  } catch (e) {
+    console.log(`⚠️ Prefill skipped: ${e.message} — returning empty form`);
+  }
+
+  return { screen: 'REQUIRED_DETAILS', data: emptyForm };
 }
 
 /**
@@ -248,39 +231,39 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const t0 = Date.now();
+  const ms = () => `${Date.now() - t0}ms`;
+
   try {
     const { encrypted_flow_data, encrypted_aes_key, initial_vector } = req.body;
 
-    // Validate required encryption fields
     if (!encrypted_flow_data || !encrypted_aes_key || !initial_vector) {
-      console.error('❌ Missing encryption fields in request');
+      console.error(`❌ Missing encryption fields [${ms()}]`);
       return res.status(421).json({
         error: 'Missing encryption fields',
         required: ['encrypted_flow_data', 'encrypted_aes_key', 'initial_vector']
       });
     }
 
-    // Step 1: Decrypt the AES key using RSA private key
-    console.log('🔐 Decrypting AES key...');
+    // Step 1: Decrypt AES key (RSA-OAEP)
     let aesKey;
     try {
       aesKey = decryptAesKey(encrypted_aes_key);
+      console.log(`🔐 AES key decrypted [${ms()}]`);
     } catch (e) {
-      console.error('❌ AES key decryption failed:', e.message);
+      console.error(`❌ AES key decryption failed [${ms()}]:`, e.message);
       return res.status(421).json({ error: 'Failed to decrypt AES key' });
     }
 
-    // Step 2: Decrypt the flow data using AES-GCM
-    console.log('🔓 Decrypting flow data...');
+    // Step 2: Decrypt flow data (AES-GCM)
     let decryptedData;
     try {
       decryptedData = decryptFlowData(encrypted_flow_data, aesKey, initial_vector);
+      console.log(`🔓 Decrypted action: ${decryptedData.action} [${ms()}]`);
     } catch (e) {
-      console.error('❌ Flow data decryption failed:', e.message);
+      console.error(`❌ Flow data decryption failed [${ms()}]:`, e.message);
       return res.status(421).json({ error: 'Failed to decrypt flow data' });
     }
-
-    console.log('📥 Decrypted action:', decryptedData.action);
 
     // Step 3: Handle the action
     let response;
@@ -288,42 +271,29 @@ export default async function handler(req, res) {
       case 'ping':
         response = handlePing();
         break;
-
       case 'INIT':
-        response = await handleInit(decryptedData, aesKey);
+        response = await handleInit(decryptedData);
         break;
-
       case 'data_exchange':
         response = await handleDataExchange(decryptedData, aesKey);
         break;
-
       default:
-        console.log('❓ Unknown action:', decryptedData.action);
-        response = {
-          screen: 'REQUIRED_DETAILS',
-          data: {}
-        };
+        console.log(`❓ Unknown action: ${decryptedData.action} [${ms()}]`);
+        response = { screen: 'REQUIRED_DETAILS', data: {} };
     }
+    console.log(`📋 Handler done [${ms()}]`);
 
-    // Add version to response (required by WhatsApp)
+    // Step 4: Encrypt + respond
     response.version = '3.0';
-
-    // Step 4: Encrypt the response
-    console.log('🔒 Encrypting response for screen:', response.screen);
     const encryptedResponse = encryptResponse(response, aesKey, initial_vector);
+    console.log(`✅ Response encrypted & sent [${ms()}] screen=${response.screen}`);
 
-    // Return encrypted response as plain text
     res.setHeader('Content-Type', 'text/plain');
     return res.status(200).send(encryptedResponse);
 
   } catch (error) {
-    console.error('❌ Flow endpoint error:', error);
+    console.error(`❌ Flow endpoint error [${ms()}]:`, error.message);
     console.error('Stack:', error.stack);
-
-    // Return 500 with error details for debugging
-    return res.status(500).json({
-      error: 'Internal server error',
-      message: error.message
-    });
+    return res.status(500).json({ error: 'Internal server error', message: error.message });
   }
 }

@@ -643,8 +643,12 @@ async function handleDescription(phone, text, conv, res) {
     notes: extracted.notes || ''
   };
 
+  // Unique flow_token per listing attempt — reusing the same token causes
+  // "Something went wrong" on WhatsApp's client when a previous flow session
+  // with that token hasn't fully closed.
+  const flowToken = `prefill_${phone}_${Date.now()}`;
   console.log('📤 Sending Flow with prefill data:', JSON.stringify(prefillData));
-  await sendWhatsAppFlowWithPrefill(phone, `prefill_${phone}`, messageBody, prefillData);
+  await sendWhatsAppFlowWithPrefill(phone, flowToken, messageBody, prefillData);
   await smsDb.setState(phone, 'awaiting_flow');
 
   return res.status(200).json({ status: 'sent flow with prefill' });
