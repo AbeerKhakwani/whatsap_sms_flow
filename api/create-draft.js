@@ -5,6 +5,7 @@ import { createDraft } from '../lib/shopify.js';
 import { findOrCreateSeller, addProductToSeller } from '../lib/sellers.js';
 import { validateAndSanitize } from '../lib/security.js';
 import { cors } from '../lib/cors.js';
+import { sendEmail } from '../lib/send-email.js';
 
 export default async function handler(req, res) {
   if (cors(req, res, 'POST, OPTIONS')) return;
@@ -78,7 +79,11 @@ export default async function handler(req, res) {
       description: safeFields.description,
       sellerEmail: email,
       sellerId: seller?.id?.toString() || '',
-      sellerPhone: seller?.phone || ''
+      sellerPhone: seller?.phone || '',
+      chest: fields.chest || '',
+      hip: fields.hip || '',
+      notes: fields.notes || '',
+      originalPrice: fields.original_price || ''
     });
 
     console.log('✅ Shopify draft created:', product.id);
@@ -90,6 +95,25 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error('Product linking error (non-fatal):', err);
       }
+    }
+
+    // Notify admin of new listing
+    const shopifyAdminUrl = `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`;
+    try {
+      await sendEmail({
+        to: 'thephirstory@gmail.com',
+        subject: `New Listing: ${safeFields.designer || 'Unknown'} - ${safeFields.item_type || 'Item'}`,
+        html: `<h3>New listing submitted</h3>
+          <p><strong>Designer:</strong> ${safeFields.designer || 'Unknown'}</p>
+          <p><strong>Item:</strong> ${safeFields.item_type || 'Unknown'}</p>
+          <p><strong>Size:</strong> ${fields.size || 'One Size'}</p>
+          <p><strong>Asking Price:</strong> $${safeFields.asking_price || 0}</p>
+          <p><strong>Seller:</strong> ${email || 'Unknown'} ${seller?.phone ? `(${seller.phone})` : ''}</p>
+          <p><a href="${shopifyAdminUrl}">View in Shopify</a></p>`,
+        context: 'new_listing_admin'
+      });
+    } catch (emailErr) {
+      console.error('Admin notification email error (non-fatal):', emailErr);
     }
 
     return res.status(200).json({

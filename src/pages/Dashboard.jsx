@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Link as LinkIcon } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 
 const REJECTION_REASONS = [
@@ -26,7 +26,21 @@ export default function Dashboard() {
   const [rejectReason, setRejectReason] = useState('');
   const [rejectNote, setRejectNote] = useState('');
   const [approveModal, setApproveModal] = useState({ open: false, listing: null });
-  const [editedListing, setEditedListing] = useState({});
+
+  // Admin Create Listing state
+  const [createModal, setCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good',
+    original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: ''
+  });
+  const [sellerSearch, setSellerSearch] = useState('');
+  const [sellerResults, setSellerResults] = useState([]);
+  const [selectedSeller, setSelectedSeller] = useState(null);
+  const [searchingSellers, setSearchingSellers] = useState(false);
+  const [creatingListing, setCreatingListing] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [adminScrapeUrl, setAdminScrapeUrl] = useState('');
+  const [adminScraping, setAdminScraping] = useState(false);
 
   // Mark Paid modal state
   const [showPayModal, setShowPayModal] = useState(false);
@@ -124,16 +138,10 @@ export default function Dashboard() {
 
   function openApproveModal(listing) {
     setApproveModal({ open: true, listing });
-    setEditedListing({
-      description: listing.description || '',
-      tags: listing.tags ? listing.tags.join(', ') : '',
-      commission: listing.commission_rate || 18
-    });
   }
 
   function closeApproveModal() {
     setApproveModal({ open: false, listing: null });
-    setEditedListing({});
   }
 
   async function confirmApproval() {
@@ -145,12 +153,7 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          shopifyProductId: listing.shopify_product_id,
-          updates: {
-            description: editedListing.description,
-            tags: editedListing.tags,
-            commission: parseInt(editedListing.commission) || 18
-          }
+          shopifyProductId: listing.shopify_product_id
         })
       });
 
@@ -168,6 +171,74 @@ export default function Dashboard() {
       alert(`Error: ${error.message}`);
     }
     setApproving(null);
+  }
+
+  // Admin listing helpers
+  async function searchSellers(query) {
+    if (!query || query.length < 2) { setSellerResults([]); return; }
+    setSearchingSellers(true);
+    try {
+      const res = await fetch(`/api/admin-listings?action=sellers&search=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success) setSellerResults(data.sellers || []);
+    } catch { setSellerResults([]); }
+    setSearchingSellers(false);
+  }
+
+  async function handleAdminScrape(url) {
+    if (!url) return;
+    setAdminScraping(true);
+    try {
+      const res = await fetch('/api/scrape-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        const s = data.data;
+        setCreateForm(prev => ({
+          ...prev,
+          original_price: s.price ? s.price.toString() : prev.original_price,
+          description: s.description || prev.description,
+          designer: s.title && !prev.designer ? s.title : prev.designer
+        }));
+      }
+    } catch { /* ignore */ }
+    setAdminScraping(false);
+  }
+
+  async function submitAdminListing() {
+    if (!selectedSeller) { setCreateError('Select a seller'); return; }
+    if (!createForm.designer || !createForm.asking_price) { setCreateError('Designer and asking price required'); return; }
+    setCreatingListing(true);
+    setCreateError('');
+    try {
+      const res = await fetch('/api/admin-listings?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sellerId: selectedSeller.id,
+          ...createForm,
+          asking_price: parseFloat(createForm.asking_price) || 0,
+          original_price: parseFloat(createForm.original_price) || 0
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCreateModal(false);
+        setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '' });
+        setSelectedSeller(null);
+        setSellerSearch('');
+        setAdminScrapeUrl('');
+        fetchData(); // Refresh listings
+      } else {
+        setCreateError(data.error || 'Failed to create listing');
+      }
+    } catch (err) {
+      setCreateError(err.message);
+    }
+    setCreatingListing(false);
   }
 
   function openRejectModal(listing) {
@@ -307,13 +378,13 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-gray-900">{payout.product_title}</span>
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                      ${payout.sale_price?.toFixed(0)}
+                      ${payout.sale_price?.toFixed(2)}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
                     <span>{payout.seller?.name || payout.seller?.email || 'Unknown'}</span>
                     <span>·</span>
-                    <span className="font-medium text-gray-900">${payout.seller_payout?.toFixed(0)} payout</span>
+                    <span className="font-medium text-gray-900">${payout.seller_payout?.toFixed(2)} payout</span>
                     <span>·</span>
                     <span>{payout.order_name}</span>
                   </div>
@@ -334,11 +405,18 @@ export default function Dashboard() {
 
       {/* Pending Listings */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-semibold text-gray-900 flex items-center gap-2">
             <Clock className="w-4 h-4" />
             Pending Approval ({listings.length})
           </h2>
+          <button
+            onClick={() => setCreateModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Listing
+          </button>
         </div>
 
         {listings.length === 0 ? (
@@ -572,59 +650,33 @@ export default function Dashboard() {
                 <Check className="w-5 h-5 text-green-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Review & Approve Listing</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Approve Listing</h3>
                 <p className="text-sm text-gray-500">{approveModal.listing?.product_name}</p>
               </div>
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description
-                </label>
-                <textarea
-                  value={editedListing.description || ''}
-                  onChange={(e) => setEditedListing(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="Edit the listing description..."
-                  rows={4}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
-                />
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="text-sm text-gray-600 space-y-1">
+                  <p><span className="font-medium">Seller:</span> {approveModal.listing?.seller_name || approveModal.listing?.seller_email || 'Unknown'}</p>
+                  <p><span className="font-medium">Price:</span> ${approveModal.listing?.price || '—'}</p>
+                  {approveModal.listing?.size && <p><span className="font-medium">Size:</span> {approveModal.listing.size}</p>}
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tags (comma separated)
-                </label>
-                <input
-                  type="text"
-                  value={editedListing.tags || ''}
-                  onChange={(e) => setEditedListing(prev => ({ ...prev, tags: e.target.value }))}
-                  placeholder="e.g., Sana Safinaz, Lawn, Medium, Excellent"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Commission Rate (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={editedListing.commission || ''}
-                  onChange={(e) => setEditedListing(prev => ({ ...prev, commission: e.target.value }))}
-                  placeholder="18"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Default is 18%. Seller receives {100 - (parseInt(editedListing.commission) || 18)}% of asking price.
-                </p>
-              </div>
+              <a
+                href={`https://${import.meta.env.VITE_SHOPIFY_STORE_URL}/admin/products/${approveModal.listing?.shopify_product_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Edit in Shopify before approving
+              </a>
 
               <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                 <p className="text-xs text-green-800">
-                  This will approve the listing, add "New Arrivals" tag, and notify the seller via email and WhatsApp.
+                  This will make the listing live, add "New Arrivals" tag, and notify the seller via email and WhatsApp.
                 </p>
               </div>
             </div>
@@ -652,6 +704,189 @@ export default function Dashboard() {
                     <Check className="w-4 h-4" />
                     Approve & Make Live
                   </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Listing Modal */}
+      {createModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Create Listing for Seller</h3>
+              <button onClick={() => setCreateModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Seller Picker */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Seller <span className="text-red-500">*</span></label>
+              {selectedSeller ? (
+                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <div>
+                    <span className="font-medium text-gray-900">{selectedSeller.name || selectedSeller.email}</span>
+                    {selectedSeller.phone && <span className="text-sm text-gray-500 ml-2">{selectedSeller.phone}</span>}
+                  </div>
+                  <button onClick={() => { setSelectedSeller(null); setSellerSearch(''); }} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <div className="flex items-center border border-gray-300 rounded-lg">
+                    <Search className="w-4 h-4 text-gray-400 ml-3" />
+                    <input
+                      type="text"
+                      value={sellerSearch}
+                      onChange={(e) => { setSellerSearch(e.target.value); searchSellers(e.target.value); }}
+                      placeholder="Search by name, email, or phone..."
+                      className="flex-1 px-3 py-2 outline-none rounded-lg"
+                    />
+                    {searchingSellers && <Loader2 className="w-4 h-4 text-gray-400 mr-3 animate-spin" />}
+                  </div>
+                  {sellerResults.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                      {sellerResults.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => { setSelectedSeller(s); setSellerResults([]); setSellerSearch(''); }}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm"
+                        >
+                          <span className="font-medium">{s.name || s.email}</span>
+                          {s.phone && <span className="text-gray-500 ml-2">{s.phone}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Product Link Scraper */}
+            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <label className="block text-sm font-medium text-blue-800 mb-1">Product link (optional)</label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={adminScrapeUrl}
+                  onChange={(e) => setAdminScrapeUrl(e.target.value)}
+                  placeholder="Paste retail URL to auto-fill"
+                  className="flex-1 px-3 py-2 border border-blue-300 rounded-lg text-sm bg-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAdminScrape(adminScrapeUrl)}
+                  disabled={!adminScrapeUrl || adminScraping}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {adminScraping ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Fetch'}
+                </button>
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Designer/Brand *</label>
+                  <input type="text" value={createForm.designer} onChange={e => setCreateForm(f => ({ ...f, designer: e.target.value }))}
+                    placeholder="e.g., Sana Safinaz" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Item Type</label>
+                  <input type="text" value={createForm.item_type} onChange={e => setCreateForm(f => ({ ...f, item_type: e.target.value }))}
+                    placeholder="e.g., 3-piece suit" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Size</label>
+                  <select value={createForm.size} onChange={e => setCreateForm(f => ({ ...f, size: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    <option value="">Select...</option>
+                    {['XS','S','M','L','XL','XXL','One Size','Unstitched'].map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Color</label>
+                  <input type="text" value={createForm.color} onChange={e => setCreateForm(f => ({ ...f, color: e.target.value }))}
+                    placeholder="e.g., Teal" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Condition</label>
+                  <select value={createForm.condition} onChange={e => setCreateForm(f => ({ ...f, condition: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    {['New with tags','Like new','Excellent','Good','Fair'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Material</label>
+                  <input type="text" value={createForm.material} onChange={e => setCreateForm(f => ({ ...f, material: e.target.value }))}
+                    placeholder="e.g., Chiffon" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Chest (")</label>
+                    <input type="text" value={createForm.chest} onChange={e => setCreateForm(f => ({ ...f, chest: e.target.value }))}
+                      placeholder="36" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Hip (")</label>
+                    <input type="text" value={createForm.hip} onChange={e => setCreateForm(f => ({ ...f, hip: e.target.value }))}
+                      placeholder="38" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Original Retail Price ($)</label>
+                  <input type="number" value={createForm.original_price} onChange={e => setCreateForm(f => ({ ...f, original_price: e.target.value }))}
+                    placeholder="250" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Asking Price ($) *</label>
+                  <input type="number" value={createForm.asking_price} onChange={e => setCreateForm(f => ({ ...f, asking_price: e.target.value }))}
+                    placeholder="95" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Description</label>
+                <textarea value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Item description..." rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Notes (internal)</label>
+                <input type="text" value={createForm.notes} onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Admin notes..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+            </div>
+
+            {createError && (
+              <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{createError}</div>
+            )}
+
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setCreateModal(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">
+                Cancel
+              </button>
+              <button onClick={submitAdminListing} disabled={creatingListing}
+                className="flex-1 px-4 py-2.5 bg-black text-white rounded-lg hover:bg-gray-800 font-medium disabled:opacity-50 flex items-center justify-center gap-2">
+                {creatingListing ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</>
+                ) : (
+                  <><Plus className="w-4 h-4" /> Create Draft</>
                 )}
               </button>
             </div>

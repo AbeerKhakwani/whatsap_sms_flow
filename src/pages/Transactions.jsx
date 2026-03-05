@@ -588,12 +588,12 @@ export default function Transactions() {
 
                     {/* Sale */}
                     <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(0)}</span>
+                      <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(2)}</span>
                     </td>
 
                     {/* Payout */}
                     <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(0)}</span>
+                      <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(2)}</span>
                     </td>
 
                     {/* Shipping */}

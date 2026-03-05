@@ -829,7 +829,12 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
           item_type: flowData.pieces,
           size: flowData.size,
           condition: flowData.condition,
-          asking_price: parseInt(flowData.price) || 0
+          asking_price: parseInt(flowData.price) || 0,
+          color: flowData.color || '',
+          material: flowData.fabric || '',
+          chest: flowData.chest || '',
+          hip: flowData.hip || '',
+          notes: flowData.notes || ''
         }
       })
     });

@@ -97,6 +97,9 @@ export default function SellerSubmit() {
   const [uploadProgress, setUploadProgress] = useState('');
   const [processingCount, setProcessingCount] = useState(0);
   const [submitError, setSubmitError] = useState(null); // { message: string, issues: array }
+  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [isScraping, setIsScraping] = useState(false);
+  const [scrapeError, setScrapeError] = useState('');
 
   // Address state for existing users without address
   const [hasAddress, setHasAddress] = useState(null); // null = loading, true/false = has/doesn't have
@@ -160,6 +163,34 @@ export default function SellerSubmit() {
     }
     fetchProfile();
   }, [navigate]);
+
+  async function handleScrapeUrl(url) {
+    if (!url) return;
+    setScrapeError('');
+    setIsScraping(true);
+    try {
+      const res = await fetch(`${API_URL}/api/scrape-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        const scraped = data.data;
+        setFormData(prev => ({
+          ...prev,
+          original_price: scraped.price ? scraped.price.toString() : prev.original_price,
+          additional_details: scraped.description || prev.additional_details,
+          designer: scraped.title && !prev.designer ? scraped.title : prev.designer
+        }));
+      } else {
+        setScrapeError('Could not extract product info from this URL');
+      }
+    } catch (err) {
+      setScrapeError('Failed to fetch product info');
+    }
+    setIsScraping(false);
+  }
 
   async function startRecording() {
     try {
@@ -832,6 +863,32 @@ export default function SellerSubmit() {
               </div>
 
               <div className="space-y-4">
+                {/* Product Link Scraper */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <label className="block text-sm font-medium text-blue-800 mb-1">
+                    Have the original product link? (optional)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={scrapeUrl}
+                      onChange={(e) => setScrapeUrl(e.target.value)}
+                      onBlur={(e) => e.target.value && handleScrapeUrl(e.target.value)}
+                      placeholder="Paste retail URL to auto-fill price & details"
+                      className="flex-1 px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleScrapeUrl(scrapeUrl)}
+                      disabled={!scrapeUrl || isScraping}
+                      className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {isScraping ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Fetch'}
+                    </button>
+                  </div>
+                  {scrapeError && <p className="text-xs text-red-600 mt-1">{scrapeError}</p>}
+                </div>
+
                 {/* Designer */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">

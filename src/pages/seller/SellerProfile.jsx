@@ -1076,7 +1076,7 @@ export default function SellerProfile() {
                         <span>Sold for ${item.retailPrice}</span>
                       </div>
                       <p className="text-sm text-green-600 font-medium mt-1">
-                        You earned ${item.earnings?.toFixed(0)}
+                        You earned ${item.earnings?.toFixed(2)}
                       </p>
                       {item.trackingNumber && (
                         <p className="text-xs text-gray-500 mt-1">
@@ -1683,7 +1683,7 @@ export default function SellerProfile() {
                       </div>
                       <div>
                         <p className="font-medium text-gray-900 text-sm">{item.title}</p>
-                        <p className="text-sm text-green-600">Earnings: ${item.earnings?.toFixed(0)}</p>
+                        <p className="text-sm text-green-600">Earnings: ${item.earnings?.toFixed(2)}</p>
                       </div>
                     </div>
                     <div className="text-right">
@@ -1720,7 +1720,7 @@ export default function SellerProfile() {
               {availableItems.map((item, idx) => (
                 <div key={idx} className="flex items-center justify-between text-sm">
                   <span className="text-gray-700">{item.title}</span>
-                  <span className="font-medium text-green-700">${item.earnings?.toFixed(0)}</span>
+                  <span className="font-medium text-green-700">${item.earnings?.toFixed(2)}</span>
                 </div>
               ))}
             </div>

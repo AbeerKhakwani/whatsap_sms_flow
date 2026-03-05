@@ -552,8 +552,8 @@ export default function SellerDetail() {
 
                   <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-stone-100">
                     <div>
-                      <div className="text-sm font-bold text-stone-900">${listing.price?.toFixed(0)}</div>
-                      <div className="text-[10px] text-green-600">→ ${listing.sellerPayout?.toFixed(0)}</div>
+                      <div className="text-sm font-bold text-stone-900">${listing.price?.toFixed(2)}</div>
+                      <div className="text-[10px] text-green-600">→ ${listing.sellerPayout?.toFixed(2)}</div>
                     </div>
                     <a
                       href={`https://${import.meta.env.VITE_SHOPIFY_STORE_URL}/admin/products/${listing.id}`}

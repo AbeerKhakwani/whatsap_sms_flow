@@ -468,7 +468,7 @@ export default function SellerDashboard() {
                   <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
                     {latest.brand && <span>{latest.brand}</span>}
                     <span>Sold for ${latest.retailPrice}</span>
-                    <span className="text-green-600 font-medium">You earned ${latest.earnings?.toFixed(0)}</span>
+                    <span className="text-green-600 font-medium">You earned ${latest.earnings?.toFixed(2)}</span>
                   </div>
                   {latest.status === 'SOLD_WITH_PAYOUT' && latest.paymentNote && (
                     <p className="text-xs text-green-600 mt-2">{latest.paymentNote}</p>
@@ -576,7 +576,7 @@ export default function SellerDashboard() {
                           You earned: ${listing.sellerPayout?.toFixed(2)}
                         </span>
                         <span className="text-gray-400">
-                          ({100 - (listing.commissionRate || 18)}% of ${listing.sellerAskingPrice?.toFixed(0)})
+                          ({100 - (listing.commissionRate || 18)}% of ${listing.sellerAskingPrice?.toFixed(2)})
                         </span>
                       </div>
                     ) : (

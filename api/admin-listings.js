@@ -1,7 +1,7 @@
 // api/admin-listings.js
 // Consolidated admin listing actions: get-pending, approve, reject
 
-import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct } from '../lib/shopify.js';
+import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct, createDraft } from '../lib/shopify.js';
 import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
@@ -79,7 +79,7 @@ export default async function handler(req, res) {
 
     // APPROVE LISTING
     if (action === 'approve' && req.method === 'POST') {
-      const { shopifyProductId, skipNotification, updates } = req.body;
+      const { shopifyProductId, skipNotification } = req.body;
 
       if (!shopifyProductId) {
         return res.status(400).json({ error: 'Please provide shopifyProductId' });
@@ -87,73 +87,14 @@ export default async function handler(req, res) {
 
       const productBefore = await getProduct(shopifyProductId);
 
-      // Apply updates if provided (description, tags, commission)
-      if (updates) {
-        const updateData = {};
-
-        if (updates.description) {
-          updateData.body_html = `<p>${updates.description}</p>`;
-        }
-
-        if (updates.tags) {
-          updateData.tags = updates.tags;
-        }
-
-        // Update commission metafield if provided
-        if (updates.commission !== undefined) {
-          const commission = parseInt(updates.commission) || 18;
-          const variant = productBefore.variants?.[0];
-          const askingPrice = parseFloat(variant?.price) || 0;
-          const sellerPayout = (askingPrice - 10) * ((100 - commission) / 100);
-
-          const existingMf = await fetchMetafields(shopifyProductId);
-          await upsertMetafield(shopifyProductId, existingMf, 'pricing', 'commission_rate', commission.toString(), 'number_integer');
-          await upsertMetafield(shopifyProductId, existingMf, 'pricing', 'seller_payout',
-            JSON.stringify({ amount: sellerPayout.toFixed(2), currency_code: 'USD' }), 'money');
-
-          // Update inventory item cost
-          if (variant?.inventory_item_id) {
-            await fetch(
-              `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/api/2024-10/inventory_items/${variant.inventory_item_id}.json`,
-              {
-                method: 'PUT',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-Shopify-Access-Token': process.env.VITE_SHOPIFY_ACCESS_TOKEN
-                },
-                body: JSON.stringify({
-                  inventory_item: {
-                    id: variant.inventory_item_id,
-                    cost: sellerPayout.toFixed(2)
-                  }
-                })
-              }
-            );
-          }
-        }
-
-        // Apply the updates to the product
-        if (Object.keys(updateData).length > 0) {
-          await updateProduct(shopifyProductId, updateData);
-        }
-      }
-
+      // Only activate + notify — no data overwrites (admin edits in Shopify directly)
       const product = await approveDraft(shopifyProductId);
 
       // Get seller email + payout from metafields
       let sellerEmail = getSellerEmail(productBefore.metafields);
       const sellerIdMF = getSellerId(productBefore.metafields);
-
-      let sellerPayout;
-      if (updates?.commission !== undefined) {
-        const commission = parseInt(updates.commission) || 18;
-        const variant = productBefore.variants?.[0];
-        const askingPrice = parseFloat(variant?.price) || 0;
-        sellerPayout = (askingPrice - 10) * ((100 - commission) / 100);
-      } else {
-        const pricing = extractPricing(productBefore.metafields, productBefore.variants?.[0]?.price);
-        sellerPayout = pricing.sellerPayout;
-      }
+      const pricing = extractPricing(productBefore.metafields, productBefore.variants?.[0]?.price);
+      const sellerPayout = pricing.sellerPayout;
       const productUrl = `https://${STORE_URL}.com/products/${product.handle}`;
 
       // Find seller in DB (try ID, email, then product ID fallback)
@@ -745,7 +686,99 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, test-transaction, test-notification' });
+    // SEARCH SELLERS (for admin listing picker)
+    if (action === 'sellers' && req.method === 'GET') {
+      const search = req.query.search;
+      if (!search || search.length < 2) {
+        return res.status(200).json({ success: true, sellers: [] });
+      }
+
+      const { data: sellers } = await supabase
+        .from('sellers')
+        .select('id, name, email, phone')
+        .or(`name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`)
+        .limit(10);
+
+      return res.status(200).json({ success: true, sellers: sellers || [] });
+    }
+
+    // CREATE LISTING (admin creates on behalf of seller)
+    if (action === 'create' && req.method === 'POST') {
+      const { sellerId, designer, item_type, size, color, material, condition, original_price, asking_price, description, chest, hip, notes } = req.body;
+
+      if (!sellerId) {
+        return res.status(400).json({ error: 'Seller ID required' });
+      }
+      if (!designer || !asking_price) {
+        return res.status(400).json({ error: 'Designer and asking price required' });
+      }
+
+      // Look up seller
+      const { data: seller, error: sellerErr } = await supabase
+        .from('sellers')
+        .select('id, name, email, phone')
+        .eq('id', sellerId)
+        .single();
+
+      if (sellerErr || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      const product = await createDraft({
+        designer,
+        itemType: item_type,
+        size: size || 'One Size',
+        condition: condition || 'Good',
+        askingPrice: parseFloat(asking_price) || 0,
+        color,
+        material,
+        description,
+        sellerEmail: seller.email,
+        sellerId: seller.id,
+        sellerPhone: seller.phone,
+        chest,
+        hip,
+        notes,
+        originalPrice: parseFloat(original_price) || 0
+      });
+
+      // Link to seller in Supabase
+      await supabase
+        .from('listings')
+        .insert({
+          seller_id: seller.id,
+          shopify_product_id: product.id.toString(),
+          status: 'pending',
+          created_at: new Date().toISOString()
+        });
+
+      const shopifyAdminUrl = `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`;
+
+      // Send admin notification
+      try {
+        await sendEmail({
+          to: 'thephirstory@gmail.com',
+          subject: `New Listing (Admin): ${designer} - ${item_type || 'Item'}`,
+          html: `<h3>Admin-created listing</h3>
+            <p><strong>Designer:</strong> ${designer}</p>
+            <p><strong>Item:</strong> ${item_type || 'Unknown'}</p>
+            <p><strong>Asking Price:</strong> $${asking_price}</p>
+            <p><strong>Seller:</strong> ${seller.name || seller.email}</p>
+            <p><a href="${shopifyAdminUrl}">View in Shopify</a></p>`,
+          context: 'admin_created_listing'
+        });
+      } catch (emailErr) {
+        console.error('Admin listing email error:', emailErr);
+      }
+
+      return res.status(200).json({
+        success: true,
+        productId: product.id,
+        shopifyAdminUrl
+      });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, test-transaction, test-notification' });
 
   } catch (error) {
     console.error('Admin listings error:', error);
