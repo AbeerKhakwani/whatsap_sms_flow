@@ -724,6 +724,8 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Seller not found' });
       }
 
+      console.log('Admin create listing:', { designer, item_type, size, asking_price, sellerId, sellerEmail: seller.email });
+
       const product = await createDraft({
         designer,
         itemType: item_type,
