@@ -9,7 +9,7 @@ import { getShippingLabel, getShippingInstructions, WAREHOUSE_ADDRESS } from '..
 import { getSellerMessages } from '../lib/messages.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
-import { itemSoldInlineEmail, shippingLabelEmail } from '../lib/email.js';
+import { itemSoldInlineEmail, shippingLabelEmail, sendTransferFromNotification, sendTransferToNotification } from '../lib/email.js';
 import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
@@ -985,13 +985,24 @@ export default async function handler(req, res) {
         await upsertMetafield(productId, metafields, 'seller', 'phone', toSeller.phone, 'single_line_text_field');
       }
 
+      // Get product title for email notifications
+      let productTitle = 'your listing';
+      try {
+        const product = await getProduct(productId);
+        productTitle = product?.title || productTitle;
+      } catch (e) {
+        console.error('Failed to fetch product for transfer email:', e.message);
+      }
+
       // Remove from old seller's product list
+      let fromSeller = null;
       if (fromSellerId) {
-        const { data: fromSeller } = await supabase
+        const { data: fs } = await supabase
           .from('sellers')
-          .select('shopify_product_ids')
+          .select('id, name, email, phone, shopify_product_ids')
           .eq('id', fromSellerId)
           .single();
+        fromSeller = fs;
 
         if (fromSeller) {
           const oldIds = (fromSeller.shopify_product_ids || []).filter(
@@ -1010,6 +1021,18 @@ export default async function handler(req, res) {
         .from('sellers')
         .update({ shopify_product_ids: newIds })
         .eq('id', toSellerId);
+
+      // Send email notifications (non-fatal)
+      try {
+        if (fromSeller?.email) {
+          await sendTransferFromNotification(fromSeller.email, fromSeller.name, productTitle, toSeller.name || toSeller.email);
+        }
+        if (toSeller.email) {
+          await sendTransferToNotification(toSeller.email, toSeller.name, productTitle);
+        }
+      } catch (emailErr) {
+        console.error('Transfer email error (non-fatal):', emailErr);
+      }
 
       return res.status(200).json({
         success: true,

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Link as LinkIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Link as LinkIcon, Mic, MicOff, Camera, Trash2 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
+import { useVoiceRecording } from '../hooks/useVoiceRecording';
+import { useImageUpload } from '../hooks/useImageUpload';
 
 const REJECTION_REASONS = [
   { value: 'poor_photos', label: 'Poor Photo Quality' },
@@ -41,6 +43,34 @@ export default function Dashboard() {
   const [createError, setCreateError] = useState('');
   const [adminScrapeUrl, setAdminScrapeUrl] = useState('');
   const [adminScraping, setAdminScraping] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+
+  // Voice recording hook for admin create
+  const voice = useVoiceRecording({
+    onTranscribed: (text) => {
+      setCreateForm(prev => ({ ...prev, description: text }));
+    },
+    onFieldsExtracted: (extracted) => {
+      setCreateForm(prev => ({
+        ...prev,
+        designer: extracted.designer || prev.designer,
+        item_type: extracted.pieces || extracted.item_type || prev.item_type,
+        size: extracted.size || prev.size,
+        color: extracted.color || prev.color,
+        material: extracted.material || extracted.fabric || prev.material,
+        condition: extracted.condition || prev.condition,
+        original_price: extracted.original_price?.toString() || prev.original_price,
+        asking_price: extracted.asking_price?.toString() || prev.asking_price,
+        chest: extracted.chest?.toString() || prev.chest,
+        hip: extracted.hip?.toString() || prev.hip,
+        notes: extracted.notes || prev.notes
+      }));
+    },
+    onError: (msg) => setVoiceError(msg)
+  });
+
+  // Image upload hook for admin create
+  const imageUpload = useImageUpload({ maxPhotos: 10 });
 
   // Mark Paid modal state
   const [showPayModal, setShowPayModal] = useState(false);
@@ -201,8 +231,13 @@ export default function Dashboard() {
           ...prev,
           original_price: s.price ? s.price.toString() : prev.original_price,
           description: s.description || prev.description,
-          designer: s.title && !prev.designer ? s.title : prev.designer
+          designer: s.title && !prev.designer ? s.title : prev.designer,
+          material: s.material || prev.material
         }));
+        // Auto-populate images from scraper
+        if (s.images?.length) {
+          imageUpload.addPhotosFromUrls(s.images);
+        }
       }
     } catch { /* ignore */ }
     setAdminScraping(false);
@@ -226,11 +261,21 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (data.success) {
+        // Upload photos to Shopify if any
+        if (imageUpload.photos.length > 0 && data.productId) {
+          try {
+            await imageUpload.uploadAllToShopify(data.productId);
+          } catch (err) {
+            console.error('Photo upload error (non-fatal):', err);
+          }
+        }
         setCreateModal(false);
         setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '' });
         setSelectedSeller(null);
         setSellerSearch('');
         setAdminScrapeUrl('');
+        imageUpload.reset();
+        voice.reset();
         fetchData(); // Refresh listings
       } else {
         setCreateError(data.error || 'Failed to create listing');
@@ -788,6 +833,37 @@ export default function Dashboard() {
               </div>
             </div>
 
+            {/* Voice AI Autofill */}
+            <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-purple-800">Voice AI</span>
+                  {voice.isTranscribing && <span className="text-xs text-purple-600">Transcribing...</span>}
+                  {voice.isAnalyzing && <span className="text-xs text-purple-600">Analyzing...</span>}
+                  {voice.transcribedText && !voice.isTranscribing && !voice.isAnalyzing && (
+                    <span className="text-xs text-green-600">Fields extracted</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={voice.isRecording ? voice.stopRecording : voice.startRecording}
+                  disabled={voice.isTranscribing || voice.isAnalyzing}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    voice.isRecording
+                      ? 'bg-red-500 text-white hover:bg-red-600 animate-pulse'
+                      : 'bg-purple-600 text-white hover:bg-purple-700'
+                  } disabled:opacity-50`}
+                >
+                  {voice.isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                  {voice.isRecording ? 'Stop' : 'Describe item'}
+                </button>
+              </div>
+              {voiceError && <p className="text-xs text-red-600 mt-1">{voiceError}</p>}
+              {voice.transcribedText && (
+                <p className="text-xs text-purple-700 mt-2 line-clamp-2">{voice.transcribedText}</p>
+              )}
+            </div>
+
             {/* Form Fields */}
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
@@ -869,6 +945,51 @@ export default function Dashboard() {
                 <label className="block text-xs font-medium text-gray-600 mb-1">Notes (internal)</label>
                 <input type="text" value={createForm.notes} onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
                   placeholder="Admin notes..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+
+              {/* Photo Upload */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Photos {imageUpload.photos.length > 0 && `(${imageUpload.photos.length})`}
+                </label>
+                <div
+                  onDragOver={imageUpload.handleDragOver}
+                  onDrop={imageUpload.handleDrop}
+                  onClick={() => imageUpload.photoInputRef.current?.click()}
+                  className="border-2 border-dashed border-gray-300 rounded-lg p-3 text-center cursor-pointer hover:border-gray-400 transition-colors"
+                >
+                  <Camera className="w-5 h-5 text-gray-400 mx-auto mb-1" />
+                  <p className="text-xs text-gray-500">Click or drag photos here</p>
+                  <input
+                    ref={imageUpload.photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={imageUpload.handlePhotoSelect}
+                    className="hidden"
+                  />
+                </div>
+                {imageUpload.photos.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {imageUpload.photos.map((photo, i) => (
+                      <div key={i} className="relative group w-16 h-16">
+                        <img src={photo.preview} alt="" className="w-16 h-16 object-cover rounded-lg border" />
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); imageUpload.removePhoto(i); }}
+                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    {imageUpload.processingCount > 0 && (
+                      <div className="w-16 h-16 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
+                        <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
