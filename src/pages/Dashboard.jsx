@@ -47,9 +47,7 @@ export default function Dashboard() {
 
   // Voice recording hook for admin create
   const voice = useVoiceRecording({
-    onTranscribed: (text) => {
-      setCreateForm(prev => ({ ...prev, description: text }));
-    },
+    onTranscribed: () => {},
     onFieldsExtracted: (extracted) => {
       setCreateForm(prev => ({
         ...prev,
