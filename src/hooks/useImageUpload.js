@@ -191,7 +191,7 @@ export function useImageUpload({ maxPhotos = 10 } = {}) {
         const uploadRes = await fetch(`${API_URL}/api/product-image?action=add`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productId, image: base64, filename: photo.originalName })
+          body: JSON.stringify({ productId, base64, filename: photo.originalName })
         });
         const uploadData = await uploadRes.json();
         results.push({ success: !!uploadData.image, name: photo.originalName });
