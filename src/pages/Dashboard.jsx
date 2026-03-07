@@ -336,6 +336,29 @@ export default function Dashboard() {
     setApproving(null);
   }
 
+  async function simulateSale(listing) {
+    if (!confirm(`Simulate a sale for "${listing.product_name}"? This will create a test transaction and notify the seller.`)) return;
+    try {
+      const res = await fetch('/api/admin-listings?action=simulate-sale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: listing.shopify_product_id,
+          sellerId: listing.seller?.id,
+          salePrice: listing.asking_price_usd
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message);
+      } else {
+        alert(`Error: ${data.error}`);
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
   function toggleExpand(id) {
     setExpandedId(expandedId === id ? null : id);
   }
@@ -678,6 +701,14 @@ export default function Dashboard() {
                         Reject
                       </button>
                     </div>
+                    {listing.seller?.id && (
+                      <button
+                        onClick={() => simulateSale(listing)}
+                        className="w-full mt-2 text-xs text-gray-500 hover:text-purple-600 py-1 transition-colors"
+                      >
+                        Simulate Sale (test shipping flow)
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

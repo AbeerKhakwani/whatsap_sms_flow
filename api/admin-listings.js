@@ -780,7 +780,100 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, test-transaction, test-notification' });
+    // SIMULATE SALE — test the full seller shipping flow with a real product
+    if (action === 'simulate-sale' && req.method === 'POST') {
+      const { productId, sellerId, salePrice } = req.body;
+
+      if (!productId || !sellerId) {
+        return res.status(400).json({ error: 'productId and sellerId required' });
+      }
+
+      // Fetch seller
+      const { data: seller } = await supabase
+        .from('sellers')
+        .select('id, name, email, phone')
+        .eq('id', sellerId)
+        .single();
+
+      if (!seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      // Fetch product from Shopify for title
+      let productTitle = 'Simulated Product';
+      try {
+        const product = await getProduct(productId);
+        if (product) productTitle = product.title;
+      } catch { /* use default */ }
+
+      const price = parseFloat(salePrice) || 100;
+      const commissionRate = 18;
+      const sellerPayout = Math.round(price * (1 - commissionRate / 100) * 100) / 100;
+
+      const shipBy = new Date();
+      shipBy.setDate(shipBy.getDate() + 7);
+
+      const testBuyerAddress = {
+        name: 'Test Buyer',
+        street1: '123 Test Street',
+        street2: '',
+        city: 'New York',
+        state: 'NY',
+        zip: '10001',
+        country: 'US',
+        phone: '+12125551234'
+      };
+
+      const transaction = {
+        seller_id: seller.id,
+        order_id: `SIM-${Date.now()}`,
+        order_name: `#SIM-${Math.floor(Math.random() * 9000) + 1000}`,
+        product_id: productId.toString(),
+        product_title: productTitle,
+        sale_price: price,
+        seller_payout: sellerPayout,
+        commission_rate: commissionRate,
+        status: 'pending_payout',
+        payout_status: 'pending_shipping',
+        shipping_status: 'pending_label',
+        ship_by: shipBy.toISOString(),
+        buyer_address: testBuyerAddress,
+        customer_email: 'test-buyer@example.com',
+        created_at: new Date().toISOString()
+      };
+
+      const { data: txData, error: txError } = await supabase
+        .from('transactions')
+        .insert(transaction)
+        .select()
+        .single();
+
+      if (txError) {
+        return res.status(400).json({ error: txError.message });
+      }
+
+      // Send sale notifications (email + WhatsApp) — same as real sale
+      try {
+        const { notifySeller } = await import('../lib/shopify-webhook.js');
+        await notifySeller(seller, {
+          productTitle,
+          salePrice: price,
+          sellerPayout,
+          shipBy: shipBy.toISOString()
+        });
+      } catch (notifyErr) {
+        console.error('Simulate sale notification error:', notifyErr);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Simulated sale for "${productTitle}" — seller notified`,
+        transactionId: txData.id,
+        transaction: txData
+      });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification' });
 
   } catch (error) {
     console.error('Admin listings error:', error);
