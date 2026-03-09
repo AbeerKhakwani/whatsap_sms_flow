@@ -90,10 +90,10 @@ export default async function handler(req, res) {
         const price = parseFloat(variant.price) || 0;
         const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, price);
 
-        // Check if sold (0 inventory, but not if delisted)
+        // Check if sold (0 inventory or archived) — but not if seller delisted it
         const inventory = variant.inventory_quantity ?? 0;
         const isDelisted = product.tags?.includes('delisted');
-        const isSold = !isDelisted && (inventory === 0 && product.status === 'archived');
+        const isSold = !isDelisted && (inventory === 0 || product.status === 'archived');
 
         listings.push({
           id: product.id,
