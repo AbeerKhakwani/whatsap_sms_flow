@@ -175,15 +175,13 @@ export function useImageUpload({ maxPhotos = 10 } = {}) {
     const results = [];
     for (const photo of photos) {
       try {
-        let base64;
+        let body;
         if (photo.isFromUrl && photo.url) {
-          // For URL-based photos, fetch and convert
-          const res = await fetch(photo.url);
-          const blob = await res.blob();
-          const file = new File([blob], photo.originalName, { type: blob.type || 'image/jpeg' });
-          base64 = await fileToBase64(file);
+          // For URL-based photos, let the backend pass the URL to Shopify directly
+          body = { productId, imageUrl: photo.url, filename: photo.originalName };
         } else if (photo.file) {
-          base64 = await fileToBase64(photo.file);
+          const base64 = await fileToBase64(photo.file);
+          body = { productId, base64, filename: photo.originalName };
         } else {
           continue;
         }
@@ -191,10 +189,10 @@ export function useImageUpload({ maxPhotos = 10 } = {}) {
         const uploadRes = await fetch(`${API_URL}/api/product-image?action=add`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productId, base64, filename: photo.originalName })
+          body: JSON.stringify(body)
         });
         const uploadData = await uploadRes.json();
-        results.push({ success: !!uploadData.image, name: photo.originalName });
+        results.push({ success: !!uploadData.success, name: photo.originalName });
       } catch (err) {
         console.error('Photo upload error:', err);
         results.push({ success: false, name: photo.originalName, error: err.message });

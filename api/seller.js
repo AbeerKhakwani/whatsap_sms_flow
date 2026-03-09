@@ -90,9 +90,10 @@ export default async function handler(req, res) {
         const price = parseFloat(variant.price) || 0;
         const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, price);
 
-        // Check if sold (0 inventory or archived)
+        // Check if sold (0 inventory, but not if delisted)
         const inventory = variant.inventory_quantity ?? 0;
-        const isSold = inventory === 0 || product.status === 'archived';
+        const isDelisted = product.tags?.includes('delisted');
+        const isSold = !isDelisted && (inventory === 0 && product.status === 'archived');
 
         listings.push({
           id: product.id,
@@ -118,6 +119,7 @@ export default async function handler(req, res) {
         stats.total++;
 
         if (isSold) stats.sold++;
+        else if (isDelisted) { /* delisted items don't count in active/draft */ }
         else if (product.status === 'draft') stats.draft++;
         else if (product.status === 'active') stats.active++;
       }
@@ -1082,7 +1084,10 @@ export default async function handler(req, res) {
         tagsArray.push('delisted');
       }
 
-      // Update product: status to draft + add delisted tag
+      // Remove pending-approval tag if present (it's being delisted, not pending)
+      const cleanedTags = tagsArray.filter(t => t !== 'pending-approval');
+
+      // Update product: status to archived + add delisted tag
       const updateRes = await fetch(
         `https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}.json`,
         {
@@ -1094,8 +1099,8 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             product: {
               id: productId,
-              status: 'draft',
-              tags: tagsArray.join(', ')
+              status: 'archived',
+              tags: cleanedTags.join(', ')
             }
           })
         }
@@ -1108,8 +1113,8 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         success: true,
-        message: 'Listing delisted (hidden from store)',
-        status: 'draft',
+        message: 'Listing delisted and archived',
+        status: 'archived',
         isDelisted: true
       });
     }
@@ -1149,10 +1154,13 @@ export default async function handler(req, res) {
       const { product: currentProduct } = await getRes.json();
       const currentTags = currentProduct?.tags || '';
 
-      // Remove 'delisted' tag
+      // Remove 'delisted' tag, add 'pending-approval' so it shows up for admin review
       const tagsArray = currentTags.split(',').map(t => t.trim()).filter(t => t && t !== 'delisted');
+      if (!tagsArray.includes('pending-approval')) {
+        tagsArray.push('pending-approval');
+      }
 
-      // Update product: status to draft (pending review) + remove delisted tag
+      // Update product: status to draft (pending review) + remove delisted tag + add pending-approval
       const updateRes = await fetch(
         `https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}.json`,
         {

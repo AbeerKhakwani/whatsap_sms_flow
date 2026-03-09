@@ -1,7 +1,7 @@
 // api/product-image.js
 // Manage product images - add and delete
 
-import { addProductImage, deleteProductImage } from '../lib/shopify.js';
+import { addProductImage, addProductImageFromUrl, deleteProductImage } from '../lib/shopify.js';
 import { cors } from '../lib/cors.js';
 
 export default async function handler(req, res) {
@@ -14,15 +14,21 @@ export default async function handler(req, res) {
   const { action } = req.query;
 
   try {
-    // ADD IMAGE
+    // ADD IMAGE (accepts base64 or imageUrl)
     if (action === 'add') {
-      const { productId, base64, filename } = req.body;
+      const { productId, base64, imageUrl, filename } = req.body;
 
-      if (!productId || !base64) {
-        return res.status(400).json({ error: 'Missing productId or image data' });
+      if (!productId || (!base64 && !imageUrl)) {
+        return res.status(400).json({ error: 'Missing productId or image data (base64 or imageUrl)' });
       }
 
-      const image = await addProductImage(productId, base64, filename);
+      let image;
+      if (imageUrl) {
+        // Let Shopify download the image directly from URL
+        image = await addProductImageFromUrl(productId, imageUrl, filename);
+      } else {
+        image = await addProductImage(productId, base64, filename);
+      }
 
       return res.status(200).json({
         success: true,

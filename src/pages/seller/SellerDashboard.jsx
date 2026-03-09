@@ -269,18 +269,21 @@ export default function SellerDashboard() {
         setListings(prev =>
           prev.map(l => {
             if (l.id !== listing.id) return l;
-            const newTags = action === 'delist'
-              ? [...(l.tags || []), 'delisted']
-              : (l.tags || []).filter(t => t !== 'delisted');
+            let newTags;
+            if (action === 'delist') {
+              newTags = [...(l.tags || []).filter(t => t !== 'pending-approval'), 'delisted'];
+            } else {
+              newTags = [...(l.tags || []).filter(t => t !== 'delisted'), 'pending-approval'];
+            }
             return { ...l, status: data.status, tags: newTags };
           })
         );
 
         // Update stats
         if (action === 'delist') {
-          setStats(prev => ({ ...prev, active: prev.active - 1, draft: prev.draft + 1 }));
+          setStats(prev => ({ ...prev, active: prev.active - 1 }));
         } else {
-          setStats(prev => ({ ...prev, active: prev.active + 1, draft: prev.draft - 1 }));
+          setStats(prev => ({ ...prev, draft: prev.draft + 1 }));
         }
       } else {
         alert(`Failed to ${action}: ` + (data.error || 'Unknown error'));
