@@ -1043,7 +1043,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // DELIST LISTING (set to draft - hides from store, adds delisted tag)
+    // DELIST LISTING (archive product, add delisted tag, append DELISTED to title)
     if (action === 'delist' && req.method === 'POST') {
       const { email, productId } = req.body;
 
@@ -1087,7 +1087,11 @@ export default async function handler(req, res) {
       // Remove pending-approval tag if present (it's being delisted, not pending)
       const cleanedTags = tagsArray.filter(t => t !== 'pending-approval');
 
-      // Update product: status to archived + add delisted tag
+      // Append DELISTED to title if not already there
+      const currentTitle = currentProduct?.title || '';
+      const delistedTitle = currentTitle.includes('DELISTED') ? currentTitle : `${currentTitle} DELISTED`;
+
+      // Update product: status to archived + add delisted tag + update title
       const updateRes = await fetch(
         `https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}.json`,
         {
@@ -1099,6 +1103,7 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             product: {
               id: productId,
+              title: delistedTitle,
               status: 'archived',
               tags: cleanedTags.join(', ')
             }
@@ -1119,7 +1124,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // RELIST LISTING (set to active - shows on store, removes delisted tag)
+    // RELIST LISTING (back to draft for re-approval, removes delisted tag + DELISTED from title)
     if (action === 'relist' && req.method === 'POST') {
       const { email, productId } = req.body;
 
@@ -1160,7 +1165,11 @@ export default async function handler(req, res) {
         tagsArray.push('pending-approval');
       }
 
-      // Update product: status to draft (pending review) + remove delisted tag + add pending-approval
+      // Remove DELISTED from title
+      const currentTitle = currentProduct?.title || '';
+      const cleanTitle = currentTitle.replace(/\s*DELISTED\s*/, '').trim();
+
+      // Update product: status to draft (pending review) + remove delisted tag + add pending-approval + restore title
       const updateRes = await fetch(
         `https://${SHOPIFY_URL}/admin/api/2024-10/products/${productId}.json`,
         {
@@ -1172,6 +1181,7 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             product: {
               id: productId,
+              title: cleanTitle,
               status: 'draft',
               tags: tagsArray.join(', ')
             }
