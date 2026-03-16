@@ -362,6 +362,17 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Handle WhatsApp delivery/read receipts
+    const statuses = req.body?.entry?.[0]?.changes?.[0]?.value?.statuses;
+    if (statuses?.length > 0) {
+      for (const s of statuses) {
+        if (['delivered', 'read', 'failed'].includes(s.status)) {
+          await supabase.from('messages').update({ status: s.status }).eq('external_id', s.id);
+        }
+      }
+      return res.status(200).json({ status: 'status_update_processed' });
+    }
+
     const message = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
     if (!message) {
       return res.status(200).json({ status: 'no message' });
@@ -1391,6 +1402,7 @@ async function submitListing(phone, conv, res) {
         email: seller.email,
         phone: seller.phone,
         description: listing.description || '',
+        source: 'whatsapp',
         extracted: {
           designer: listing.designer,
           item_type: listing.item_type,

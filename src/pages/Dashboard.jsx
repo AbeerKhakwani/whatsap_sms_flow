@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Link as LinkIcon, Mic, MicOff, Camera, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Link as LinkIcon, Mic, MicOff, Camera, Trash2, RotateCcw } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { useImageUpload } from '../hooks/useImageUpload';
@@ -28,6 +28,9 @@ export default function Dashboard() {
   const [rejectReason, setRejectReason] = useState('');
   const [rejectNote, setRejectNote] = useState('');
   const [approveModal, setApproveModal] = useState({ open: false, listing: null });
+  const [revisionModal, setRevisionModal] = useState({ open: false, listing: null });
+  const [revisionNote, setRevisionNote] = useState('');
+  const [submittingRevision, setSubmittingRevision] = useState(false);
 
   // Admin Create Listing state
   const [createModal, setCreateModal] = useState(false);
@@ -296,6 +299,42 @@ export default function Dashboard() {
     setRejectNote('');
   }
 
+  function openRevisionModal(listing) {
+    setRevisionModal({ open: true, listing });
+    setRevisionNote('');
+  }
+
+  function closeRevisionModal() {
+    setRevisionModal({ open: false, listing: null });
+    setRevisionNote('');
+  }
+
+  async function submitRevision() {
+    const { listing } = revisionModal;
+    if (!revisionNote.trim()) return;
+
+    setSubmittingRevision(true);
+    try {
+      const response = await fetch('/api/admin-listings?action=request-revision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopifyProductId: listing.id, note: revisionNote.trim() })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setListings(prev => prev.map(l =>
+          l.id === listing.id ? { ...l, tags: [...(l.tags || []).filter(t => t !== 'pending-approval'), 'needs-revision'] } : l
+        ));
+        closeRevisionModal();
+      } else {
+        alert(`Error: ${data.error || 'Failed to request revision'}`);
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+    setSubmittingRevision(false);
+  }
+
   async function submitRejection() {
     const { listing } = rejectModal;
 
@@ -519,15 +558,22 @@ export default function Dashboard() {
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-gray-900 truncate">{listing.designer}</span>
                       <span className="text-gray-400">-</span>
                       <span className="text-gray-600 truncate">{listing.product_name}</span>
+                      {listing.tags?.includes('needs-revision') && (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-medium flex-shrink-0">Needs Revision</span>
+                      )}
+                      {listing.tags?.includes('seller-revised') && (
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium flex-shrink-0">✓ Seller Revised</span>
+                      )}
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
                       <span className="flex items-center gap-1">
                         <DollarSign className="w-3 h-3" />
-                        ${listing.asking_price_usd || 0}
+                        asks ${listing.asking_price_usd || 0}
+                        <span className="text-gray-300 text-xs">→ lists ${listing.list_price || 0}</span>
                       </span>
                       <span className="flex items-center gap-1">
                         <Shirt className="w-3 h-3" />
@@ -640,9 +686,10 @@ export default function Dashboard() {
                       <div className="bg-white p-3 rounded-lg shadow-sm">
                         <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
                           <DollarSign className="w-3 h-3" />
-                          Asking Price
+                          Seller Asking Price
                         </div>
                         <p className="font-medium text-green-600">${listing.asking_price_usd || 0}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Lists at ${listing.list_price || 0} (+$10 fee)</p>
                       </div>
                     </div>
 
@@ -687,13 +734,23 @@ export default function Dashboard() {
                         className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:from-green-600 hover:to-emerald-600 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
                       >
                         <Check className="w-5 h-5" />
-                        Review & Approve
+                        {listing.tags?.includes('seller-revised') ? 'Re-review & Approve' : 'Review & Approve'}
+                      </button>
+
+                      <button
+                        onClick={() => openRevisionModal(listing)}
+                        disabled={approving === listing.id}
+                        className="px-4 bg-amber-100 text-amber-700 py-3 rounded-lg font-semibold hover:bg-amber-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        title="Request seller to update something"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Revise
                       </button>
 
                       <button
                         onClick={() => openRejectModal(listing)}
                         disabled={approving === listing.id}
-                        className="px-6 bg-red-100 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                        className="px-4 bg-red-100 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                       >
                         <X className="w-5 h-5" />
                         Reject
@@ -1037,6 +1094,87 @@ export default function Dashboard() {
                   <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</>
                 ) : (
                   <><Plus className="w-4 h-4" /> Create Draft</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Revision Request Modal */}
+      {revisionModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                <RotateCcw className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Request Revision</h3>
+                <p className="text-sm text-gray-500">{revisionModal.listing?.product_name}</p>
+              </div>
+            </div>
+
+            {/* Quick chips */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {[
+                'Please update the price',
+                'Please update the designer name',
+                'Please submit a clearer photo of the tag',
+                'Please add more photos',
+              ].map(chip => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => setRevisionNote(chip)}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                    revisionNote === chip
+                      ? 'bg-amber-100 border-amber-400 text-amber-800 font-medium'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-amber-300'
+                  }`}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={revisionNote}
+              onChange={(e) => setRevisionNote(e.target.value)}
+              placeholder="Or write a custom note for the seller..."
+              rows={3}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none text-sm"
+            />
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+              <p className="text-xs text-amber-800">
+                The seller will receive a WhatsApp message and email with your note and a link to update their listing. The draft stays alive.
+              </p>
+            </div>
+
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={closeRevisionModal}
+                disabled={submittingRevision}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitRevision}
+                disabled={submittingRevision || !revisionNote.trim()}
+                className="flex-1 px-4 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {submittingRevision ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-4 h-4" />
+                    Send Revision Request
+                  </>
                 )}
               </button>
             </div>

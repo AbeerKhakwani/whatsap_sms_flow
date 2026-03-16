@@ -206,12 +206,20 @@ export default async function handler(req, res) {
         .filter(tx => tx.status !== 'paid')
         .reduce((sum, tx) => sum + (tx.seller_payout || 0), 0);
 
+      // Fetch rejected listings for this seller
+      const { data: rejectedListings } = await supabase
+        .from('rejected_listings')
+        .select('*')
+        .eq('seller_id', seller.id)
+        .order('rejected_at', { ascending: false });
+
       return res.status(200).json({
         success: true,
         listings,
         stats: {
           ...stats,
-          sold: allSoldProducts.length
+          sold: allSoldProducts.length,
+          rejected: (rejectedListings || []).length
         },
         seller: {
           name: seller.name,
@@ -221,7 +229,21 @@ export default async function handler(req, res) {
           pendingPayout
         },
         soldProducts: allSoldProducts,
-        balanceBreakdown
+        balanceBreakdown,
+        rejectedListings: (rejectedListings || []).map(r => ({
+          id: r.id,
+          title: r.title,
+          designer: r.designer,
+          itemType: r.item_type,
+          size: r.size,
+          condition: r.condition,
+          askingPrice: r.asking_price,
+          images: r.images || [],
+          rejectionReason: r.rejection_reason,
+          rejectionNote: r.rejection_note,
+          submissionSource: r.submission_source,
+          rejectedAt: r.rejected_at
+        }))
       });
     }
 
@@ -304,6 +326,19 @@ export default async function handler(req, res) {
         updatedProduct = await updateProduct(productId, updates);
       } else {
         updatedProduct = await getProduct(productId);
+      }
+
+      // If listing was awaiting revision, flip tag to seller-revised and notify admin
+      const productTags = product.tags?.split(', ').map(t => t.trim()).filter(Boolean) || [];
+      if (productTags.includes('needs-revision')) {
+        const revisedTags = [...productTags.filter(t => t !== 'needs-revision'), 'seller-revised'];
+        await updateProduct(productId, { tags: revisedTags.join(', ') });
+        await sendEmail({
+          to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
+          subject: `Seller revised listing: ${product.title}`,
+          html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px;"><h3 style="color:#2563eb;">Listing Updated by Seller</h3><p><strong>${seller.name || seller.email}</strong> has updated their listing <strong>${product.title}</strong> after your revision request.</p><p>Please re-review it in the admin panel.</p></div>`,
+          context: 'seller_revised'
+        });
       }
 
       // Get updated payout for response - re-fetch metafields for accurate data
@@ -1288,6 +1323,65 @@ export default async function handler(req, res) {
           provider
         });
       }
+    }
+
+    // GET REJECTED LISTINGS
+    if (action === 'rejected-listings' && req.method === 'GET') {
+      const email = req.query.email?.toLowerCase();
+      const sellerId = req.query.sellerId;
+
+      if (!email && !sellerId) {
+        return res.status(400).json({ error: 'Email or sellerId required' });
+      }
+
+      // Find seller
+      let seller;
+      if (sellerId) {
+        const { data } = await supabase
+          .from('sellers')
+          .select('id')
+          .eq('id', sellerId)
+          .single();
+        seller = data;
+      } else {
+        const { data } = await supabase
+          .from('sellers')
+          .select('id')
+          .ilike('email', email)
+          .maybeSingle();
+        seller = data;
+      }
+
+      if (!seller) {
+        return res.status(200).json({ success: true, rejectedListings: [] });
+      }
+
+      const { data: rejected } = await supabase
+        .from('rejected_listings')
+        .select('*')
+        .eq('seller_id', seller.id)
+        .order('rejected_at', { ascending: false });
+
+      return res.status(200).json({
+        success: true,
+        rejectedListings: (rejected || []).map(r => ({
+          id: r.id,
+          shopifyProductId: r.shopify_product_id,
+          title: r.title,
+          designer: r.designer,
+          itemType: r.item_type,
+          size: r.size,
+          condition: r.condition,
+          askingPrice: r.asking_price,
+          listingPrice: r.listing_price,
+          images: r.images || [],
+          rejectionReason: r.rejection_reason,
+          rejectionNote: r.rejection_note,
+          submissionSource: r.submission_source,
+          rejectedAt: r.rejected_at,
+          createdAt: r.created_at
+        }))
+      });
     }
 
     return res.status(400).json({ error: 'Invalid action' });

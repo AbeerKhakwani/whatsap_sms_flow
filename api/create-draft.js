@@ -6,6 +6,7 @@ import { findOrCreateSeller, addProductToSeller } from '../lib/sellers.js';
 import { validateAndSanitize } from '../lib/security.js';
 import { cors } from '../lib/cors.js';
 import { sendEmail } from '../lib/send-email.js';
+import { supabase } from '../lib/supabase-admin.js';
 
 export default async function handler(req, res) {
   if (cors(req, res, 'POST, OPTIONS')) return;
@@ -15,7 +16,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { email, phone, description, extracted } = req.body;
+    const { email, phone, description, extracted, source: requestSource } = req.body;
 
     if (!description && !extracted) {
       return res.status(400).json({ error: 'Please provide description or extracted fields' });
@@ -83,7 +84,8 @@ export default async function handler(req, res) {
       chest: fields.chest || '',
       hip: fields.hip || '',
       notes: fields.notes || '',
-      originalPrice: fields.original_price || ''
+      originalPrice: fields.original_price || '',
+      source: requestSource || 'portal'
     });
 
     console.log('✅ Shopify draft created:', product.id);
@@ -94,6 +96,20 @@ export default async function handler(req, res) {
         await addProductToSeller(seller.id, product.id);
       } catch (err) {
         console.error('Product linking error (non-fatal):', err);
+      }
+
+      // Insert into listings table
+      try {
+        await supabase.from('listings').insert({
+          seller_id: seller.id,
+          shopify_product_id: product.id.toString(),
+          source: requestSource || 'portal',
+          status: 'draft',
+          extracted_data: safeFields,
+          photo_urls: []
+        });
+      } catch (err) {
+        console.error('Listings insert error (non-fatal):', err);
       }
     }
 

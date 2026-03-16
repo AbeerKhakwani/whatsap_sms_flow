@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import {
   ArrowLeft, Mail, Phone, Package, ExternalLink, Edit2, Check, X,
-  RotateCcw, Image as ImageIcon, ArrowRightLeft, Search, User, MessageSquare
+  RotateCcw, Image as ImageIcon, ArrowRightLeft, Search, User, MessageSquare, XCircle
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 
@@ -23,6 +23,7 @@ export default function SellerDetail() {
   const [resettingAuth, setResettingAuth] = useState(false);
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [rejectedListings, setRejectedListings] = useState([]);
 
   // Edit state
   const [editing, setEditing] = useState(null); // 'name', 'email', 'phone', 'paypal'
@@ -81,6 +82,7 @@ export default function SellerDetail() {
         fetchListings(data.shopify_product_ids);
       }
       fetchMessages(data.id);
+      fetchRejectedListings(data.id);
     }
     setLoading(false);
   }
@@ -99,6 +101,19 @@ export default function SellerDetail() {
       console.error('Error fetching messages:', error);
     }
     setLoadingMessages(false);
+  }
+
+  async function fetchRejectedListings(sellerId) {
+    if (!sellerId) return;
+    try {
+      const response = await fetch(`${API_URL}/api/seller?action=rejected-listings&sellerId=${sellerId}`);
+      const data = await response.json();
+      if (data.success) {
+        setRejectedListings(data.rejectedListings || []);
+      }
+    } catch (error) {
+      console.error('Error fetching rejected listings:', error);
+    }
   }
 
   async function fetchListings(productIds) {
@@ -351,6 +366,17 @@ export default function SellerDetail() {
               <EditableField field="email" icon={Mail} value={seller.email} placeholder="Add email" />
               <EditableField field="phone" icon={Phone} value={seller.phone?.startsWith('NOPHONE') ? '' : seller.phone} placeholder="Add phone" />
             </div>
+            {/* Last Dashboard Login */}
+            <div className="text-[10px] text-stone-400 mt-1">
+              {seller.last_dashboard_login ? (
+                <span>Last login: {new Date(seller.last_dashboard_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+              ) : (
+                <span className="italic">Never logged in</span>
+              )}
+              {seller.created_at && (
+                <span className="ml-3">Joined: {new Date(seller.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              )}
+            </div>
           </div>
         </div>
         <button
@@ -528,17 +554,37 @@ export default function SellerDetail() {
                     </div>
                   )}
                   {/* Status Badge */}
-                  <span className={`absolute top-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                    listing.isSold || listing.status === 'archived'
-                      ? 'bg-blue-100 text-blue-700'
-                      : listing.status === 'active'
-                      ? 'bg-green-100 text-green-700'
-                      : listing.status === 'draft'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-stone-100 text-stone-600'
-                  }`}>
-                    {listing.isSold || listing.status === 'archived' ? 'SOLD' : listing.status}
-                  </span>
+                  <div className="absolute top-1 right-1 flex flex-col gap-0.5 items-end">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      listing.isSold || listing.status === 'archived'
+                        ? 'bg-blue-100 text-blue-700'
+                        : listing.status === 'active'
+                        ? 'bg-green-100 text-green-700'
+                        : listing.status === 'draft'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-stone-100 text-stone-600'
+                    }`}>
+                      {listing.isSold || listing.status === 'archived' ? 'SOLD' : listing.status}
+                    </span>
+                    {/* Source Badge */}
+                    {listing.tags && (() => {
+                      const tagList = listing.tags?.split(', ') || [];
+                      const sourceTag = tagList.find(t => t.startsWith('source:'));
+                      if (!sourceTag) return null;
+                      const source = sourceTag.replace('source:', '');
+                      return (
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                          source === 'portal' ? 'bg-purple-100 text-purple-600' :
+                          source === 'whatsapp' ? 'bg-green-100 text-green-600' :
+                          source === 'admin' ? 'bg-blue-100 text-blue-600' :
+                          'bg-stone-100 text-stone-500'
+                        }`}>
+                          {source === 'portal' ? '🌐' : source === 'whatsapp' ? '💬' : source === 'admin' ? '👤' : ''}
+                          {' '}{source}
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
 
                 {/* Info */}
@@ -570,6 +616,85 @@ export default function SellerDetail() {
           </div>
         )}
       </div>
+
+      {/* Rejected Listings */}
+      {rejectedListings.length > 0 && (
+        <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-stone-100 flex items-center justify-between">
+            <h2 className="font-semibold text-stone-900 flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-red-400" />
+              Rejected Listings
+            </h2>
+            <span className="px-2 py-1 bg-red-50 text-red-600 rounded text-xs font-medium">
+              {rejectedListings.length} Rejected
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-4">
+            {rejectedListings.map((item) => (
+              <div key={item.id} className="border border-stone-200 rounded-lg overflow-hidden bg-white opacity-70">
+                {/* Image */}
+                <div className="aspect-[4/5] bg-stone-100 relative">
+                  {item.images?.[0]?.src ? (
+                    <img
+                      src={getThumbnail(item.images[0].src)}
+                      alt={item.title}
+                      className="w-full h-full object-cover grayscale"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <ImageIcon className="w-8 h-8 text-stone-300" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-red-500/5" />
+                  <div className="absolute top-1 right-1 flex flex-col gap-0.5 items-end">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700">
+                      REJECTED
+                    </span>
+                    {item.submissionSource && (
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                        item.submissionSource === 'portal' ? 'bg-purple-100 text-purple-600' :
+                        item.submissionSource === 'whatsapp' ? 'bg-green-100 text-green-600' :
+                        item.submissionSource === 'admin' ? 'bg-blue-100 text-blue-600' :
+                        'bg-stone-100 text-stone-500'
+                      }`}>
+                        {item.submissionSource === 'portal' ? '🌐' : item.submissionSource === 'whatsapp' ? '💬' : item.submissionSource === 'admin' ? '👤' : ''}
+                        {' '}{item.submissionSource}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Info */}
+                <div className="p-2">
+                  <h3 className="font-medium text-stone-600 text-xs truncate">{item.title || `${item.designer} ${item.itemType}`}</h3>
+                  <div className="flex items-center gap-1 mt-0.5 text-[10px] text-stone-500">
+                    <span>{item.size || 'OS'}</span>
+                    {item.askingPrice && (
+                      <>
+                        <span>·</span>
+                        <span>Asked ${parseFloat(item.askingPrice).toFixed(0)}</span>
+                      </>
+                    )}
+                  </div>
+                  {item.rejectionReason && (
+                    <div className="mt-1.5 pt-1.5 border-t border-stone-100">
+                      <p className="text-[10px] text-red-600 font-medium">{item.rejectionReason}</p>
+                      {item.rejectionNote && (
+                        <p className="text-[10px] text-stone-500 mt-0.5">{item.rejectionNote}</p>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-[9px] text-stone-400 mt-1">
+                    {new Date(item.rejectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Message History */}
       <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
@@ -614,9 +739,19 @@ export default function SellerDetail() {
                       }`}>
                         {msg.type === 'whatsapp' ? 'WhatsApp' : 'Email'}
                       </span>
-                      {msg.status === 'failed' && (
+                      {msg.type === 'whatsapp' && (
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                          msg.status === 'read'      ? 'bg-blue-100 text-blue-700' :
+                          msg.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                          msg.status === 'failed'    ? 'bg-red-100 text-red-700' :
+                                                       'bg-amber-100 text-amber-700'
+                        }`}>
+                          {msg.status === 'read' ? '👁 Read' : msg.status === 'delivered' ? '✓ Delivered' : msg.status === 'failed' ? '✕ Failed' : '· Sent'}
+                        </span>
+                      )}
+                      {msg.type === 'email' && msg.status === 'failed' && (
                         <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-700">
-                          Failed
+                          ✕ Failed
                         </span>
                       )}
                       {msg.context && (

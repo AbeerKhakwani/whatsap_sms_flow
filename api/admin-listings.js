@@ -2,7 +2,7 @@
 // Consolidated admin listing actions: get-pending, approve, reject
 
 import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct, createDraft } from '../lib/shopify.js';
-import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail } from '../lib/email.js';
+import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail, listingRevisionEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { supabase } from '../lib/supabase-admin.js';
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
         const metafields = await fetchMetafields(product.id);
         const sellerEmail = getSellerEmail(metafields);
         const sellerId = getSellerId(metafields);
-        const { commissionRate, sellerPayout } = extractPricing(metafields, variant.price);
+        const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, variant.price);
 
         // Find seller in DB (try ID, email, then product ID fallback)
         const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone');
@@ -49,7 +49,8 @@ export default async function handler(req, res) {
           designer: product.vendor || 'Unknown Designer',
           size: variant.option1 || 'One Size',
           condition: variant.option3 || 'Good',
-          asking_price_usd: parseFloat(variant.price) || 0,
+          list_price: parseFloat(variant.price) || 0,       // what buyer pays (asking + $10 fee)
+          asking_price_usd: sellerAskingPrice || 0,          // what seller wants (used throughout UI)
           seller_payout: sellerPayout,
           commission_rate: commissionRate,
           description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
@@ -109,13 +110,28 @@ export default async function handler(req, res) {
         const { subject, html } = listingApprovedEmail(seller?.name, product.title, productUrl, sellerPayout);
         await sendEmail({ sellerId, to: sellerEmail, subject, html, context: 'listing_approved', metadata });
 
-        // Send WhatsApp
+        // Send WhatsApp (utility template with View Listing button)
         if (seller?.phone) {
           await sendWhatsApp({
             sellerId,
             to: seller.phone,
-            template: 'listing_approved',
-            params: [product.title],
+            template: 'listing_approved_v2',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: product.title },
+                  { type: 'text', text: sellerPayout?.toFixed(2) || '0.00' }
+                ]
+              },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
+                parameters: [{ type: 'text', text: product.handle }]
+              }
+            ],
             context: 'listing_approved',
             metadata,
             textPreview: `Your listing "${product.title}" is now live on The Phir Story!`
@@ -142,6 +158,8 @@ export default async function handler(req, res) {
       // Get product info before deleting
       const productBefore = await getProduct(shopifyProductId);
       const productTitle = productBefore.title;
+      const variant = productBefore.variants?.[0] || {};
+      const productTags = productBefore.tags || '';
 
       // Find seller from metafields + DB lookup
       let sellerEmail = getSellerEmail(productBefore.metafields);
@@ -149,7 +167,46 @@ export default async function handler(req, res) {
       const seller = await resolveSellerFromProduct(sellerEmail, sellerIdMF, shopifyProductId);
       if (seller && !sellerEmail) sellerEmail = seller.email;
 
-      // Delete the draft
+      // Extract pricing from metafields
+      const { sellerPayout } = extractPricing(productBefore.metafields, variant.price);
+
+      // Extract source from tags
+      const sourceTag = productTags.split(',').map(t => t.trim()).find(t => t.startsWith('source:'));
+      const submissionSource = sourceTag ? sourceTag.replace('source:', '') : 'unknown';
+
+      // Collect image URLs before deletion
+      const imageUrls = (productBefore.images || []).map(img => ({
+        src: img.src,
+        alt: img.alt || '',
+        position: img.position
+      }));
+
+      // Save rejected listing data to Supabase BEFORE deleting from Shopify
+      try {
+        await supabase.from('rejected_listings').insert({
+          seller_id: seller?.id || null,
+          shopify_product_id: shopifyProductId.toString(),
+          title: productTitle,
+          designer: productBefore.vendor || null,
+          item_type: productBefore.product_type || null,
+          size: variant.option1 || null,
+          condition: productTags.split(',').map(t => t.trim()).find(t =>
+            ['new', 'like new', 'gently used', 'used', 'fair'].includes(t.toLowerCase())
+          ) || null,
+          asking_price: variant.price ? parseFloat(variant.price) : null,
+          listing_price: sellerPayout || null,
+          images: imageUrls,
+          rejection_reason: reason || null,
+          rejection_note: note || null,
+          submission_source: submissionSource,
+          original_tags: productTags
+        });
+        console.log('📋 Rejected listing saved to DB');
+      } catch (saveErr) {
+        console.error('Failed to save rejected listing (non-fatal):', saveErr);
+      }
+
+      // Delete the draft from Shopify
       await deleteProduct(shopifyProductId);
 
       // Send notifications if we found the seller
@@ -160,15 +217,25 @@ export default async function handler(req, res) {
         const { subject, html } = listingRejectedEmail(seller.name, productTitle, reason, note || null);
         await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'listing_rejected', metadata });
 
-        // Send WhatsApp (text message — no rejection template)
+        // Send WhatsApp (utility template with Submit New Listing button)
         if (seller.phone && !seller.phone.startsWith('NOPHONE') && !seller.phone.startsWith('RESET_')) {
-          const waMessage = `Hi${seller.name ? ` ${seller.name}` : ''}! We reviewed your listing "${productTitle}" but can't approve it at this time.\n\nReason: ${reason}${note ? `\n${note}` : ''}\n\nYou're welcome to submit a new listing addressing these concerns. Questions? Just reply here!`;
           await sendWhatsApp({
             sellerId: seller.id,
             to: seller.phone,
-            textBody: waMessage,
+            template: 'listing_rejected_v2',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: productTitle },
+                  { type: 'text', text: reason }
+                ]
+              }
+            ],
             context: 'listing_rejected',
-            metadata
+            metadata,
+            textPreview: `Your listing "${productTitle}" was not approved. Reason: ${reason}`
           });
         }
       }
@@ -178,6 +245,60 @@ export default async function handler(req, res) {
         message: 'Listing rejected and notifications sent',
         notificationSent: !skipNotification && !!seller
       });
+    }
+
+    // REQUEST REVISION — keep draft alive, tag as needs-revision, notify seller
+    if (action === 'request-revision' && req.method === 'POST') {
+      const { shopifyProductId, note, skipNotification } = req.body;
+
+      if (!shopifyProductId || !note) {
+        return res.status(400).json({ error: 'shopifyProductId and note required' });
+      }
+
+      const product = await getProduct(shopifyProductId);
+      const metafields = await fetchMetafields(shopifyProductId);
+      const sellerEmail = getSellerEmail(metafields);
+      const sellerId = getSellerId(metafields);
+
+      // Swap tags: remove pending-approval + seller-revised, add needs-revision
+      const currentTags = product.tags?.split(', ').map(t => t.trim()).filter(Boolean) || [];
+      const newTags = [
+        ...currentTags.filter(t => t !== 'pending-approval' && t !== 'seller-revised'),
+        'needs-revision'
+      ];
+      await updateProduct(shopifyProductId, { tags: newTags.join(', ') });
+
+      // Store revision note as metafield so seller portal can display it
+      await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_note', note);
+
+      const seller = await resolveSellerFromProduct(sellerEmail, sellerId, shopifyProductId, 'id, name, email, phone');
+
+      let notificationSent = false;
+      if (!skipNotification && seller) {
+        const portalUrl = `https://sell.thephirstory.com/seller`;
+        const metadata = { productId: shopifyProductId, productTitle: product.title, note };
+
+        // Email
+        if (seller.email) {
+          const { subject, html } = listingRevisionEmail(seller.name, product.title, note, portalUrl);
+          await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'revision_requested', metadata });
+        }
+
+        // WhatsApp
+        if (seller.phone) {
+          await sendWhatsApp({
+            sellerId: seller.id,
+            to: seller.phone,
+            textBody: `Hi ${seller.name || 'there'}! We reviewed your listing "${product.title}" and need a small update before we can approve it:\n\n"${note}"\n\nPlease update your listing here: ${portalUrl}\n\nThank you! 🙏`,
+            context: 'revision_requested',
+            metadata,
+            textPreview: `Revision requested for "${product.title}": ${note}`
+          });
+        }
+        notificationSent = true;
+      }
+
+      return res.status(200).json({ success: true, notificationSent });
     }
 
     // GET PENDING PAYOUTS
@@ -603,7 +724,7 @@ export default async function handler(req, res) {
       const { sellerEmail, type } = req.body;
 
       if (!sellerEmail || !type) {
-        return res.status(400).json({ error: 'sellerEmail and type required. Types: listing_approved, item_sold, payout_sent' });
+        return res.status(400).json({ error: 'sellerEmail and type required. Types: listing_approved, listing_rejected, item_sold, payout_sent' });
       }
 
       // Find seller
@@ -628,28 +749,76 @@ export default async function handler(req, res) {
 
       // Send WhatsApp
       if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
-        let templateName, templateParams;
-        if (type === 'listing_approved') {
-          templateName = 'listing_approved';
-          templateParams = [testData.productTitle];
-        } else if (type === 'item_sold') {
-          templateName = 'item_sold';
-          templateParams = [testData.productTitle, testData.salePrice.toFixed(0)];
-        } else if (type === 'payout_sent') {
-          templateName = 'payout_sent';
-          templateParams = [seller.name || 'there', `$${testData.sellerPayout.toFixed(2)}`, testData.productTitle, ' via PayPal'];
-        }
+        let waPayload;
 
-        if (templateName) {
-          const waResult = await sendWhatsApp({
+        if (type === 'listing_approved') {
+          waPayload = {
             sellerId: seller.id,
             to: seller.phone,
-            template: templateName,
-            params: templateParams,
+            template: 'listing_approved_v2',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: testData.productTitle },
+                  { type: 'text', text: testData.sellerPayout.toFixed(2) }
+                ]
+              },
+              {
+                type: 'button',
+                sub_type: 'url',
+                index: '0',
+                parameters: [{ type: 'text', text: 'test' }]
+              }
+            ],
             context: type,
             metadata: testMeta,
-            textPreview: `[TEST] ${type} notification`
-          });
+            textPreview: `[TEST] Your listing "${testData.productTitle}" is now live!`
+          };
+        } else if (type === 'listing_rejected') {
+          waPayload = {
+            sellerId: seller.id,
+            to: seller.phone,
+            template: 'listing_rejected_v2',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: testData.productTitle },
+                  { type: 'text', text: 'Item does not meet quality standards' }
+                ]
+              }
+            ],
+            context: type,
+            metadata: testMeta,
+            textPreview: `[TEST] Your listing "${testData.productTitle}" was not approved.`
+          };
+        } else if (type === 'item_sold') {
+          waPayload = {
+            sellerId: seller.id,
+            to: seller.phone,
+            template: 'item_sold',
+            params: [testData.productTitle, testData.salePrice.toFixed(0)],
+            context: type,
+            metadata: testMeta,
+            textPreview: `[TEST] Item sold: "${testData.productTitle}"`
+          };
+        } else if (type === 'payout_sent') {
+          waPayload = {
+            sellerId: seller.id,
+            to: seller.phone,
+            template: 'payout_sent',
+            params: [seller.name || 'there', `$${testData.sellerPayout.toFixed(2)}`, testData.productTitle, ' via PayPal'],
+            context: type,
+            metadata: testMeta,
+            textPreview: `[TEST] Payout sent for "${testData.productTitle}"`
+          };
+        }
+
+        if (waPayload) {
+          const waResult = await sendWhatsApp(waPayload);
           results.whatsapp = waResult.success ? 'sent' : waResult.error || 'failed';
         }
       }
@@ -659,6 +828,8 @@ export default async function handler(req, res) {
         let emailTemplate;
         if (type === 'listing_approved') {
           emailTemplate = listingApprovedEmail(seller.name, testData.productTitle, testData.productUrl, testData.sellerPayout);
+        } else if (type === 'listing_rejected') {
+          emailTemplate = listingRejectedEmail(seller.name, testData.productTitle, 'Item does not meet quality standards', 'This is a test rejection note');
         } else if (type === 'payout_sent') {
           emailTemplate = payoutNotificationEmail(seller.name, testData.productTitle, testData.sellerPayout, 'PayPal (test)');
         }
@@ -741,7 +912,8 @@ export default async function handler(req, res) {
         chest,
         hip,
         notes,
-        originalPrice: parseFloat(original_price) || 0
+        originalPrice: parseFloat(original_price) || 0,
+        source: 'admin'
       });
 
       // Link to seller in Supabase
@@ -873,7 +1045,117 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification' });
+    // BACKFILL ORDERS — process paid Shopify orders from the last N days that are missing transactions
+    if (action === 'backfill-orders' && req.method === 'POST') {
+      const days = parseInt(req.body?.days || 7, 10);
+      const dryRun = req.body?.dryRun === true;
+
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      // Fetch paid orders from Shopify since the cutoff date
+      const { url, token } = { url: process.env.VITE_SHOPIFY_STORE_URL, token: process.env.VITE_SHOPIFY_ACCESS_TOKEN };
+      const ordersRes = await fetch(
+        `https://${url}/admin/api/2024-10/orders.json?status=any&financial_status=paid&created_at_min=${since}&limit=250`,
+        { headers: { 'X-Shopify-Access-Token': token } }
+      );
+      const { orders } = await ordersRes.json();
+
+      console.log(`📦 Backfill: found ${orders?.length || 0} paid orders since ${since}`);
+
+      const results = { processed: 0, skipped: 0, errors: [], items: [] };
+
+      for (const order of orders || []) {
+        for (const item of order.line_items || []) {
+          const productId = item.product_id;
+          if (!productId) continue;
+
+          // Skip if transaction already exists
+          const { data: existingTx } = await supabase
+            .from('transactions')
+            .select('id')
+            .eq('order_id', order.id.toString())
+            .eq('product_id', productId.toString())
+            .maybeSingle();
+
+          if (existingTx) {
+            results.skipped++;
+            continue;
+          }
+
+          if (dryRun) {
+            results.items.push({ order: order.name, product: item.title, status: 'would_create' });
+            results.processed++;
+            continue;
+          }
+
+          try {
+            // Fetch seller from metafields
+            let sellerEmail = null, sellerId = null, sellerPayout = null, commissionRate = 18;
+            try {
+              const metafields = await fetchMetafields(productId);
+              sellerEmail    = getSellerEmail(metafields);
+              sellerId       = getSellerId(metafields);
+              sellerPayout   = parseFloat(getMetafieldValue(metafields, 'pricing', 'seller_payout')) || null;
+              commissionRate = parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18;
+            } catch {}
+
+            let seller = null;
+            if (sellerId) {
+              const { data } = await supabase.from('sellers').select('*').eq('id', sellerId).single();
+              seller = data;
+            }
+            if (!seller && sellerEmail) {
+              const { data } = await supabase.from('sellers').select('*').eq('email', sellerEmail.toLowerCase()).single();
+              seller = data;
+            }
+
+            const salePrice = parseFloat(item.price);
+            if (!sellerPayout) sellerPayout = salePrice * ((100 - commissionRate) / 100);
+
+            const buyerAddress = order.shipping_address ? {
+              name: order.shipping_address.name, street1: order.shipping_address.address1,
+              street2: order.shipping_address.address2 || '', city: order.shipping_address.city,
+              state: order.shipping_address.province_code, zip: order.shipping_address.zip,
+              country: order.shipping_address.country_code || 'US', phone: order.shipping_address.phone || ''
+            } : null;
+
+            const shipBy = new Date(new Date(order.created_at).getTime() + 7 * 24 * 60 * 60 * 1000);
+
+            const { error: txError } = await supabase.from('transactions').insert({
+              seller_id:       seller?.id || null,
+              order_id:        order.id.toString(),
+              order_name:      order.name,
+              product_id:      productId.toString(),
+              product_title:   item.title,
+              product_image:   item.image?.src || null,
+              sale_price:      salePrice,
+              seller_payout:   sellerPayout,
+              commission_rate: commissionRate,
+              status:          'pending_payout',
+              payout_status:   seller ? 'pending_shipping' : 'needs_attention',
+              shipping_status: seller ? 'pending_label'    : 'needs_attention',
+              customer_email:  order.email,
+              buyer_address:   buyerAddress,
+              ship_by:         shipBy.toISOString(),
+              created_at:      order.created_at,
+              admin_note:      `Backfilled from order ${order.name}${!seller ? ` — SELLER NOT FOUND (email: ${sellerEmail}, id: ${sellerId})` : ''}`
+            });
+
+            if (txError) throw new Error(txError.message);
+
+            results.processed++;
+            results.items.push({ order: order.name, product: item.title, seller: seller?.email || 'MISSING', payout: sellerPayout, status: 'created' });
+          } catch (err) {
+            results.errors.push({ order: order.name, product: item.title, error: err.message });
+          }
+        }
+      }
+
+      console.log(`✅ Backfill done: ${results.processed} created, ${results.skipped} skipped, ${results.errors.length} errors`);
+      return res.status(200).json({ success: true, dryRun, days, ...results });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders' });
 
   } catch (error) {
     console.error('Admin listings error:', error);
