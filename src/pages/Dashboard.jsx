@@ -220,7 +220,7 @@ export default function Dashboard() {
     if (!url) return;
     setAdminScraping(true);
     try {
-      const res = await fetch('/api/scrape-url', {
+      const res = await fetch('/api/admin-listings?action=scrape-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
@@ -573,7 +573,7 @@ export default function Dashboard() {
                       <span className="flex items-center gap-1">
                         <DollarSign className="w-3 h-3" />
                         asks ${listing.asking_price_usd || 0}
-                        <span className="text-gray-300 text-xs">→ lists ${listing.list_price || 0}</span>
+                        <span className="text-gray-300 text-xs">→ lists ${listing.asking_price_usd || 0}</span>
                       </span>
                       <span className="flex items-center gap-1">
                         <Shirt className="w-3 h-3" />
@@ -689,7 +689,7 @@ export default function Dashboard() {
                           Seller Asking Price
                         </div>
                         <p className="font-medium text-green-600">${listing.asking_price_usd || 0}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">Lists at ${listing.list_price || 0} (+$10 fee)</p>
+                        <p className="text-xs text-gray-400 mt-0.5">Lists at ${listing.asking_price_usd || 0} (+$10 fee)</p>
                       </div>
                     </div>
 

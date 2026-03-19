@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue, extractPricing, upsertMetafield } from '../lib/shopify-metafields.js';
 import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
+import { scrapePage } from '../lib/scraper.js';
 
 const STORE_URL = process.env.VITE_SHOPIFY_STORE_URL?.replace('.myshopify.com', '');
 
@@ -1155,7 +1156,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, dryRun, days, ...results });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders' });
+    if (action === 'scrape-url' && req.method === 'POST') {
+      const { url } = req.body;
+      if (!url) return res.status(400).json({ error: 'URL is required' });
+      try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+      const data = await scrapePage(url);
+      return res.status(200).json({ success: true, url, data });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url' });
 
   } catch (error) {
     console.error('Admin listings error:', error);

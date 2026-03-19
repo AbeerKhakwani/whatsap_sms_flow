@@ -169,7 +169,7 @@ export default function SellerSubmit() {
     setScrapeError('');
     setIsScraping(true);
     try {
-      const res = await fetch(`${API_URL}/api/scrape-url`, {
+      const res = await fetch(`${API_URL}/api/admin-listings?action=scrape-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
