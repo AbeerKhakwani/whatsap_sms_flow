@@ -116,7 +116,7 @@ export default async function handler(req, res) {
           await sendWhatsApp({
             sellerId,
             to: seller.phone,
-            template: 'listing_approved_v2',
+            template: 'listing_approved',
             components: [
               {
                 type: 'body',
@@ -756,7 +756,7 @@ export default async function handler(req, res) {
           waPayload = {
             sellerId: seller.id,
             to: seller.phone,
-            template: 'listing_approved_v2',
+            template: 'listing_approved',
             components: [
               {
                 type: 'body',
