@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2, ArrowUpDown } from 'lucide-react';
+import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2, ArrowUpDown, AlertCircle } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
 import SellerLayout from './SellerLayout';
 
@@ -388,19 +388,16 @@ export default function SellerDashboard() {
 
   function getStatusBadge(listing) {
     if (listing.isSold) {
-      return (
-        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-          Sold
-        </span>
-      );
+      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Sold</span>;
     }
-    // Check if delisted (has delisted tag)
+    if (listing.tags?.includes('needs-revision')) {
+      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Action Required</span>;
+    }
+    if (listing.tags?.includes('seller-revised')) {
+      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Under Review</span>;
+    }
     if (listing.tags?.includes('delisted')) {
-      return (
-        <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
-          Delisted
-        </span>
-      );
+      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">Delisted</span>;
     }
     const styles = {
       draft: 'bg-yellow-100 text-yellow-800',
@@ -601,7 +598,34 @@ export default function SellerDashboard() {
           ) : (
             <div className="divide-y divide-gray-100">
               {listings.map((listing) => (
-                <div key={listing.id} className="p-4 flex items-start gap-4 hover:bg-gray-50">
+                <div key={listing.id} className="flex flex-col">
+                  {/* Revision Banner */}
+                  {listing.tags?.includes('needs-revision') && (
+                    <div className="mx-4 mt-4 mb-0 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-amber-800">Update needed before approval</p>
+                          {listing.revisionNote && (
+                            <p className="text-sm text-amber-700 mt-0.5">"{listing.revisionNote}"</p>
+                          )}
+                          <p className="text-xs text-amber-600 mt-1">
+                            Click <strong>Edit</strong> below to update your listing and resubmit for review.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {listing.tags?.includes('seller-revised') && (
+                    <div className="mx-4 mt-4 mb-0 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-blue-700">Your update has been submitted — we're reviewing it now.</p>
+                      </div>
+                    </div>
+                  )}
+
+                <div className="p-4 flex items-start gap-4 hover:bg-gray-50">
                   {/* Image */}
                   <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
                     {listing.image ? (
@@ -717,6 +741,7 @@ export default function SellerDashboard() {
                       </a>
                     )}
                   </div>
+                </div>
                 </div>
               ))}
             </div>

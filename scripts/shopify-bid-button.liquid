@@ -1,0 +1,320 @@
+{% comment %}
+  The Phir Story — Make a Bid snippet
+  =====================================
+  HOW TO ADD:
+  1. In Shopify Admin → Online Store → Themes → Edit code
+  2. Under "Snippets", click "Add a new snippet" → name it "product-bid"
+  3. Paste this entire file into it
+  4. Open sections/main-product.liquid (or your product template)
+  5. Find where the "Add to cart" button is rendered and add just below it:
+       {% render 'product-bid', product: product %}
+  6. Save. Done.
+{% endcomment %}
+
+{% assign listing_price = product.price | divided_by: 100.0 %}
+{% assign min_offer = listing_price | times: 0.5 | ceil %}
+
+<div class="phirstory-bid-wrapper" style="margin-top: 12px;">
+  <button
+    type="button"
+    id="phirstory-bid-btn"
+    onclick="phirstoryOpenBid()"
+    style="
+      width: 100%;
+      padding: 14px 20px;
+      background: #fff;
+      color: #18181b;
+      border: 2px solid #18181b;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s, color 0.15s;
+    "
+    onmouseover="this.style.background='#18181b';this.style.color='#fff'"
+    onmouseout="this.style.background='#fff';this.style.color='#18181b'"
+  >
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    Make a Bid
+  </button>
+  <p style="text-align:center;font-size:12px;color:#888;margin-top:6px;">
+    Listed at {{ product.price | money }}. Minimum offer: {{ min_offer | money }}
+  </p>
+</div>
+
+<!-- Bid Modal Overlay -->
+<div id="phirstory-bid-overlay" onclick="phirstoryCloseBid()" style="
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 9998;
+  backdrop-filter: blur(2px);
+"></div>
+
+<!-- Bid Modal -->
+<div id="phirstory-bid-modal" style="
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px 24px;
+  width: 90%;
+  max-width: 420px;
+  z-index: 9999;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+">
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+      <h2 style="margin:0;font-size:18px;font-weight:700;color:#18181b;">Make a Bid</h2>
+      <p style="margin:4px 0 0;font-size:13px;color:#888;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        {{ product.title }}
+      </p>
+    </div>
+    <button onclick="phirstoryCloseBid()" style="background:none;border:none;cursor:pointer;padding:4px;color:#888;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+
+  <!-- Price summary -->
+  <div style="background:#f9fafb;border-radius:8px;padding:12px 14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-size:13px;color:#666;">Listed at</span>
+    <span style="font-size:16px;font-weight:700;color:#18181b;">{{ product.price | money }}</span>
+  </div>
+
+  <!-- Form -->
+  <form id="phirstory-bid-form" onsubmit="phirstorySubmitBid(event)">
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">
+        Your Offer *
+      </label>
+      <div style="position:relative;">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#888;font-size:15px;">$</span>
+        <input
+          type="number"
+          id="phirstory-amount"
+          min="{{ min_offer }}"
+          max="{{ listing_price }}"
+          step="1"
+          placeholder="{{ min_offer | ceil }}"
+          required
+          style="
+            width: 100%;
+            padding: 10px 12px 10px 26px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 15px;
+            box-sizing: border-box;
+            outline: none;
+          "
+          onfocus="this.style.borderColor='#18181b'"
+          onblur="this.style.borderColor='#d1d5db'"
+        />
+      </div>
+      <p id="phirstory-amount-hint" style="font-size:11px;color:#888;margin-top:4px;">
+        Min {{ min_offer | money }} · Max {{ product.price | money }}
+      </p>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">
+        Your Email *
+      </label>
+      <input
+        type="email"
+        id="phirstory-email"
+        placeholder="you@example.com"
+        required
+        style="
+          width: 100%;
+          padding: 10px 12px;
+          border: 1.5px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 14px;
+          box-sizing: border-box;
+          outline: none;
+        "
+        onfocus="this.style.borderColor='#18181b'"
+        onblur="this.style.borderColor='#d1d5db'"
+      />
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">
+        Note <span style="font-weight:400;color:#9ca3af;">(optional)</span>
+      </label>
+      <textarea
+        id="phirstory-note"
+        rows="2"
+        placeholder="Any details you'd like to share..."
+        style="
+          width: 100%;
+          padding: 10px 12px;
+          border: 1.5px solid #d1d5db;
+          border-radius: 8px;
+          font-size: 13px;
+          resize: none;
+          box-sizing: border-box;
+          outline: none;
+        "
+        onfocus="this.style.borderColor='#18181b'"
+        onblur="this.style.borderColor='#d1d5db'"
+      ></textarea>
+    </div>
+
+    <!-- Error message -->
+    <div id="phirstory-error" style="display:none;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:13px;color:#dc2626;"></div>
+
+    <!-- Submit -->
+    <button
+      type="submit"
+      id="phirstory-submit-btn"
+      style="
+        width: 100%;
+        padding: 13px;
+        background: #18181b;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      "
+    >
+      Submit Bid
+    </button>
+
+    <p style="text-align:center;font-size:11px;color:#9ca3af;margin-top:10px;">
+      The seller will respond within 48 hours. All transactions through The Phir Story.
+    </p>
+  </form>
+
+  <!-- Success state -->
+  <div id="phirstory-success" style="display:none;text-align:center;padding:20px 0;">
+    <div style="font-size:48px;margin-bottom:12px;">🎉</div>
+    <h3 style="margin:0 0 8px;font-size:18px;font-weight:700;color:#18181b;">Bid Submitted!</h3>
+    <p style="color:#666;font-size:14px;margin:0 0 20px;">
+      The seller has been notified and will respond within 48 hours.<br>
+      We'll email you at <strong id="phirstory-success-email"></strong>.
+    </p>
+    <button onclick="phirstoryCloseBid()" style="
+      padding: 10px 24px;
+      background: #18181b;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    ">
+      Done
+    </button>
+  </div>
+</div>
+
+<script>
+(function() {
+  var PRODUCT_ID = {{ product.id | json }};
+  var PRODUCT_TITLE = {{ product.title | json }};
+  var LISTING_PRICE = {{ listing_price }};
+  var MIN_OFFER = Math.ceil(LISTING_PRICE * 0.5);
+  var API_BASE = 'https://sell.thephirstory.com';
+
+  window.phirstoryOpenBid = function() {
+    document.getElementById('phirstory-bid-overlay').style.display = 'block';
+    document.getElementById('phirstory-bid-modal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    setTimeout(function() {
+      document.getElementById('phirstory-amount').focus();
+    }, 100);
+  };
+
+  window.phirstoryCloseBid = function() {
+    document.getElementById('phirstory-bid-overlay').style.display = 'none';
+    document.getElementById('phirstory-bid-modal').style.display = 'none';
+    document.body.style.overflow = '';
+    // Reset form on close
+    document.getElementById('phirstory-bid-form').style.display = 'block';
+    document.getElementById('phirstory-success').style.display = 'none';
+    document.getElementById('phirstory-error').style.display = 'none';
+    document.getElementById('phirstory-bid-form').reset();
+  };
+
+  window.phirstorySubmitBid = async function(e) {
+    e.preventDefault();
+
+    var amount = parseFloat(document.getElementById('phirstory-amount').value);
+    var email = document.getElementById('phirstory-email').value.trim();
+    var note = document.getElementById('phirstory-note').value.trim();
+    var errorEl = document.getElementById('phirstory-error');
+    var submitBtn = document.getElementById('phirstory-submit-btn');
+
+    // Client-side validation
+    if (amount < MIN_OFFER) {
+      errorEl.textContent = 'Minimum offer is $' + MIN_OFFER.toFixed(0) + '.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (amount > LISTING_PRICE) {
+      errorEl.textContent = 'Offer cannot exceed the listed price of $' + LISTING_PRICE.toFixed(2) + '. Just buy it!';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    errorEl.style.display = 'none';
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:phirstory-spin 0.8s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Submitting...';
+
+    try {
+      var res = await fetch(API_BASE + '/api/seller?action=submit-offer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: PRODUCT_ID,
+          amount: amount,
+          buyerEmail: email,
+          note: note || null
+        })
+      });
+
+      var data = await res.json();
+
+      if (data.success) {
+        document.getElementById('phirstory-bid-form').style.display = 'none';
+        document.getElementById('phirstory-success-email').textContent = email;
+        document.getElementById('phirstory-success').style.display = 'block';
+      } else {
+        errorEl.textContent = data.error || 'Something went wrong. Please try again.';
+        errorEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Submit Bid';
+      }
+    } catch (err) {
+      errorEl.textContent = 'Network error. Please check your connection and try again.';
+      errorEl.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = 'Submit Bid';
+    }
+  };
+})();
+</script>
+
+<style>
+@keyframes phirstory-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+</style>

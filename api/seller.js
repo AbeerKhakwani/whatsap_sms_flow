@@ -95,6 +95,8 @@ export default async function handler(req, res) {
         const isDelisted = product.tags?.includes('delisted');
         const isSold = !isDelisted && (inventory === 0 || product.status === 'archived');
 
+        const revisionNote = getMetafieldValue(metafields, 'custom', 'revision_note') || null;
+
         listings.push({
           id: product.id,
           title: product.title,
@@ -114,7 +116,8 @@ export default async function handler(req, res) {
           sellerAskingPrice,
           sellerPayout,
           inventory,
-          isSold
+          isSold,
+          revisionNote
         });
         stats.total++;
 
@@ -507,6 +510,7 @@ export default async function handler(req, res) {
           id: product.id,
           title: product.title,
           status: product.status,
+          tags: product.tags || '',
           price,
           size: variant.option1 || 'One Size',
           condition: variant.option3 || 'Good',
