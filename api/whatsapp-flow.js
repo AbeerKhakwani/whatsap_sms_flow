@@ -191,6 +191,15 @@ async function handleDataExchange(decryptedData, aesKey) {
         data: data
       };
 
+    case 'REVISION':
+      // Revision flow — single terminal screen. Echo back the pre-filled data
+      // so Meta renders the form with the correct field visibility flags.
+      console.log('✏️  REVISION screen data_exchange — echoing init data');
+      return {
+        screen: 'REVISION',
+        data: data || {}
+      };
+
     default:
       console.log('❓ Unknown screen:', screen);
       return {

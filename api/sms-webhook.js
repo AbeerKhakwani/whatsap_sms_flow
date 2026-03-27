@@ -892,6 +892,11 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
   console.log('🎉 Flow photos field:', JSON.stringify(flowData.photos));
   console.log('🎉 Flow keys:', Object.keys(flowData));
 
+  // ── Revision flow: update existing listing instead of creating a draft ──
+  if (flowData.flow_type === 'revision') {
+    return handleRevisionFlowCompletion(phone, flowData, res);
+  }
+
   try {
     // Get seller info
     const seller = await smsDb.findSellerByPhone(phone);
@@ -1023,6 +1028,91 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
     console.error('❌ Flow completion error:', error);
     await sendMessage(phone, "Something went wrong. Please try again.");
     await smsDb.resetConversation(phone);
+    return res.status(200).json({ status: 'error', error: error.message });
+  }
+}
+
+// ============ REVISION FLOW COMPLETION ============
+
+/**
+ * Handle revision flow nfm_reply — update an existing Shopify listing, flip tag
+ * to seller-revised, and notify the admin.
+ */
+async function handleRevisionFlowCompletion(phone, flowData, res) {
+  console.log('✏️  Revision flow completed for product:', flowData.product_id);
+
+  try {
+    const seller = await smsDb.findSellerByPhone(phone);
+    if (!seller) throw new Error('Seller not found for phone: ' + phone);
+
+    const productId = flowData.product_id;
+    if (!productId) throw new Error('product_id missing from revision flow payload');
+
+    // Build the update payload — only include non-empty fields
+    const updatePayload = {
+      email: seller.email,
+      productId
+    };
+    if (flowData.title?.trim())        updatePayload.title = flowData.title.trim();
+    if (flowData.designer?.trim())     updatePayload.designer = flowData.designer.trim();
+    if (flowData.description?.trim())  updatePayload.description = flowData.description.trim();
+    if (flowData.measurements?.trim()) updatePayload.measurements = flowData.measurements.trim();
+    if (flowData.price)                updatePayload.askingPrice = parseFloat(flowData.price);
+
+    // Call the seller update endpoint (handles tag flip + admin notification)
+    const updateRes = await fetch(`${API_BASE}/api/seller?action=update`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatePayload)
+    });
+    const updateData = await updateRes.json();
+    if (!updateData.success) throw new Error(updateData.error || 'Update failed');
+    console.log('✅ Listing updated via seller API');
+
+    // Upload any photos the seller submitted
+    const photos = flowData.photos || [];
+    if (photos.length) {
+      console.log(`📸 Uploading ${photos.length} revision photo(s)...`);
+      for (let i = 0; i < photos.length; i++) {
+        try {
+          const photo = photos[i];
+          let buffer;
+          const mediaId = photo.id || photo.media_id;
+          if (mediaId) {
+            buffer = await downloadMedia(mediaId.toString());
+          } else if (photo.cdn_url) {
+            const r = await fetch(photo.cdn_url);
+            buffer = Buffer.from(await r.arrayBuffer());
+          } else if (typeof photo === 'string' && photo.startsWith('http')) {
+            const r = await fetch(photo);
+            buffer = Buffer.from(await r.arrayBuffer());
+          } else {
+            console.warn(`  ⚠️  Photo ${i + 1} unknown format`);
+            continue;
+          }
+          const compressed = await compressImage(buffer);
+          await fetch(`${API_BASE}/api/product-image?action=add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ productId, base64: compressed.toString('base64'), filename: `revision_photo_${i + 1}.jpg` })
+          });
+          console.log(`  ✅ Photo ${i + 1} uploaded`);
+        } catch (photoErr) {
+          console.error(`  ❌ Photo ${i + 1} failed:`, photoErr.message);
+        }
+      }
+    }
+
+    await sendMessage(phone,
+      `Thanks! Your listing has been updated and sent back to our team for review.\n\nWe'll notify you once it's approved. 🙏`
+    );
+    return res.status(200).json({ status: 'revised', productId });
+
+  } catch (error) {
+    console.error('❌ Revision flow completion error:', error.message);
+    await sendMessage(phone,
+      `Something went wrong updating your listing. Please try again via the seller portal:\nhttps://sell.thephirstory.com/seller`
+    );
     return res.status(200).json({ status: 'error', error: error.message });
   }
 }

@@ -17,6 +17,65 @@ const CACHE_ALL = 'listings:all';
 
 const STORE_URL = process.env.VITE_SHOPIFY_STORE_URL?.replace('.myshopify.com', '');
 
+/**
+ * Send a WhatsApp interactive Flow message for the revision update form.
+ * Uses `flow_action: data_exchange` so our whatsapp-flow endpoint receives the
+ * screen init call and echoes back the field-visibility data.
+ * Template message must have been sent first to open the 24 h session window.
+ */
+async function sendRevisionFlowMessage(phone, productTitle, note, productId, flowId, screenData) {
+  const TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+  const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  if (!TOKEN || !PHONE_ID) return;
+
+  let cleanPhone = phone.replace(/\D/g, '');
+  if (!cleanPhone.startsWith('1') && cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: cleanPhone,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      header: { type: 'text', text: 'Update Your Listing' },
+      body: {
+        text: `Tap below to update the requested fields for *${productTitle}* directly here in WhatsApp.`
+      },
+      footer: { text: 'The Phir Story' },
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_token: `rev_${productId}`,
+          flow_id: flowId,
+          flow_cta: 'Update Listing',
+          flow_action: 'data_exchange',
+          flow_action_payload: {
+            screen: 'REVISION',
+            data: screenData
+          }
+        }
+      }
+    }
+  };
+
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error('❌ Revision flow message failed:', JSON.stringify(data));
+    } else {
+      console.log('📱 Revision flow message sent:', data?.messages?.[0]?.id);
+    }
+  } catch (e) {
+    console.error('❌ Revision flow message crashed:', e.message);
+  }
+}
+
 export default async function handler(req, res) {
   if (cors(req, res)) return;
 
@@ -293,6 +352,7 @@ export default async function handler(req, res) {
         }
 
         // WhatsApp — template: listing_revision_requested ({{1}}=name, {{2}}=title, {{3}}=note)
+        // The template re-opens the 24h session window so we can immediately follow with a Flow message.
         if (seller.phone) {
           await sendWhatsApp({
             sellerId: seller.id,
@@ -319,6 +379,33 @@ export default async function handler(req, res) {
             metadata,
             textPreview: `Revision requested for "${product.title}": ${note}`
           });
+
+          // If a Flow ID is configured, send an interactive flow message so the seller
+          // can update the exact requested fields directly inside WhatsApp.
+          const REVISION_FLOW_ID = process.env.WHATSAPP_REVISION_FLOW_ID;
+          if (REVISION_FLOW_ID) {
+            // Build visibility flags from the selected fields array
+            const fieldSet = new Set(fields || []);
+            const flowScreenData = {
+              product_id:         shopifyProductId.toString(),
+              product_title:      product.title,
+              revision_note:      note,
+              current_price:      String(getMetafieldValue(metafields, 'pricing', 'seller_asking_price') || ''),
+              show_photos:        fieldSet.has('photos'),
+              show_price:         fieldSet.has('price'),
+              show_designer:      fieldSet.has('designer'),
+              show_measurements:  fieldSet.has('measurements'),
+              show_description:   fieldSet.has('description'),
+              show_title:         fieldSet.has('title')
+            };
+
+            // Fallback: if no fields provided, show all
+            if (!fields?.length) {
+              Object.keys(flowScreenData).forEach(k => { if (k.startsWith('show_')) flowScreenData[k] = true; });
+            }
+
+            await sendRevisionFlowMessage(seller.phone, product.title, note, shopifyProductId, REVISION_FLOW_ID, flowScreenData);
+          }
         }
         notificationSent = true;
       }
