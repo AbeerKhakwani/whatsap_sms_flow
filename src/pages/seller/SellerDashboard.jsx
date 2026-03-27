@@ -79,6 +79,18 @@ export default function SellerDashboard() {
   const [submittingRevision, setSubmittingRevision] = useState(false);
   const revisionPhotoRef = useRef(null);
 
+  // Derived revision values — computed outside JSX to avoid Babel IIFE issues
+  const revisionReqs = revisionListing ? parseRevisionNeeds(revisionListing.revisionNote || '', revisionListing.revisionFields) : {};
+  const revisionHasAnyReq = Object.values(revisionReqs).some(Boolean);
+  const revisionIsValid = !revisionListing || (
+    (!revisionReqs.photos || revisionPhotos.length > 0) &&
+    (!revisionReqs.price || (revisionForm.price && parseFloat(revisionForm.price) > 0)) &&
+    (!revisionReqs.designer || revisionForm.designer.trim()) &&
+    (!revisionReqs.title || revisionForm.title.trim()) &&
+    (!revisionReqs.measurements || revisionForm.measurements.trim()) &&
+    (!revisionReqs.description || revisionForm.description.trim())
+  );
+
   // Address modal
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
@@ -255,11 +267,11 @@ export default function SellerDashboard() {
 
       // Build update payload from filled fields
       const updatePayload = { email, productId: revisionListing.id };
-      if (reqs.price && revisionForm.price) updatePayload.askingPrice = parseFloat(revisionForm.price);
-      if (reqs.title && revisionForm.title) updatePayload.title = revisionForm.title;
-      if (reqs.description && revisionForm.description) updatePayload.description = revisionForm.description;
-      if (reqs.designer && revisionForm.designer) updatePayload.designer = revisionForm.designer;
-      if (reqs.measurements && revisionForm.measurements) updatePayload.measurements = revisionForm.measurements;
+      if (revisionReqs.price && revisionForm.price) updatePayload.askingPrice = parseFloat(revisionForm.price);
+      if (revisionReqs.title && revisionForm.title) updatePayload.title = revisionForm.title;
+      if (revisionReqs.description && revisionForm.description) updatePayload.description = revisionForm.description;
+      if (revisionReqs.designer && revisionForm.designer) updatePayload.designer = revisionForm.designer;
+      if (revisionReqs.measurements && revisionForm.measurements) updatePayload.measurements = revisionForm.measurements;
 
       const res = await fetch('/api/seller?action=update', {
         method: 'PUT',
@@ -539,18 +551,7 @@ export default function SellerDashboard() {
       </div>
 
       {/* ══ REVISION EDIT MODAL ══ */}
-      {revisionListing && (() => {
-        const reqs = parseRevisionNeeds(revisionListing.revisionNote || '', revisionListing.revisionFields);
-        const hasAnyReq = Object.values(reqs).some(Boolean);
-        const isValid = (
-          (!reqs.photos || revisionPhotos.length > 0) &&
-          (!reqs.price || (revisionForm.price && parseFloat(revisionForm.price) > 0)) &&
-          (!reqs.designer || revisionForm.designer.trim()) &&
-          (!reqs.title || revisionForm.title.trim()) &&
-          (!reqs.measurements || revisionForm.measurements.trim()) &&
-          (!reqs.description || revisionForm.description.trim())
-        );
-        return (
+      {revisionListing && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
             <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto">
               <div className="p-5 border-b border-gray-100 flex items-start justify-between">
@@ -573,7 +574,7 @@ export default function SellerDashboard() {
                 )}
 
                 {/* Dynamic fields */}
-                {reqs.photos && (
+                {revisionReqs.photos && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Add Photos <span className="text-red-500">*</span></label>
                     <input ref={revisionPhotoRef} type="file" accept="image/*" multiple className="hidden" onChange={handleRevisionPhotoSelect} />
@@ -596,7 +597,7 @@ export default function SellerDashboard() {
                   </div>
                 )}
 
-                {reqs.price && (
+                {revisionReqs.price && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Your New Asking Price (CAD) <span className="text-red-500">*</span></label>
                     <div className="relative">
@@ -614,7 +615,7 @@ export default function SellerDashboard() {
                   </div>
                 )}
 
-                {reqs.designer && (
+                {revisionReqs.designer && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Designer / Brand <span className="text-red-500">*</span></label>
                     <input
@@ -627,7 +628,7 @@ export default function SellerDashboard() {
                   </div>
                 )}
 
-                {reqs.title && (
+                {revisionReqs.title && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Listing Title <span className="text-red-500">*</span></label>
                     <input
@@ -639,7 +640,7 @@ export default function SellerDashboard() {
                   </div>
                 )}
 
-                {reqs.measurements && (
+                {revisionReqs.measurements && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Measurements <span className="text-red-500">*</span></label>
                     <textarea
@@ -652,7 +653,7 @@ export default function SellerDashboard() {
                   </div>
                 )}
 
-                {reqs.description && (
+                {revisionReqs.description && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Description / Condition <span className="text-red-500">*</span></label>
                     <textarea
@@ -664,7 +665,7 @@ export default function SellerDashboard() {
                   </div>
                 )}
 
-                {!hasAnyReq && (
+                {!revisionHasAnyReq && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">What did you update? <span className="text-red-500">*</span></label>
                     <textarea
@@ -681,7 +682,7 @@ export default function SellerDashboard() {
 
                 <button
                   onClick={handleSubmitRevision}
-                  disabled={submittingRevision || !isValid}
+                  disabled={submittingRevision || !revisionIsValid}
                   className="w-full py-3.5 bg-[#C91A2B] hover:bg-[#a81523] text-white font-bold rounded-2xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2 text-sm"
                 >
                   {submittingRevision ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Update'}
@@ -689,8 +690,7 @@ export default function SellerDashboard() {
               </div>
             </div>
           </div>
-        );
-      })()}
+        )}
 
       {/* ══ REGULAR EDIT MODAL ══ */}
       {editingListing && (
