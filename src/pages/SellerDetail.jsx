@@ -728,17 +728,33 @@ export default function SellerDetail() {
                     </a>
                   </div>
 
+                  {/* Revision status banners */}
+                  {listing.tags?.split(', ').includes('needs-revision') && (
+                    <div className="mt-2 px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wide text-center"
+                      style={{ background: '#FFF0F1', color: CRIMSON, border: `1px solid ${CRIMSON}30` }}>
+                      ⏳ Awaiting seller update
+                    </div>
+                  )}
+                  {listing.tags?.split(', ').includes('seller-revised') && (
+                    <div className="mt-2 px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wide text-center"
+                      style={{ background: '#F0F9FF', color: '#0284C7', border: '1px solid #BAE6FD' }}>
+                      ✓ Seller revised — re-review
+                    </div>
+                  )}
+
                   {/* Request Revision — amber, full-width, prominent */}
-                  <button
-                    onClick={() => { setRevisionProduct({ id: listing.id, title: listing.title }); setRevisionFields({}); setRevisionNote(''); }}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors"
-                    style={{ background: '#FFF3CD', color: '#92400E', border: '1px solid #F59E0B' }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#FEF08A'}
-                    onMouseLeave={e => e.currentTarget.style.background = '#FFF3CD'}
-                  >
-                    <AlertCircle className="w-3 h-3" />
-                    Request Revision
-                  </button>
+                  {!listing.tags?.split(', ').includes('needs-revision') && (
+                    <button
+                      onClick={() => { setRevisionProduct({ id: listing.id, title: listing.title }); setRevisionFields({}); setRevisionNote(''); }}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors"
+                      style={{ background: '#FFF3CD', color: '#92400E', border: '1px solid #F59E0B' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#FEF08A'}
+                      onMouseLeave={e => e.currentTarget.style.background = '#FFF3CD'}
+                    >
+                      <AlertCircle className="w-3 h-3" />
+                      Request Revision
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

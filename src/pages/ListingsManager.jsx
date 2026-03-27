@@ -62,12 +62,16 @@ function SellerSearch({ value, onChange }) {
   );
 }
 
-const QUICK_NOTES = [
-  'Please update the price',
-  'Please update the designer name',
-  'Please submit a clearer photo of the tag',
-  'Please add more photos',
+const REVISION_FIELD_OPTIONS = [
+  { key: 'photos',       label: 'Photos',       hint: 'Add clearer / more photos' },
+  { key: 'price',        label: 'Price',         hint: 'Update asking price' },
+  { key: 'designer',     label: 'Designer',      hint: 'Correct the brand name' },
+  { key: 'measurements', label: 'Measurements',  hint: 'Add size measurements' },
+  { key: 'description',  label: 'Description',   hint: 'Improve condition details' },
+  { key: 'title',        label: 'Title',         hint: 'Rename the listing' },
 ];
+
+const FIELD_LABELS = { photos: 'photos', price: 'price', designer: 'designer/brand name', measurements: 'measurements', description: 'description/condition', title: 'listing title' };
 
 function ListingRow({ listing, onSaved }) {
   const [editing, setEditing] = useState(false);
@@ -77,21 +81,26 @@ function ListingRow({ listing, onSaved }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
   const [showRevision, setShowRevision] = useState(false);
+  const [revisionFields, setRevisionFields] = useState({});
   const [revisionNote, setRevisionNote] = useState('');
   const [sendingRevision, setSendingRevision] = useState(false);
 
   async function sendRevision() {
-    if (!revisionNote.trim()) return;
+    const selectedFields = Object.keys(revisionFields).filter(k => revisionFields[k]);
+    if (selectedFields.length === 0) return;
+    const fieldList = selectedFields.map(k => FIELD_LABELS[k]).join(', ');
+    const builtNote = `Please update the following: ${fieldList}${revisionNote.trim() ? `. ${revisionNote.trim()}` : '.'}`;
     setSendingRevision(true);
     try {
       const r = await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
-        body: JSON.stringify({ shopifyProductId: listing.id, note: revisionNote.trim() })
+        body: JSON.stringify({ shopifyProductId: listing.id, note: builtNote, fields: selectedFields })
       });
       const d = await r.json();
       if (d.success) {
         setShowRevision(false);
+        setRevisionFields({});
         setRevisionNote('');
       } else {
         alert(d.error || 'Failed to send revision request');
@@ -226,33 +235,39 @@ function ListingRow({ listing, onSaved }) {
 
             {/* Inline revision form */}
             {showRevision && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
-                <div className="flex flex-wrap gap-1">
-                  {QUICK_NOTES.map(n => (
-                    <button
-                      key={n}
-                      onClick={() => setRevisionNote(n)}
-                      className={`px-2 py-0.5 rounded-full text-[10px] border transition-colors ${revisionNote === n ? 'bg-amber-200 border-amber-400 text-amber-900 font-medium' : 'bg-white border-amber-200 text-amber-700 hover:bg-amber-100'}`}
-                    >
-                      {n}
-                    </button>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2 min-w-[260px]">
+                <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wide">Select fields to update</p>
+                <div className="grid grid-cols-2 gap-1">
+                  {REVISION_FIELD_OPTIONS.map(({ key, label, hint }) => (
+                    <label key={key} className={`flex items-start gap-1.5 p-1.5 rounded cursor-pointer transition-colors ${revisionFields[key] ? 'bg-amber-200' : 'hover:bg-amber-100'}`}>
+                      <input
+                        type="checkbox"
+                        checked={!!revisionFields[key]}
+                        onChange={e => setRevisionFields(f => ({ ...f, [key]: e.target.checked }))}
+                        className="mt-0.5 accent-amber-600 flex-shrink-0"
+                      />
+                      <div>
+                        <p className="text-[10px] font-semibold text-amber-900">{label}</p>
+                        <p className="text-[9px] text-amber-700">{hint}</p>
+                      </div>
+                    </label>
                   ))}
                 </div>
                 <textarea
                   value={revisionNote}
                   onChange={e => setRevisionNote(e.target.value)}
-                  placeholder="What needs to be updated..."
+                  placeholder="Optional extra note for seller..."
                   rows={2}
                   className="w-full text-xs px-2 py-1.5 border border-amber-200 rounded focus:outline-none resize-none bg-white"
                 />
                 <div className="flex gap-2">
-                  <button onClick={() => setShowRevision(false)} className="px-3 py-1 text-xs text-stone-500 border border-stone-200 rounded hover:bg-stone-50">Cancel</button>
+                  <button onClick={() => { setShowRevision(false); setRevisionFields({}); setRevisionNote(''); }} className="px-3 py-1 text-xs text-stone-500 border border-stone-200 rounded hover:bg-stone-50">Cancel</button>
                   <button
                     onClick={sendRevision}
-                    disabled={sendingRevision || !revisionNote.trim()}
+                    disabled={sendingRevision || Object.values(revisionFields).every(v => !v)}
                     className="px-3 py-1 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded disabled:opacity-50 flex items-center gap-1"
                   >
-                    {sendingRevision ? <Loader2 size={11} className="animate-spin" /> : 'Send'}
+                    {sendingRevision ? <Loader2 size={11} className="animate-spin" /> : 'Send Request'}
                   </button>
                 </div>
               </div>
