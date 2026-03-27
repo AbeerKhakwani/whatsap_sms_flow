@@ -244,7 +244,7 @@ export default function SellerDashboard() {
           if (pData.success) finalImages.push({ id: pData.imageId, src: newPhotos[i].preview });
         }
       }
-      setListings(prev => prev.map(l => l.id === editingListing.id ? { ...l, title: editForm.title, sellerAskingPrice: parseFloat(editForm.price), condition: editForm.condition, description: editForm.description, images: finalImages, image: finalImages[0]?.src || l.image } : l));
+      setListings(prev => prev.map(l => l.id === editingListing.id ? { ...l, title: editForm.title, sellerAskingPrice: data.listing?.sellerAskingPrice ?? parseFloat(editForm.price), sellerPayout: data.listing?.sellerPayout ?? l.sellerPayout, condition: editForm.condition, description: editForm.description, images: finalImages, image: finalImages[0]?.src || l.image } : l));
       setEditingListing(null);
       setUploadProgress('');
     } catch { alert('Something went wrong'); }
@@ -284,7 +284,7 @@ export default function SellerDashboard() {
         setListings(prev => prev.map(l => {
           if (l.id !== revisionListing.id) return l;
           const newTags = [...(l.tags || []).filter(t => t !== 'needs-revision'), 'seller-revised'];
-          return { ...l, tags: newTags, revisionNote: null, revisionDeadline: null, ...(updatePayload.askingPrice && { sellerAskingPrice: updatePayload.askingPrice }), ...(updatePayload.title && { title: updatePayload.title }) };
+          return { ...l, tags: newTags, revisionNote: null, revisionDeadline: null, ...(data.listing?.sellerAskingPrice && { sellerAskingPrice: data.listing.sellerAskingPrice }), ...(data.listing?.sellerPayout !== undefined && { sellerPayout: data.listing.sellerPayout }), ...(updatePayload.title && { title: updatePayload.title }) };
         }));
         setRevisionListing(null);
         setRevisionPhotos([]);
