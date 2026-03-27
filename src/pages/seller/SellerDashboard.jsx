@@ -95,17 +95,33 @@ export default function SellerDashboard() {
     }
   }
 
+  function applyListingsData(data) {
+    setListings(data.listings);
+    setStats(data.stats);
+    setSeller(data.seller);
+    setSoldProducts(data.soldProducts || []);
+    setRejectedListings(data.rejectedListings || []);
+  }
+
   async function fetchListings(sellerEmail) {
+    const cacheKey = `listings_cache_${sellerEmail}`;
+
+    // Show stale data instantly while fetching fresh
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        applyListingsData(JSON.parse(cached));
+        setLoading(false);
+      }
+    } catch {}
+
     try {
       const response = await fetch(`/api/seller?action=listings&email=${encodeURIComponent(sellerEmail)}`);
       const data = await response.json();
 
       if (data.success) {
-        setListings(data.listings);
-        setStats(data.stats);
-        setSeller(data.seller);
-        setSoldProducts(data.soldProducts || []);
-        setRejectedListings(data.rejectedListings || []);
+        applyListingsData(data);
+        try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
       }
     } catch (error) {
       console.error('Error fetching listings:', error);

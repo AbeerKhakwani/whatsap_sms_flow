@@ -13,6 +13,10 @@ import { itemSoldInlineEmail, shippingLabelEmail, sendTransferFromNotification, 
 import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
+import { withCache, cacheBust } from '../lib/cache.js';
+
+const CACHE_TTL_LISTINGS = 90; // seconds
+function cacheKeyListings(email) { return `listings:seller:${email}`; }
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -65,69 +69,64 @@ export default async function handler(req, res) {
         });
       }
 
-      const listings = [];
-      let stats = { total: 0, draft: 0, active: 0, sold: 0 };
+      // CACHED: Shopify products + metafields (expensive — N+1 API calls)
+      const { listings, stats } = await withCache(cacheKeyListings(email), CACHE_TTL_LISTINGS, async () => {
+        const _listings = [];
+        let _stats = { total: 0, draft: 0, active: 0, sold: 0 };
 
-      // BATCH FETCH: Get all products in one API call
-      const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
-      const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+        const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
+        const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
 
-      const productsRes = await fetch(
-        `https://${SHOPIFY_URL}/admin/api/2024-10/products.json?ids=${productIds.join(',')}&limit=250`,
-        { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
-      );
-      const { products } = await productsRes.json();
+        const productsRes = await fetch(
+          `https://${SHOPIFY_URL}/admin/api/2024-10/products.json?ids=${productIds.join(',')}&limit=250`,
+          { headers: { 'X-Shopify-Access-Token': SHOPIFY_TOKEN } }
+        );
+        const { products } = await productsRes.json();
 
-      // PARALLEL FETCH: Get all metafields at once
-      const metafieldsByProduct = await fetchMetafieldsBatch((products || []).map(p => p.id));
+        const metafieldsByProduct = await fetchMetafieldsBatch((products || []).map(p => p.id));
 
-      // Process all products
-      for (const product of products || []) {
-        const variant = product.variants?.[0] || {};
-        const metafields = metafieldsByProduct[product.id] || [];
+        for (const product of products || []) {
+          const variant = product.variants?.[0] || {};
+          const metafields = metafieldsByProduct[product.id] || [];
+          const price = parseFloat(variant.price) || 0;
+          const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, price);
+          const inventory = variant.inventory_quantity ?? 0;
+          const isDelisted = product.tags?.includes('delisted');
+          const isSold = !isDelisted && (inventory === 0 || product.status === 'archived');
+          const revisionNote = getMetafieldValue(metafields, 'custom', 'revision_note') || null;
 
-        // Extract pricing from metafields
-        const price = parseFloat(variant.price) || 0;
-        const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, price);
+          _listings.push({
+            id: product.id,
+            title: product.title,
+            handle: product.handle,
+            designer: product.vendor || 'Unknown',
+            status: product.status,
+            price,
+            size: variant.option1 || 'One Size',
+            condition: variant.option3 || 'Good',
+            image: product.images?.[0]?.src || null,
+            images: product.images?.map(img => ({ id: img.id, src: img.src })) || [],
+            description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
+            tags: product.tags?.split(', ') || [],
+            created_at: product.created_at,
+            updated_at: product.updated_at,
+            commissionRate,
+            sellerAskingPrice,
+            sellerPayout,
+            inventory,
+            isSold,
+            revisionNote
+          });
+          _stats.total++;
+          if (isSold) _stats.sold++;
+          else if (isDelisted) { /* skip */ }
+          else if (product.status === 'draft') _stats.draft++;
+          else if (product.status === 'active') _stats.active++;
+        }
 
-        // Check if sold (0 inventory or archived) — but not if seller delisted it
-        const inventory = variant.inventory_quantity ?? 0;
-        const isDelisted = product.tags?.includes('delisted');
-        const isSold = !isDelisted && (inventory === 0 || product.status === 'archived');
-
-        const revisionNote = getMetafieldValue(metafields, 'custom', 'revision_note') || null;
-
-        listings.push({
-          id: product.id,
-          title: product.title,
-          handle: product.handle,
-          designer: product.vendor || 'Unknown',
-          status: product.status,
-          price,
-          size: variant.option1 || 'One Size',
-          condition: variant.option3 || 'Good',
-          image: product.images?.[0]?.src || null,
-          images: product.images?.map(img => ({ id: img.id, src: img.src })) || [],
-          description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
-          tags: product.tags?.split(', ') || [],
-          created_at: product.created_at,
-          updated_at: product.updated_at,
-          commissionRate,
-          sellerAskingPrice,
-          sellerPayout,
-          inventory,
-          isSold,
-          revisionNote
-        });
-        stats.total++;
-
-        if (isSold) stats.sold++;
-        else if (isDelisted) { /* delisted items don't count in active/draft */ }
-        else if (product.status === 'draft') stats.draft++;
-        else if (product.status === 'active') stats.active++;
-      }
-
-      listings.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        _listings.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        return { listings: _listings, stats: _stats };
+      });
 
       // Get transactions from database (source of truth for sold items)
       const { data: transactions } = await supabase
@@ -380,6 +379,8 @@ export default async function handler(req, res) {
       const finalPrice = parseFloat(updatedProduct.variants?.[0]?.price) || 0;
       const finalMf = await fetchMetafields(productId);
       const { sellerAskingPrice, sellerPayout } = extractPricing(finalMf, finalPrice);
+
+      await cacheBust(cacheKeyListings(email));
 
       return res.status(200).json({
         success: true,
@@ -1187,6 +1188,8 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: errData.errors || 'Failed to delist' });
       }
 
+      await cacheBust(cacheKeyListings(email));
+
       return res.status(200).json({
         success: true,
         message: 'Listing delisted and archived',
@@ -1264,6 +1267,8 @@ export default async function handler(req, res) {
         const errData = await updateRes.json();
         return res.status(400).json({ error: errData.errors || 'Failed to relist' });
       }
+
+      await cacheBust(cacheKeyListings(email));
 
       return res.status(200).json({
         success: true,
