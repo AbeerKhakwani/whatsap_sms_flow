@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sell With Us - Preview</title>
+<style>body { margin: 0; padding: 40px 20px; background: white; }</style>
+</head>
+<body>
+
+<style>
+  .tps-sell { max-width: 860px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .tps-sell * { box-sizing: border-box; }
+  .tps-sell-hero {
+    text-align: center; padding: 50px 24px 40px;
+    background: linear-gradient(135deg, #1a1a1a 0%, #333 100%);
+    border-radius: 20px; margin-bottom: 40px; color: white;
+  }
+  .tps-sell-hero h1 { font-size: 36px; margin: 0 0 12px; color: white; }
+  .tps-sell-hero p { font-size: 18px; margin: 0 0 6px; opacity: 0.85; line-height: 1.6; }
+  .tps-sell-hero-sub { font-size: 15px; opacity: 0.6; margin-top: 12px; }
+  .tps-sell-badge {
+    display: inline-block; background: rgba(37,211,102,0.15); border: 1px solid rgba(37,211,102,0.3);
+    padding: 8px 20px; border-radius: 30px; font-size: 15px; font-weight: 600;
+    color: #25D366; margin-bottom: 20px;
+  }
+  .tps-sell-options {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 40px;
+  }
+  @media (max-width: 700px) { .tps-sell-options { grid-template-columns: 1fr; } }
+  .tps-sell-card {
+    border: 2px solid #eee; border-radius: 20px; padding: 32px 28px;
+    text-align: center; transition: border-color 0.2s, transform 0.2s;
+    position: relative; overflow: hidden;
+  }
+  .tps-sell-card:hover { border-color: #ddd; transform: translateY(-2px); }
+  .tps-sell-card-icon {
+    width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center; font-size: 32px;
+  }
+  .tps-sell-card h2 { font-size: 22px; margin: 0 0 10px; color: #1a1a1a; }
+  .tps-sell-card p { font-size: 15px; color: #666; line-height: 1.6; margin: 0 0 8px; }
+  .tps-sell-card-list {
+    text-align: left; margin: 16px 0; padding: 0; list-style: none; font-size: 14px; color: #555;
+  }
+  .tps-sell-card-list li { padding: 6px 0 6px 24px; position: relative; }
+  .tps-sell-card-list li::before { content: '✓'; position: absolute; left: 0; color: #25D366; font-weight: 700; }
+  .tps-sell-card-tag {
+    display: inline-block; font-size: 12px; font-weight: 600; padding: 4px 12px;
+    border-radius: 20px; margin-bottom: 16px;
+  }
+  .tps-sell-tag-fast { background: #f0fdf4; color: #166534; }
+  .tps-sell-btn {
+    display: inline-block; padding: 14px 32px; border-radius: 30px;
+    text-decoration: none; font-weight: 600; font-size: 16px;
+    transition: transform 0.2s, box-shadow 0.2s; margin-top: 20px;
+  }
+  .tps-sell-btn:hover { transform: scale(1.03); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+  .tps-sell-btn-wa { background: #25D366; color: white; }
+  .tps-sell-how {
+    background: #f8f9fa; border-radius: 16px; padding: 32px 28px; margin-bottom: 40px;
+  }
+  .tps-sell-how h3 { text-align: center; margin: 0 0 24px; font-size: 22px; }
+  .tps-sell-steps {
+    display: flex; justify-content: space-between; gap: 12px; text-align: center;
+  }
+  @media (max-width: 600px) { .tps-sell-steps { flex-direction: column; gap: 16px; } }
+  .tps-sell-step { flex: 1; }
+  .tps-sell-step-icon { font-size: 28px; margin-bottom: 8px; }
+  .tps-sell-step-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; color: #1a1a1a; }
+  .tps-sell-step-desc { font-size: 13px; color: #888; }
+  .tps-sell-arrow { display: flex; align-items: center; color: #ccc; font-size: 20px; }
+  @media (max-width: 600px) { .tps-sell-arrow { display: none; } }
+  .tps-sell-payout {
+    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 16px;
+    padding: 28px; text-align: center; margin-bottom: 40px;
+  }
+  .tps-sell-payout-big { font-size: 40px; font-weight: 800; color: #166534; margin: 0 0 4px; }
+  .tps-sell-payout-sub { font-size: 15px; color: #166534; margin: 0 0 12px; }
+  .tps-sell-payout-detail { font-size: 13px; color: #555; margin: 0; }
+  .tps-sell-faq { border-top: 1px solid #eee; padding-top: 30px; }
+  .tps-sell-faq h3 { margin: 0 0 16px; font-size: 22px; text-align: center; }
+  .tps-sell-faq details { margin-bottom: 8px; background: #f8f9fa; border-radius: 10px; padding: 16px; }
+  .tps-sell-faq summary { font-weight: 600; cursor: pointer; font-size: 15px; }
+  .tps-sell-faq details p { margin: 12px 0 0; color: #555; font-size: 14px; line-height: 1.6; }
+</style>
+
+<div class="tps-sell">
+
+  <div class="tps-sell-hero">
+    <div class="tps-sell-badge">You Keep 82% of Every Sale</div>
+    <h1>Sell Your Preloved Designer Pieces</h1>
+    <p>Turn your closet into cash. We handle the listing, customer service, and payments — you just describe, ship, and get paid.</p>
+    <div class="tps-sell-hero-sub">Pakistani &amp; international designers welcome &middot; Free to list &middot; Prepaid shipping</div>
+  </div>
+
+  <div style="background: #FFF9E6; border: 2px solid #F59E0B; border-radius: 16px; padding: 28px; margin-bottom: 40px; text-align: center;">
+    <div style="font-size: 28px; margin-bottom: 12px;">🚧</div>
+    <h2 style="margin: 0 0 10px; font-size: 22px; color: #92400E;">New Selling Platform Coming Soon</h2>
+    <p style="margin: 0 0 16px; color: #78350F; font-size: 15px; line-height: 1.6;">We are no longer accepting listings through our previous selling platform. We're building a brand new, more intuitive experience for sellers — including <strong>WhatsApp selling</strong> and a <strong>Seller Portal</strong>.</p>
+    <p style="margin: 0 0 6px; color: #78350F; font-size: 15px; line-height: 1.6;">During this transition, we are limiting new listings to <strong>10 per month</strong>. Once spots are filled, submissions close until the following month.</p>
+  </div>
+
+  <div class="tps-sell-card" style="margin-bottom: 40px; border-color: #25D366; border-width: 2px;">
+    <div class="tps-sell-card-tag tps-sell-tag-fast">✅ Available Now</div>
+    <div class="tps-sell-card-icon" style="background: #f0fdf4;">📧</div>
+    <h2>Submit via Email</h2>
+    <p>During our transition period, you can submit items by emailing us directly. Please include:</p>
+    <ul class="tps-sell-card-list">
+      <li>Designer name</li>
+      <li>Material</li>
+      <li>Measurements</li>
+      <li>Condition</li>
+      <li>Clear, detailed photos of the outfit</li>
+    </ul>
+    <p style="font-size: 14px; color: #888; margin-top: 12px;">You will receive a response regarding approval within 4–5 business days.</p>
+    <a href="mailto:admin@thephirstory.com?subject=New%20Listing%20Submission" class="tps-sell-btn tps-sell-btn-wa" style="background: #1a1a1a;">📧 Email admin@thephirstory.com</a>
+  </div>
+
+  <h3 style="text-align: center; font-size: 20px; color: #999; margin-bottom: 24px;">Coming Soon — Two New Ways to Sell</h3>
+  <div class="tps-sell-options">
+    <div class="tps-sell-card" style="opacity: 0.7;">
+      <div class="tps-sell-card-tag" style="background: #f3f4f6; color: #9ca3af;">🔜 Coming Soon</div>
+      <div class="tps-sell-card-icon" style="background: #f0fdf4;">💬</div>
+      <h2>Sell on WhatsApp</h2>
+      <p>Just message us and describe your item — type or send a voice note. Our AI handles the rest.</p>
+      <ul class="tps-sell-card-list">
+        <li>Send a voice note or text description</li>
+        <li>AI extracts all details automatically</li>
+        <li>Pre-filled form to review &amp; add photos</li>
+        <li>Get notified when it sells</li>
+      </ul>
+    </div>
+    <div class="tps-sell-card" style="opacity: 0.7;">
+      <div class="tps-sell-card-tag" style="background: #f3f4f6; color: #9ca3af;">🔜 Coming Soon</div>
+      <div class="tps-sell-card-icon" style="background: #eff6ff;">📱</div>
+      <h2>Seller Portal</h2>
+      <p>Fill out a form with all details, upload photos, and track your listings — all from your browser.</p>
+      <ul class="tps-sell-card-list">
+        <li>Step-by-step listing form</li>
+        <li>Upload photos directly</li>
+        <li>Track all your listings &amp; sales</li>
+        <li>View earnings &amp; payouts</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="tps-sell-how">
+    <h3>How It Works</h3>
+    <div class="tps-sell-steps">
+      <div class="tps-sell-step">
+        <div class="tps-sell-step-icon">📝</div>
+        <div class="tps-sell-step-title">1. List It</div>
+        <div class="tps-sell-step-desc">Email us with details &amp; photos of your item</div>
+      </div>
+      <div class="tps-sell-arrow">→</div>
+      <div class="tps-sell-step">
+        <div class="tps-sell-step-icon">✅</div>
+        <div class="tps-sell-step-title">2. We Review</div>
+        <div class="tps-sell-step-desc">We approve &amp; list it on our store</div>
+      </div>
+      <div class="tps-sell-arrow">→</div>
+      <div class="tps-sell-step">
+        <div class="tps-sell-step-icon">📦</div>
+        <div class="tps-sell-step-title">3. Ship It</div>
+        <div class="tps-sell-step-desc">When sold, we send a prepaid shipping label</div>
+      </div>
+      <div class="tps-sell-arrow">→</div>
+      <div class="tps-sell-step">
+        <div class="tps-sell-step-icon">💰</div>
+        <div class="tps-sell-step-title">4. Get Paid</div>
+        <div class="tps-sell-step-desc">You keep 82% — paid weekly</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tps-sell-payout">
+    <p class="tps-sell-payout-big">You Keep 82%</p>
+    <p class="tps-sell-payout-sub">Free to list &middot; No upfront costs &middot; We handle everything</p>
+    <p class="tps-sell-payout-detail">We take care of listing optimization, photography touch-ups, customer inquiries, secure payments, and buyer support.</p>
+  </div>
+
+  <div class="tps-sell-faq">
+    <h3>Common Questions</h3>
+    <details>
+      <summary>Why can't I use the old platform?</summary>
+      <p>We're upgrading to a much better selling experience! Our new platform will let you list items via WhatsApp (voice notes + AI) or a dedicated Seller Portal. During the transition, email submissions keep things moving.</p>
+    </details>
+    <details>
+      <summary>What are the 10 monthly spots?</summary>
+      <p>To ensure quality during our transition, we're accepting up to 10 new listings per month. Once all spots are filled, submissions re-open the following month. Submit early to secure your spot!</p>
+    </details>
+    <details>
+      <summary>What brands do you accept?</summary>
+      <p>Pakistani designers (Sana Safinaz, Khaadi, Agha Noor, Maria B, Elan, HSY, Asim Jofa, Baroque, and more) plus international brands (Zara, Mango, H&amp;M, etc). Not sure? Just ask us!</p>
+    </details>
+    <details>
+      <summary>How much does it cost?</summary>
+      <p>Listing is completely free. We only take an 18% commission when your item sells. You keep 82% of the sale price. Shipping is on us — we provide a prepaid label.</p>
+    </details>
+    <details>
+      <summary>How long does approval take?</summary>
+      <p>You'll receive a response regarding approval within 4–5 business days of emailing us.</p>
+    </details>
+    <details>
+      <summary>How do I ship when it sells?</summary>
+      <p>We send a prepaid shipping label to your email. Just pack your item, stick on the label, and drop it off at any shipping location. No cost to you!</p>
+    </details>
+    <details>
+      <summary>When do I get paid?</summary>
+      <p>Payments are processed after the buyer receives the item. We pay weekly via your preferred method (Zelle, Venmo, or bank transfer).</p>
+    </details>
+  </div>
+
+</div>
+</body>
+</html>

@@ -10,6 +10,10 @@ import { cors } from '../lib/cors.js';
 import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue, extractPricing, upsertMetafield } from '../lib/shopify-metafields.js';
 import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
 import { scrapePage } from '../lib/scraper.js';
+import { withCache, cacheBust } from '../lib/cache.js';
+
+const CACHE_PENDING = 'listings:pending';
+const CACHE_ALL = 'listings:all';
 
 const STORE_URL = process.env.VITE_SHOPIFY_STORE_URL?.replace('.myshopify.com', '');
 
@@ -21,16 +25,14 @@ export default async function handler(req, res) {
   try {
     // GET PENDING LISTINGS
     if (action === 'pending' && req.method === 'GET') {
-      const products = await getPendingDrafts();
-      const counts = await getProductCounts();
+      const [products, counts, { count: soldCount }] = await Promise.all([
+        getPendingDrafts(),
+        getProductCounts(),
+        supabase.from('transactions').select('*', { count: 'exact', head: true })
+      ]);
 
-      // Get sold count from transactions table
-      const { count: soldCount } = await supabase
-        .from('transactions')
-        .select('*', { count: 'exact', head: true });
-
-      // Fetch metafields for all products to get seller info
-      const listingsWithSeller = await Promise.all(products.map(async (product) => {
+      // Fetch metafields for all products to get seller info (cache 2 min)
+      const listingsWithSeller = await withCache(CACHE_PENDING, 120, async () => Promise.all(products.map(async (product) => {
         const variant = product.variants?.[0] || {};
         const tags = product.tags?.split(', ') || [];
 
@@ -66,7 +68,7 @@ export default async function handler(req, res) {
             phone: seller.phone
           } : null
         };
-      }));
+      })));
 
       return res.status(200).json({
         success: true,
@@ -111,7 +113,7 @@ export default async function handler(req, res) {
         const { subject, html } = listingApprovedEmail(seller?.name, product.title, productUrl, sellerPayout);
         await sendEmail({ sellerId, to: sellerEmail, subject, html, context: 'listing_approved', metadata });
 
-        // Send WhatsApp (utility template with View Listing button)
+        // Send WhatsApp — template vars: {{1}}=name, {{2}}=title, {{3}}=payout
         if (seller?.phone) {
           await sendWhatsApp({
             sellerId,
@@ -140,6 +142,7 @@ export default async function handler(req, res) {
         }
       }
 
+      await cacheBust(CACHE_PENDING, CACHE_ALL);
       return res.status(200).json({
         success: true,
         productId: product.id,
@@ -241,6 +244,7 @@ export default async function handler(req, res) {
         }
       }
 
+      await cacheBust(CACHE_PENDING, CACHE_ALL);
       return res.status(200).json({
         success: true,
         message: 'Listing rejected and notifications sent',
@@ -285,12 +289,22 @@ export default async function handler(req, res) {
           await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'revision_requested', metadata });
         }
 
-        // WhatsApp
+        // WhatsApp — template: listing_revision_requested ({{1}}=name, {{2}}=title, {{3}}=note)
         if (seller.phone) {
           await sendWhatsApp({
             sellerId: seller.id,
             to: seller.phone,
-            textBody: `Hi ${seller.name || 'there'}! We reviewed your listing "${product.title}" and need a small update before we can approve it:\n\n"${note}"\n\nPlease update your listing here: ${portalUrl}\n\nThank you! 🙏`,
+            template: 'listing_revision_requested',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: product.title },
+                  { type: 'text', text: note }
+                ]
+              }
+            ],
             context: 'revision_requested',
             metadata,
             textPreview: `Revision requested for "${product.title}": ${note}`
@@ -299,6 +313,7 @@ export default async function handler(req, res) {
         notificationSent = true;
       }
 
+      await cacheBust(CACHE_PENDING, CACHE_ALL);
       return res.status(200).json({ success: true, notificationSent });
     }
 
@@ -559,12 +574,23 @@ export default async function handler(req, res) {
             await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
-            // WhatsApp
+            // WhatsApp — template: payout_sent ({{1}}=name, {{2}}=$amount, {{3}}=item desc, {{4}}=method)
             if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
               await sendWhatsApp({
                 sellerId,
                 to: seller.phone,
-                textBody: `Hi ${seller.name || 'there'}! Your payout of $${totalPayout.toFixed(2)} for ${txs.length} item(s) has been sent${paymentMethod}. Thank you for selling with The Phir Story!`,
+                template: 'payout_sent',
+                components: [
+                  {
+                    type: 'body',
+                    parameters: [
+                      { type: 'text', text: seller.name || 'there' },
+                      { type: 'text', text: `$${totalPayout.toFixed(2)}` },
+                      { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
+                      { type: 'text', text: sellerNote ? ` via ${sellerNote}` : '' }
+                    ]
+                  }
+                ],
                 context: 'payout_sent',
                 metadata
               });
@@ -1164,7 +1190,161 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, url, data });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url' });
+    // GET ALL LISTINGS — active Shopify products enriched with seller metafields
+    if (action === 'all-listings' && req.method === 'GET') {
+      const { url: storeUrl, token } = {
+        url: process.env.VITE_SHOPIFY_STORE_URL,
+        token: process.env.VITE_SHOPIFY_ACCESS_TOKEN
+      };
+      const missingOnly = req.query.missing === 'true';
+
+      // Cache the full enriched list for 10 minutes (expensive: N metafield calls)
+      const enriched = await withCache(CACHE_ALL, 600, async () => {
+        const res1 = await fetch(
+          `https://${storeUrl}/admin/api/2024-10/products.json?status=active&limit=250&fields=id,title,vendor,variants,images,tags,handle`,
+          { headers: { 'X-Shopify-Access-Token': token } }
+        );
+        const { products } = await res1.json();
+
+        const result = [];
+        const BATCH = 10;
+        for (let i = 0; i < (products || []).length; i += BATCH) {
+          const batch = products.slice(i, i + BATCH);
+          const withMeta = await Promise.all(batch.map(async (p) => {
+            const metafields = await fetchMetafields(p.id);
+            const sellerEmail = getSellerEmail(metafields);
+            const sellerId = getSellerId(metafields);
+            const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, p.variants?.[0]?.price);
+            const seller = await resolveSellerFromProduct(sellerEmail, sellerId, p.id, 'id, name, email, phone');
+            const hasSeller = !!(seller || sellerEmail || sellerId);
+            return {
+              id: p.id,
+              title: p.title,
+              designer: p.vendor || '',
+              handle: p.handle,
+              tags: p.tags,
+              price: parseFloat(p.variants?.[0]?.price) || 0,
+              image: p.images?.[0]?.src || null,
+              sellerEmail: seller?.email || sellerEmail || null,
+              sellerName: seller?.name || null,
+              sellerId: seller?.id || sellerId || null,
+              sellerPhone: seller?.phone || null,
+              commissionRate,
+              sellerAskingPrice,
+              sellerPayout,
+              hasSeller,
+              shopifyAdminUrl: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${p.id}`
+            };
+          }));
+          result.push(...withMeta);
+        }
+        return result;
+      });
+
+      const filtered = missingOnly ? enriched.filter(p => !p.hasSeller) : enriched;
+      return res.status(200).json({
+        success: true,
+        listings: filtered,
+        total: enriched.length,
+        missing: enriched.filter(p => !p.hasSeller).length
+      });
+    }
+
+    // FIX LISTING SELLER — assign seller + update pricing metafields
+    if (action === 'fix-listing-seller' && req.method === 'POST') {
+      const { productId, sellerId: targetSellerId, commissionRate: newRate } = req.body;
+      if (!productId || !targetSellerId) {
+        return res.status(400).json({ error: 'productId and sellerId required' });
+      }
+
+      // Look up seller
+      const { data: seller } = await supabase
+        .from('sellers')
+        .select('id, name, email, phone')
+        .eq('id', targetSellerId)
+        .single();
+
+      if (!seller) return res.status(404).json({ error: 'Seller not found' });
+
+      const rate = parseFloat(newRate) || 18;
+      const metafields = await fetchMetafields(productId);
+
+      // Fetch product to get current price
+      const product = await getProduct(productId);
+      const listingPrice = parseFloat(product.variants?.[0]?.price) || 0;
+      const askingPrice = Math.max(0, listingPrice - 10);
+      const sellerPayout = askingPrice * ((100 - rate) / 100);
+
+      // Upsert all seller + pricing metafields
+      await Promise.all([
+        upsertMetafield(productId, metafields, 'seller', 'id', seller.id, 'single_line_text_field'),
+        upsertMetafield(productId, metafields, 'seller', 'email', seller.email, 'single_line_text_field'),
+        upsertMetafield(productId, metafields, 'pricing', 'commission_rate', rate.toFixed(2)),
+        upsertMetafield(productId, metafields, 'pricing', 'seller_asking_price', askingPrice.toFixed(2)),
+        upsertMetafield(productId, metafields, 'pricing', 'seller_payout', sellerPayout.toFixed(2)),
+      ]);
+
+      // Link listing to seller in Supabase listings table
+      await supabase.from('listings').upsert({
+        seller_id: seller.id,
+        shopify_product_id: productId.toString(),
+        status: 'active',
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'shopify_product_id' });
+
+      await cacheBust(CACHE_ALL);
+      return res.status(200).json({
+        success: true,
+        seller: { id: seller.id, name: seller.name, email: seller.email },
+        commissionRate: rate,
+        sellerPayout: sellerPayout.toFixed(2)
+      });
+    }
+
+    // ACTIVITY FEED — recent seller events for admin dashboard
+    if (action === 'activity' && req.method === 'GET') {
+      const limit = parseInt(req.query.limit) || 40;
+
+      // Fetch recent messages with seller-side contexts
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('id, seller_id, type, context, content, subject, metadata, created_at')
+        .in('context', ['price_updated', 'seller_revised', 'listing_approved', 'listing_rejected', 'revision_requested', 'item_sold', 'new_offer', 'offer_accepted', 'payout_sent'])
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      // Fetch recent transactions (sales) for cross-reference
+      const { data: recentSales } = await supabase
+        .from('transactions')
+        .select('id, seller_id, product_title, sale_price, seller_payout, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      // Enrich messages with seller names
+      const sellerIds = [...new Set((messages || []).map(m => m.seller_id).filter(Boolean))];
+      let sellerMap = {};
+      if (sellerIds.length) {
+        const { data: sellers } = await supabase
+          .from('sellers')
+          .select('id, name, email')
+          .in('id', sellerIds);
+        for (const s of sellers || []) sellerMap[s.id] = s;
+      }
+
+      const activity = (messages || []).map(m => ({
+        id: m.id,
+        context: m.context,
+        seller: sellerMap[m.seller_id] || null,
+        content: m.content,
+        subject: m.subject,
+        metadata: m.metadata,
+        createdAt: m.created_at
+      }));
+
+      return res.status(200).json({ success: true, activity, recentSales: recentSales || [] });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity' });
 
   } catch (error) {
     console.error('Admin listings error:', error);

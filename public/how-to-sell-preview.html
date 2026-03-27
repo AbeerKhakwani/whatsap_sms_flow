@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to Sell on WhatsApp — Preview</title>
+<style>
+  body { margin: 0; padding: 20px; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+
+  .tps-guide { max-width: 800px; margin: 0 auto; }
+  .tps-guide * { box-sizing: border-box; }
+
+  .tps-hero {
+    text-align: center; padding: 50px 20px; position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #075E54 0%, #25D366 50%, #128C7E 100%);
+    border-radius: 20px; margin-bottom: 50px; color: white;
+  }
+  .tps-hero h1 { font-size: 36px; margin: 0 0 8px; color: white; }
+  .tps-hero p { font-size: 18px; margin: 0; opacity: 0.9; }
+  .tps-hero-badge {
+    display: inline-block; background: rgba(255,255,255,0.2); padding: 6px 16px;
+    border-radius: 20px; font-size: 14px; margin-bottom: 16px; backdrop-filter: blur(4px);
+  }
+
+  .tps-step {
+    display: flex; gap: 40px; align-items: center; margin-bottom: 60px;
+    opacity: 0; transform: translateY(30px); animation: tps-fadeUp 0.6s ease forwards;
+  }
+  .tps-step:nth-child(even) { flex-direction: row-reverse; }
+  .tps-step-text { flex: 1; }
+  .tps-step-phone { flex: 0 0 280px; }
+
+  @media (max-width: 700px) {
+    .tps-step, .tps-step:nth-child(even) { flex-direction: column; gap: 24px; }
+    .tps-step-phone { flex: none; width: 260px; }
+  }
+
+  .tps-step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; background: #25D366; color: white;
+    border-radius: 50%; font-weight: 700; font-size: 16px; margin-bottom: 12px;
+  }
+  .tps-step-text h2 { margin: 0 0 12px; font-size: 24px; color: #1a1a1a; }
+  .tps-step-text p { margin: 0 0 12px; color: #555; line-height: 1.7; font-size: 16px; }
+
+  .tps-phone {
+    background: #1a1a1a; border-radius: 32px; padding: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.15); position: relative;
+  }
+  .tps-phone-inner {
+    background: #ECE5DD; border-radius: 22px; overflow: hidden; min-height: 360px;
+  }
+  .tps-phone-header {
+    background: #075E54; color: white; padding: 12px 16px; display: flex;
+    align-items: center; gap: 10px; font-size: 14px;
+  }
+  .tps-phone-avatar {
+    width: 32px; height: 32px; background: #25D366; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
+  }
+  .tps-phone-name { font-weight: 600; }
+  .tps-phone-status { font-size: 11px; opacity: 0.8; }
+  .tps-phone-chat { padding: 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+  .tps-bubble {
+    max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 13px;
+    line-height: 1.5; position: relative; word-wrap: break-word;
+  }
+  .tps-bubble-in {
+    background: white; align-self: flex-start; border-top-left-radius: 0;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+  }
+  .tps-bubble-out {
+    background: #DCF8C6; align-self: flex-end; border-top-right-radius: 0;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+  }
+  .tps-bubble-time { font-size: 10px; color: #999; text-align: right; margin-top: 2px; }
+  .tps-bubble-btn {
+    display: block; text-align: center; padding: 8px; margin-top: 6px;
+    background: rgba(37,211,102,0.1); border-radius: 6px; color: #25D366;
+    font-weight: 600; font-size: 13px; text-decoration: none;
+  }
+  .tps-bubble strong { color: #075E54; }
+
+  .tps-voice {
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  }
+  .tps-voice-play {
+    width: 28px; height: 28px; background: #25D366; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tps-voice-play::after {
+    content: ''; width: 0; height: 0; border-left: 8px solid white;
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent; margin-left: 2px;
+  }
+  .tps-voice-wave {
+    flex: 1; height: 20px;
+    background: repeating-linear-gradient(90deg, #075E54 0px, #075E54 2px, transparent 2px, transparent 4px);
+    border-radius: 2px; opacity: 0.4;
+  }
+  .tps-voice-dur { font-size: 11px; color: #999; }
+
+  .tps-photos {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3px; border-radius: 6px;
+    overflow: hidden; margin-bottom: 4px;
+  }
+  .tps-photo-placeholder {
+    aspect-ratio: 1; background: linear-gradient(135deg, #f0e6d9, #e8d5c4);
+    display: flex; align-items: center; justify-content: center; font-size: 24px;
+  }
+
+  @keyframes tps-fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+  .tps-step:nth-child(1) { animation-delay: 0.1s; }
+  .tps-step:nth-child(2) { animation-delay: 0.2s; }
+  .tps-step:nth-child(3) { animation-delay: 0.3s; }
+  .tps-step:nth-child(4) { animation-delay: 0.4s; }
+  .tps-step:nth-child(5) { animation-delay: 0.5s; }
+  .tps-step:nth-child(6) { animation-delay: 0.6s; }
+  .tps-step:nth-child(7) { animation-delay: 0.7s; }
+
+  .tps-tip {
+    background: #FFF9E6; border-left: 4px solid #F59E0B; padding: 14px 18px;
+    border-radius: 0 8px 8px 0; margin: 12px 0; font-size: 14px;
+  }
+
+  .tps-cta {
+    text-align: center; padding: 50px 24px; background: #f8f9fa;
+    border-radius: 20px; margin: 50px 0 30px;
+  }
+  .tps-cta h2 { margin: 0 0 8px; font-size: 28px; }
+  .tps-cta p { margin: 0 0 24px; color: #666; font-size: 16px; }
+  .tps-cta-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .tps-btn {
+    display: inline-block; padding: 14px 28px; border-radius: 30px;
+    text-decoration: none; font-weight: 600; font-size: 16px; transition: transform 0.2s;
+  }
+  .tps-btn:hover { transform: scale(1.03); }
+  .tps-btn-wa { background: #25D366; color: white; }
+  .tps-btn-portal { background: #1a1a1a; color: white; }
+
+  .tps-faq { border-top: 1px solid #eee; padding-top: 30px; margin-top: 20px; }
+  .tps-faq h3 { margin: 0 0 16px; font-size: 22px; }
+  .tps-faq details { margin-bottom: 10px; background: #f8f9fa; border-radius: 10px; padding: 16px; }
+  .tps-faq summary { font-weight: 600; cursor: pointer; font-size: 15px; }
+  .tps-faq details p { margin: 12px 0 0; color: #555; font-size: 14px; line-height: 1.6; }
+
+  .tps-payout {
+    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px;
+    padding: 20px; text-align: center; margin: 16px 0;
+  }
+  .tps-payout-big { font-size: 36px; font-weight: 800; color: #166534; margin: 0; }
+  .tps-payout-sub { font-size: 14px; color: #166534; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+
+<div class="tps-guide">
+
+  <div class="tps-hero">
+    <div class="tps-hero-badge">Takes less than 5 minutes</div>
+    <h1>Sell on WhatsApp</h1>
+    <p>List your preloved designer pieces — it's as easy as sending a message</p>
+  </div>
+
+  <!-- STEP 1 -->
+  <div class="tps-step">
+    <div class="tps-step-text">
+      <div class="tps-step-num">1</div>
+      <h2>Message Us "SELL"</h2>
+      <p>Open WhatsApp and send <strong>"SELL"</strong> to <strong>+1 (440) 653-0800</strong>. You'll instantly get a welcome message with a button to start.</p>
+      <div class="tps-tip">You can also tap the green button below to start the chat with the message pre-filled!</div>
+    </div>
+    <div class="tps-step-phone">
+      <div class="tps-phone">
+        <div class="tps-phone-inner">
+          <div class="tps-phone-header">
+            <div class="tps-phone-avatar">P</div>
+            <div><div class="tps-phone-name">The Phir Story</div><div class="tps-phone-status">online</div></div>
+          </div>
+          <div class="tps-phone-chat">
+            <div class="tps-bubble tps-bubble-out">SELL<div class="tps-bubble-time">10:01 AM</div></div>
+            <div class="tps-bubble tps-bubble-in">
+              Hi! 👋 Welcome to The Phir Story.
+              <div class="tps-bubble-btn">Click Here To SELL</div>
+              <div class="tps-bubble-time">10:01 AM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div class="tps-step">
+    <div class="tps-step-text">
+      <div class="tps-step-num">2</div>
+      <h2>Enter Your Email</h2>
+      <p>We'll ask for your email to create or link your seller account. If you already have an account, use the same email.</p>
+    </div>
+    <div class="tps-step-phone">
+      <div class="tps-phone">
+        <div class="tps-phone-inner">
+          <div class="tps-phone-header">
+            <div class="tps-phone-avatar">P</div>
+            <div><div class="tps-phone-name">The Phir Story</div><div class="tps-phone-status">online</div></div>
+          </div>
+          <div class="tps-phone-chat">
+            <div class="tps-bubble tps-bubble-in">
+              What's your email?<br><br>If you have an account with us already, please use that email.
+              <div class="tps-bubble-time">10:01 AM</div>
+            </div>
+            <div class="tps-bubble tps-bubble-out">sarah@gmail.com<div class="tps-bubble-time">10:02 AM</div></div>
+            <div class="tps-bubble tps-bubble-in">
+              ✅ Code sent to sarah@gmail.com<br><br>Check your email (and junk/spam folder) and reply with the 6-digit code to verify.
+              <div class="tps-bubble-time">10:02 AM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div class="tps-step">
+    <div class="tps-step-text">
+      <div class="tps-step-num">3</div>
+      <h2>Verify with Code</h2>
+      <p>Check your email for a <strong>6-digit code</strong> and send it back on WhatsApp. This links your phone to your seller account — you only do this once!</p>
+      <div class="tps-tip">Check your spam/junk folder if you don't see the email within a minute.</div>
+    </div>
+    <div class="tps-step-phone">
+      <div class="tps-phone">
+        <div class="tps-phone-inner">
+          <div class="tps-phone-header">
+            <div class="tps-phone-avatar">P</div>
+            <div><div class="tps-phone-name">The Phir Story</div><div class="tps-phone-status">online</div></div>
+          </div>
+          <div class="tps-phone-chat">
+            <div class="tps-bubble tps-bubble-in">
+              ✅ Code sent to sarah@gmail.com<br><br>Reply with the 6-digit code.
+              <div class="tps-bubble-time">10:02 AM</div>
+            </div>
+            <div class="tps-bubble tps-bubble-out">847291<div class="tps-bubble-time">10:03 AM</div></div>
+            <div class="tps-bubble tps-bubble-in">
+              Welcome! ✓<br><br>Tell us about your outfit in your own words.<br><br>Send a voice note or text.
+              <div class="tps-bubble-time">10:03 AM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div class="tps-step">
+    <div class="tps-step-text">
+      <div class="tps-step-num">4</div>
+      <h2>Describe Your Item</h2>
+      <p>Send a <strong>voice note</strong> or <strong>text</strong> describing your item — designer, size, condition, and your asking price. Our AI extracts the details automatically!</p>
+      <p style="font-size: 14px; color: #888;">Example: "Sana Safinaz 3-piece suit, size medium, like new condition, asking $120"</p>
+    </div>
+    <div class="tps-step-phone">
+      <div class="tps-phone">
+        <div class="tps-phone-inner">
+          <div class="tps-phone-header">
+            <div class="tps-phone-avatar">P</div>
+            <div><div class="tps-phone-name">The Phir Story</div><div class="tps-phone-status">online</div></div>
+          </div>
+          <div class="tps-phone-chat">
+            <div class="tps-bubble tps-bubble-out tps-voice">
+              <div class="tps-voice-play"></div>
+              <div class="tps-voice-wave"></div>
+              <div class="tps-voice-dur">0:12</div>
+            </div>
+            <div class="tps-bubble tps-bubble-in">
+              🎤 I heard: "Sana Safinaz 3-piece, medium, like new, $120"
+              <div class="tps-bubble-time">10:04 AM</div>
+            </div>
+            <div class="tps-bubble tps-bubble-in">
+              Tap below to edit, and add photos:
+              <div class="tps-bubble-btn">Click Here: To Edit, Review and add Photos</div>
+              <div class="tps-bubble-time">10:04 AM</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5 -->
+  <div class="tps-step">
+    <div class="tps-step-text">
+      <div class="tps-step-num">5</div>
+      <h2>Add Photos & Review</h2>
+      <p>A form opens right inside WhatsApp with your details pre-filled. Edit anything, then <strong>add at least 3 photos</strong> — front, back, and label.</p>
+      <div style="background: #f8f9fa; border-radius: 10px; padding: 16px; margin-top: 12px;">
+        <p style="margin: 0 0 6px; font-weight: 600; font-size: 14px;">📸 Best photos to include:</p>
+        <ul style="margin: 0; padding-left: 18px; font-size: 14px; color: #555;">
+          <li>Full front &amp; back view</li>
+          <li>Designer label / brand tag</li>
+          <li>Size tag</li>
+          <li>Close-up of fabric &amp; details</li>
+          <li>Any wear or flaws (honesty builds trust!)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="tps-step-phone">
+      <div class="tps-phone">
+        <div class="tps-phone-inner">
+          <div class="tps-phone-header" style="background: #128C7E;">
+            <div style="font-size: 13px;">Review Your Listing</div>
+          </div>
+          <div style="padding: 16px; background: white; font-size: 13px;">
+            <div style="margin-bottom: 12px;">
+              <div style="color: #999; font-size: 11px; margin-bottom: 3px;">DESIGNER</div>
+              <div style="padding: 8px 10px; background: #f5f5f5; border-radius: 6px;">Sana Safinaz</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+              <div>
+                <div style="color: #999; font-size: 11px; margin-bottom: 3px;">SIZE</div>
+                <div style="padding: 8px 10px; background: #f5f5f5; border-radius: 6px;">Medium</div>
+              </div>
+              <div>
+                <div style="color: #999; font-size: 11px; margin-bottom: 3px;">CONDITION</div>
+                <div style="padding: 8px 10px; background: #f5f5f5; border-radius: 6px;">Like New</div>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+              <div>
+                <div style="color: #999; font-size: 11px; margin-bottom: 3px;">PIECES</div>
+                <div style="padding: 8px 10px; background: #f5f5f5; border-radius: 6px;">3-piece</div>
+              </div>
+              <div>
+                <div style="color: #999; font-size: 11px; margin-bottom: 3px;">PRICE (USD)</div>
+                <div style="padding: 8px 10px; background: #f5f5f5; border-radius: 6px;">$120</div>
+              </div>
+            </div>
+            <div class="tps-photos" style="margin-bottom: 12px;">
+              <div class="tps-photo-placeholder">👗</div>
+              <div class="tps-photo-placeholder">🏷️</div>
+              <div class="tps-photo-placeholder">📏</div>
+              <div class="tps-photo-placeholder" style="background: linear-gradient(135deg, #e8f5e9, #c8e6c9);">+</div>
+            </div>
+            <div style="text-align: center; padding: 10px; background: #25D366; color: white; border-radius: 8px; font-weight: 600;">Submit Listing</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6 -->
+  <div class="tps-step">
+    <div class="tps-step-text">
+      <div class="tps-step-num">6</div>
+      <h2>Done! We Handle the Rest</h2>
+      <p>Your listing is submitted for review. We'll notify you on WhatsApp when it's approved and goes live on our store.</p>
+      <p>When it sells, you'll get another notification with a <strong>prepaid shipping label</strong> — just pack and ship!</p>
+      <div class="tps-payout">
+        <p class="tps-payout-big">You Keep 82%</p>
+        <p class="tps-payout-sub">We handle photography touch-ups, listing, customer service &amp; payments</p>
+      </div>
+    </div>
+    <div class="tps-step-phone">
+      <div class="tps-phone">
+        <div class="tps-phone-inner">
+          <div class="tps-phone-header">
+            <div class="tps-phone-avatar">P</div>
+            <div><div class="tps-phone-name">The Phir Story</div><div class="tps-phone-status">online</div></div>
+          </div>
+          <div class="tps-phone-chat">
+            <div class="tps-bubble tps-bubble-in">
+              ✅ Success! Your <strong>Sana Safinaz</strong> listing is now in review.<br><br>We'll notify you when it's approved.<br><br>Reply <strong>SELL</strong> to list another item.
+              <div class="tps-bubble-time">10:05 AM</div>
+            </div>
+            <div style="text-align: center; margin: 16px 0 8px;">
+              <div style="font-size: 40px;">🎉</div>
+              <div style="font-size: 12px; color: #999;">That's it!</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CTA -->
+  <div class="tps-cta">
+    <h2>Ready to Start Selling?</h2>
+    <p>It takes less than 5 minutes to list your first item</p>
+    <div class="tps-cta-btns">
+      <a href="https://wa.me/14406530800?text=SELL" target="_blank" class="tps-btn tps-btn-wa">💬 Message Us on WhatsApp</a>
+      <a href="#" class="tps-btn tps-btn-portal">📱 Use Seller Portal Instead</a>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <div class="tps-faq">
+    <h3>Frequently Asked Questions</h3>
+    <details>
+      <summary>What brands do you accept?</summary>
+      <p>We accept Pakistani and international designer brands — Sana Safinaz, Khaadi, Agha Noor, Maria B, Elan, HSY, Zara, and many more. Not sure? Just ask us on WhatsApp!</p>
+    </details>
+    <details>
+      <summary>How much does it cost to sell?</summary>
+      <p>Listing is completely free. We only take an 18% commission when your item sells. You keep 82% of the sale price.</p>
+    </details>
+    <details>
+      <summary>Can I send a voice note instead of typing?</summary>
+      <p>Absolutely! Just record a voice note describing your item and our AI will transcribe and extract all the details. It's the fastest way to list.</p>
+    </details>
+    <details>
+      <summary>How many photos do I need?</summary>
+      <p>At least 3 — front view, back view, and the designer label. More photos = faster approval and quicker sales!</p>
+    </details>
+    <details>
+      <summary>How do I ship my item when it sells?</summary>
+      <p>We provide a prepaid shipping label right on WhatsApp. Just pack your item and drop it off — no shipping costs for you!</p>
+    </details>
+    <details>
+      <summary>When do I get paid?</summary>
+      <p>Payments are processed after the buyer receives the item. We pay weekly via your preferred method.</p>
+    </details>
+  </div>
+
+</div>
+</body>
+</html>

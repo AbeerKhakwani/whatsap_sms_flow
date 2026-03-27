@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phirstory Offer System — All Screens</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #fff; padding: 40px 20px; }
+
+  h1 { text-align: center; font-size: 28px; margin-bottom: 10px; color: #fff; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 60px; font-size: 14px; }
+
+  .screen-section { margin-bottom: 80px; max-width: 900px; margin-left: auto; margin-right: auto; }
+  .screen-label { font-size: 13px; color: #25D366; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .screen-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+  .screen-desc { font-size: 14px; color: #999; margin-bottom: 20px; line-height: 1.5; }
+
+  /* Shopify Product Page */
+  .shopify-page { background: #fff; border-radius: 16px; overflow: hidden; max-width: 380px; color: #333; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+  .product-image { width: 100%; height: 320px; background: linear-gradient(135deg, #e8d5b7 0%, #f0e6d3 50%, #d4b896 100%); display: flex; align-items: center; justify-content: center; position: relative; }
+  .product-image::after { content: '👗'; font-size: 80px; opacity: 0.6; }
+  .product-image .badge { position: absolute; top: 12px; left: 12px; background: #222; color: #fff; font-size: 11px; padding: 4px 10px; border-radius: 20px; }
+  .product-info { padding: 20px; }
+  .product-info h2 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .product-info .price { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+  .product-info .add-cart { width: 100%; padding: 14px; background: #222; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 10px; }
+  .product-info .make-offer { width: 100%; padding: 14px; background: #25D366; color: #fff; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .product-info .make-offer svg { width: 20px; height: 20px; fill: #fff; }
+
+  /* WhatsApp Chat */
+  .wa-phone { background: #111; border-radius: 24px; max-width: 380px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.3); border: 2px solid #222; }
+  .wa-header { background: #1a1a2e; padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+  .wa-header .back { color: #25D366; font-size: 18px; }
+  .wa-header .avatar { width: 36px; height: 36px; border-radius: 50%; background: #25D366; display: flex; align-items: center; justify-content: center; font-size: 16px; color: #fff; font-weight: 600; }
+  .wa-header .name { font-size: 15px; font-weight: 600; color: #fff; }
+  .wa-header .status { font-size: 11px; color: #888; }
+  .wa-chat { background: #0b141a; padding: 16px; min-height: 400px; background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.02'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
+  .wa-msg { max-width: 85%; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; font-size: 14px; line-height: 1.4; position: relative; }
+  .wa-msg .time { font-size: 11px; color: #ffffff80; text-align: right; margin-top: 4px; }
+  .wa-msg.sent { background: #005c4b; margin-left: auto; border-bottom-right-radius: 2px; }
+  .wa-msg.received { background: #202c33; border-bottom-left-radius: 2px; }
+  .wa-msg.system { background: #182229; text-align: center; max-width: 70%; margin: 12px auto; font-size: 12px; color: #8696a0; border-radius: 6px; padding: 6px 12px; }
+  .wa-input { background: #1a1a2e; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
+  .wa-input input { flex: 1; background: #2a2a3e; border: none; padding: 10px 16px; border-radius: 20px; color: #fff; font-size: 14px; }
+  .wa-input .send { width: 36px; height: 36px; background: #25D366; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: none; color: #fff; font-size: 16px; }
+
+  /* WhatsApp Template Message */
+  .wa-template { background: #202c33; border-radius: 8px; padding: 12px; margin-bottom: 8px; max-width: 85%; }
+  .wa-template .body { font-size: 14px; line-height: 1.5; margin-bottom: 10px; color: #e9edef; }
+  .wa-template .btn { display: block; text-align: center; padding: 10px; color: #53bdeb; font-size: 14px; font-weight: 500; border-top: 1px solid #2a3942; cursor: pointer; }
+  .wa-template .time { font-size: 11px; color: #ffffff60; text-align: right; margin-top: 4px; }
+
+  /* WhatsApp Flow */
+  .wa-flow { background: #1b2a33; border-radius: 16px; max-width: 380px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.3); border: 2px solid #222; }
+  .wa-flow-header { background: #25D366; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
+  .wa-flow-header h3 { font-size: 17px; font-weight: 600; color: #fff; }
+  .wa-flow-header .close { color: #fff; font-size: 20px; cursor: pointer; opacity: 0.8; }
+  .wa-flow-body { padding: 20px; }
+  .wa-flow-body .item-name { font-size: 16px; font-weight: 600; color: #e9edef; margin-bottom: 4px; }
+  .wa-flow-body .item-price { font-size: 14px; color: #8696a0; margin-bottom: 20px; }
+  .wa-flow-body .offer-card { background: #233239; border-radius: 10px; padding: 14px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #2a3942; }
+  .wa-flow-body .offer-card.best { border-color: #25D366; }
+  .wa-flow-body .offer-card .rank { font-size: 13px; color: #8696a0; }
+  .wa-flow-body .offer-card .amount { font-size: 18px; font-weight: 700; color: #e9edef; }
+  .wa-flow-body .offer-card .best-badge { font-size: 11px; color: #25D366; font-weight: 600; }
+  .wa-flow-body .offer-card .time-ago { font-size: 12px; color: #8696a0; }
+  .wa-flow-body label { font-size: 13px; color: #8696a0; display: block; margin-bottom: 8px; margin-top: 20px; }
+  .wa-flow-body select, .wa-flow-body input[type="number"] { width: 100%; padding: 12px 16px; background: #233239; border: 1px solid #2a3942; border-radius: 8px; color: #e9edef; font-size: 15px; appearance: auto; }
+  .wa-flow-body .helper { font-size: 12px; color: #8696a0; margin-top: 6px; }
+  .wa-flow-body .payout-info { background: #1a2e23; border: 1px solid #25D366; border-radius: 10px; padding: 14px; margin-top: 16px; }
+  .wa-flow-body .payout-info .label { font-size: 12px; color: #8696a0; margin-bottom: 4px; margin-top: 0; }
+  .wa-flow-body .payout-info .value { font-size: 20px; font-weight: 700; color: #25D366; }
+  .wa-flow-body .payout-info .detail { font-size: 12px; color: #8696a0; margin-top: 2px; }
+  .wa-flow-footer { padding: 16px 20px; }
+  .wa-flow-footer button { width: 100%; padding: 14px; background: #25D366; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .wa-flow-footer button.decline { background: #e74c3c; }
+  .wa-flow-footer button.counter { background: #f39c12; }
+
+  /* Confirmation screen */
+  .confirm-icon { font-size: 48px; text-align: center; margin-bottom: 16px; }
+  .confirm-text { text-align: center; font-size: 16px; color: #e9edef; line-height: 1.5; margin-bottom: 8px; }
+  .confirm-sub { text-align: center; font-size: 13px; color: #8696a0; line-height: 1.5; margin-bottom: 20px; }
+
+  /* Dashboard */
+  .dashboard { background: #fff; border-radius: 16px; overflow: hidden; color: #333; box-shadow: 0 4px 24px rgba(0,0,0,0.3); max-width: 800px; }
+  .dash-nav { display: flex; border-bottom: 2px solid #f0f0f0; padding: 0 20px; background: #fafafa; }
+  .dash-nav a { padding: 14px 20px; font-size: 14px; font-weight: 500; color: #888; text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+  .dash-nav a.active { color: #25D366; border-bottom-color: #25D366; font-weight: 600; }
+  .dash-body { padding: 24px; }
+  .dash-body h2 { font-size: 18px; margin-bottom: 20px; }
+
+  .offer-group { border: 1px solid #e8e8e8; border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+  .offer-group-header { background: #f8f9fa; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e8e8e8; }
+  .offer-group-header h3 { font-size: 15px; font-weight: 600; }
+  .offer-group-header .count { background: #25D366; color: #fff; font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 600; }
+  .offer-group-header .price { color: #888; font-size: 13px; }
+
+  .offer-row { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0f0; }
+  .offer-row:last-child { border-bottom: none; }
+  .offer-row .left { display: flex; align-items: center; gap: 14px; }
+  .offer-row .rank-badge { width: 28px; height: 28px; background: #f0f0f0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #666; }
+  .offer-row .rank-badge.top { background: #25D366; color: #fff; }
+  .offer-row .offer-amount { font-size: 18px; font-weight: 700; }
+  .offer-row .offer-meta { font-size: 12px; color: #999; margin-top: 2px; }
+  .offer-row .status-badge { font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: 600; }
+  .offer-row .status-badge.pending { background: #fff3cd; color: #856404; }
+  .offer-row .status-badge.countered { background: #d4edda; color: #155724; }
+  .offer-row .status-badge.expired { background: #f0f0f0; color: #888; }
+  .offer-row .status-badge.declined { background: #f8d7da; color: #721c24; }
+  .offer-row .actions { display: flex; gap: 6px; }
+  .offer-row .actions button { padding: 6px 14px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; font-weight: 500; cursor: pointer; background: #fff; }
+  .offer-row .actions button.accept { background: #25D366; color: #fff; border-color: #25D366; }
+  .offer-row .actions button.counter-btn { background: #f39c12; color: #fff; border-color: #f39c12; }
+  .offer-row .actions button.decline-btn { color: #e74c3c; border-color: #e74c3c; }
+
+  .offer-row .waiting { font-size: 12px; color: #f39c12; font-style: italic; }
+
+  .decline-all { text-align: right; padding: 10px 18px; border-top: 1px solid #f0f0f0; }
+  .decline-all button { padding: 6px 16px; border: 1px solid #e74c3c; color: #e74c3c; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer; }
+
+  /* History timeline */
+  .history-timeline { padding: 12px 18px; background: #fafafa; border-top: 1px solid #e8e8e8; }
+  .history-timeline h4 { font-size: 12px; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .history-item { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 6px; font-size: 13px; }
+  .history-item .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .history-item .dot.buyer { background: #3498db; }
+  .history-item .dot.seller { background: #25D366; }
+  .history-item .dot.system { background: #e74c3c; }
+  .history-item .text { color: #666; }
+  .history-item .text strong { color: #333; }
+  .history-item .time-stamp { color: #999; font-size: 11px; margin-left: auto; white-space: nowrap; }
+
+  /* Two column layout */
+  .two-col { display: flex; gap: 40px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+  .two-col > * { flex-shrink: 0; }
+
+  .arrow-between { display: flex; align-items: center; justify-content: center; font-size: 32px; color: #25D366; padding: 20px 0; }
+
+  .flow-arrow { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #555; font-size: 13px; padding: 0 10px; margin-top: 180px; }
+  .flow-arrow .arrow { font-size: 28px; color: #25D366; }
+
+  .section-divider { border: none; border-top: 1px solid #222; margin: 60px auto; max-width: 900px; }
+</style>
+</head>
+<body>
+
+<h1>Phirstory Offer System</h1>
+<p class="subtitle">Complete screen-by-screen walkthrough</p>
+
+<!-- ==================== SCREEN 1: SHOPIFY ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 1 — Shopify Store</div>
+  <div class="screen-title">Product Page with "Make an Offer" Button</div>
+  <div class="screen-desc">Buyer sees the product on your Shopify store. Below "Add to Cart" there's a green "Make an Offer" button that opens WhatsApp with a prefilled message.</div>
+
+  <div class="shopify-page">
+    <div class="product-image">
+      <div class="badge">Pre-loved</div>
+    </div>
+    <div class="product-info">
+      <h2>Sky Blue Kameez Shalwar</h2>
+      <div class="price">$120.00</div>
+      <button class="add-cart">Add to Cart</button>
+      <button class="make-offer">
+        <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
+        Make an Offer
+      </button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 2: BUYER CHAT ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 2 — Buyer's WhatsApp</div>
+  <div class="screen-title">Buyer Makes an Offer</div>
+  <div class="screen-desc">WhatsApp opens with a prefilled message. Bot confirms the item, asks for price. Buyer types their offer. Bot confirms and notifies seller.</div>
+
+  <div class="wa-phone">
+    <div class="wa-header">
+      <span class="back">‹</span>
+      <div class="avatar">P</div>
+      <div>
+        <div class="name">The Phir Story</div>
+        <div class="status">online</div>
+      </div>
+    </div>
+    <div class="wa-chat">
+      <div class="wa-msg sent">
+        OFFER sky-blue-kameez-shalwar
+        <div class="time">2:14 PM ✓✓</div>
+      </div>
+      <div class="wa-msg received">
+        💬 <strong>Sky Blue Kameez Shalwar</strong> is listed at <strong>$120</strong>.<br><br>
+        What price would you like to offer?
+        <div class="time">2:14 PM</div>
+      </div>
+      <div class="wa-msg sent">
+        90
+        <div class="time">2:15 PM ✓✓</div>
+      </div>
+      <div class="wa-msg received">
+        ✅ Your offer of <strong>$90</strong> on <strong>Sky Blue Kameez Shalwar</strong> has been sent to the seller.<br><br>
+        You'll hear back within 24 hours. If the seller doesn't respond, the offer will expire automatically.
+        <div class="time">2:15 PM</div>
+      </div>
+    </div>
+    <div class="wa-input">
+      <input type="text" placeholder="Message">
+      <button class="send">›</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 3: SELLER NOTIFICATION ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 3 — Seller's WhatsApp</div>
+  <div class="screen-title">Seller Gets Offer Notification</div>
+  <div class="screen-desc">Seller receives a utility template message with a button that opens the Offer Management Flow. Same template for 1 offer or 5 — the Flow always shows live data.</div>
+
+  <div class="wa-phone">
+    <div class="wa-header">
+      <span class="back">‹</span>
+      <div class="avatar">P</div>
+      <div>
+        <div class="name">The Phir Story</div>
+        <div class="status">online</div>
+      </div>
+    </div>
+    <div class="wa-chat" style="min-height: 300px; display: flex; flex-direction: column; justify-content: flex-end;">
+      <div class="wa-template">
+        <div class="body">
+          📩 <strong>New offer on your listing</strong><br><br>
+          Sky Blue Kameez Shalwar<br>
+          Listed: $120 · Offer: $90<br><br>
+          You have 24 hours to respond.
+        </div>
+        <div class="btn">📋 Review Offers</div>
+        <div class="time">2:15 PM</div>
+      </div>
+    </div>
+    <div class="wa-input">
+      <input type="text" placeholder="Message">
+      <button class="send">›</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 4: FLOW — SINGLE OFFER ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 4 — WhatsApp Flow</div>
+  <div class="screen-title">Single Offer View</div>
+  <div class="screen-desc">Seller taps "Review Offers" — the Flow opens. With one offer, it's simple: accept, counter, or decline.</div>
+
+  <div class="wa-flow">
+    <div class="wa-flow-header">
+      <h3>Your Offers</h3>
+      <span class="close">✕</span>
+    </div>
+    <div class="wa-flow-body">
+      <div class="item-name">Sky Blue Kameez Shalwar</div>
+      <div class="item-price">Listed at $120</div>
+
+      <div class="offer-card best">
+        <div>
+          <div class="rank">Offer #1</div>
+          <div class="amount">$90</div>
+        </div>
+        <div style="text-align: right;">
+          <div class="time-ago">2 min ago</div>
+        </div>
+      </div>
+
+      <label>What would you like to do?</label>
+      <select>
+        <option>Select action...</option>
+        <option>✅ Accept $90</option>
+        <option>💰 Counter with my price</option>
+        <option>❌ Decline</option>
+      </select>
+    </div>
+    <div class="wa-flow-footer">
+      <button>Continue</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 5: FLOW — MULTIPLE OFFERS ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 5 — WhatsApp Flow</div>
+  <div class="screen-title">Multiple Offers View</div>
+  <div class="screen-desc">Three buyers have made offers. Ranked by price. Seller can accept any one (auto-declines the rest) or counter all at once.</div>
+
+  <div class="wa-flow">
+    <div class="wa-flow-header">
+      <h3>Your Offers</h3>
+      <span class="close">✕</span>
+    </div>
+    <div class="wa-flow-body">
+      <div class="item-name">Sky Blue Kameez Shalwar</div>
+      <div class="item-price">Listed at $120 · 3 offers</div>
+
+      <div class="offer-card best">
+        <div>
+          <div class="best-badge">★ BEST OFFER</div>
+          <div class="amount">$95</div>
+        </div>
+        <div style="text-align: right;">
+          <div class="time-ago">2h ago</div>
+        </div>
+      </div>
+
+      <div class="offer-card">
+        <div>
+          <div class="rank">Offer #2</div>
+          <div class="amount">$90</div>
+        </div>
+        <div style="text-align: right;">
+          <div class="time-ago">5h ago</div>
+        </div>
+      </div>
+
+      <div class="offer-card">
+        <div>
+          <div class="rank">Offer #3</div>
+          <div class="amount">$75</div>
+        </div>
+        <div style="text-align: right;">
+          <div class="time-ago">8h ago</div>
+        </div>
+      </div>
+
+      <label>What would you like to do?</label>
+      <select>
+        <option>Select action...</option>
+        <option>✅ Accept $95 (best offer)</option>
+        <option>✅ Accept $90</option>
+        <option>✅ Accept $75</option>
+        <option>💰 Counter all with my price</option>
+        <option>❌ Decline all</option>
+      </select>
+    </div>
+    <div class="wa-flow-footer">
+      <button>Continue</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 6: FLOW — COUNTER ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 6 — WhatsApp Flow</div>
+  <div class="screen-title">Counter Offer Screen</div>
+  <div class="screen-desc">Seller chose "Counter all" — enters their price. Shows their payout after commission. Counter goes to all active buyers.</div>
+
+  <div class="wa-flow">
+    <div class="wa-flow-header">
+      <h3>Counter Offer</h3>
+      <span class="close">✕</span>
+    </div>
+    <div class="wa-flow-body">
+      <div class="item-name">Sky Blue Kameez Shalwar</div>
+      <div class="item-price">Listed: $120 · Best offer: $95</div>
+
+      <label>Your counter price ($)</label>
+      <input type="number" value="105" style="font-size: 20px; font-weight: 700;">
+      <div class="helper">This counter will be sent to all 3 buyers. They each have 24h to respond.</div>
+
+      <div class="payout-info">
+        <div class="label">Your payout at $105</div>
+        <div class="value">$86.10</div>
+        <div class="detail">$105.00 × 82% = $86.10</div>
+      </div>
+    </div>
+    <div class="wa-flow-footer">
+      <button class="counter">Send Counter Offer</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 7: FLOW — CONFIRM ACCEPT ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 7 — WhatsApp Flow</div>
+  <div class="screen-title">Confirm Acceptance</div>
+  <div class="screen-desc">Seller chose to accept $95. Shows payout breakdown. One tap to confirm — creates draft order and sends buyer the checkout link.</div>
+
+  <div class="wa-flow">
+    <div class="wa-flow-header">
+      <h3>Confirm</h3>
+      <span class="close">✕</span>
+    </div>
+    <div class="wa-flow-body" style="text-align: center;">
+      <div class="confirm-icon">🤝</div>
+      <div class="confirm-text">
+        Accept <strong>$95</strong> offer on<br>
+        <strong>Sky Blue Kameez Shalwar</strong>?
+      </div>
+
+      <div class="payout-info" style="text-align: left; margin-top: 24px;">
+        <div class="label">Your payout</div>
+        <div class="value">$77.90</div>
+        <div class="detail">$95.00 × 82% = $77.90</div>
+      </div>
+
+      <div class="confirm-sub" style="margin-top: 16px;">
+        The buyer will receive a checkout link<br>and has 24 hours to complete payment.<br><br>
+        The other 2 offers will be automatically declined.
+      </div>
+    </div>
+    <div class="wa-flow-footer">
+      <button>Confirm — Accept $95</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 8: BUYER GETS CHECKOUT ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 8 — Buyer's WhatsApp</div>
+  <div class="screen-title">Accepted — Buyer Gets Checkout Link</div>
+  <div class="screen-desc">Buyer whose offer was accepted gets a message with the Shopify draft order checkout link. 24 hours to pay.</div>
+
+  <div class="wa-phone">
+    <div class="wa-header">
+      <span class="back">‹</span>
+      <div class="avatar">P</div>
+      <div>
+        <div class="name">The Phir Story</div>
+        <div class="status">online</div>
+      </div>
+    </div>
+    <div class="wa-chat" style="min-height: 300px; display: flex; flex-direction: column; justify-content: flex-end;">
+      <div class="wa-msg received">
+        🎉 <strong>Great news!</strong> Your offer of <strong>$95</strong> on <strong>Sky Blue Kameez Shalwar</strong> was accepted!<br><br>
+        Complete your purchase here:<br>
+        🔗 <a href="#" style="color: #53bdeb;">shop.thephirstory.com/checkout/d/abc123</a><br><br>
+        ⏰ This link expires in <strong>24 hours</strong>.
+        <div class="time">3:22 PM</div>
+      </div>
+    </div>
+    <div class="wa-input">
+      <input type="text" placeholder="Message">
+      <button class="send">›</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 9: DECLINED BUYERS ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 9 — Other Buyers' WhatsApp</div>
+  <div class="screen-title">Auto-Declined Buyers Get Notified</div>
+  <div class="screen-desc">The other buyers whose offers weren't accepted get a polite notification. They can make offers on other items.</div>
+
+  <div class="wa-phone">
+    <div class="wa-header">
+      <span class="back">‹</span>
+      <div class="avatar">P</div>
+      <div>
+        <div class="name">The Phir Story</div>
+        <div class="status">online</div>
+      </div>
+    </div>
+    <div class="wa-chat" style="min-height: 300px; display: flex; flex-direction: column; justify-content: flex-end;">
+      <div class="wa-msg received">
+        The seller accepted another offer on <strong>Sky Blue Kameez Shalwar</strong>.<br><br>
+        Browse more items at <a href="#" style="color: #53bdeb;">shop.thephirstory.com</a> — you can make offers on anything you like!
+        <div class="time">3:22 PM</div>
+      </div>
+    </div>
+    <div class="wa-input">
+      <input type="text" placeholder="Message">
+      <button class="send">›</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 10: COUNTER NOTIFICATION ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 10 — Buyer's WhatsApp</div>
+  <div class="screen-title">Counter Offer Received</div>
+  <div class="screen-desc">When seller counters, all buyers get the counter price. First to accept wins. They can also make a new offer.</div>
+
+  <div class="wa-phone">
+    <div class="wa-header">
+      <span class="back">‹</span>
+      <div class="avatar">P</div>
+      <div>
+        <div class="name">The Phir Story</div>
+        <div class="status">online</div>
+      </div>
+    </div>
+    <div class="wa-chat" style="min-height: 320px; display: flex; flex-direction: column; justify-content: flex-end;">
+      <div class="wa-msg received">
+        💰 The seller countered at <strong>$105</strong> on <strong>Sky Blue Kameez Shalwar</strong>.<br><br>
+        (Your offer was $90)<br><br>
+        Reply <strong>ACCEPT</strong> to buy at $105, or send a new price to counter back.<br><br>
+        ⏰ Expires in 24 hours.
+        <div class="time">3:30 PM</div>
+      </div>
+      <div class="wa-msg sent">
+        ACCEPT
+        <div class="time">3:45 PM ✓✓</div>
+      </div>
+      <div class="wa-msg received">
+        🎉 <strong>Deal!</strong> Sky Blue Kameez Shalwar is yours for <strong>$105</strong>.<br><br>
+        Complete your purchase:<br>
+        🔗 <a href="#" style="color: #53bdeb;">shop.thephirstory.com/checkout/d/def456</a><br><br>
+        ⏰ Pay within <strong>24 hours</strong> to lock it in.
+        <div class="time">3:45 PM</div>
+      </div>
+    </div>
+    <div class="wa-input">
+      <input type="text" placeholder="Message">
+      <button class="send">›</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 11: ITEM SOLD CANCELLATION ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 11 — Buyer's WhatsApp</div>
+  <div class="screen-title">Item Sold at Full Price — Offers Cancelled</div>
+  <div class="screen-desc">Someone bought the item at full price on Shopify while offers were pending. All active offers are auto-cancelled.</div>
+
+  <div class="wa-phone">
+    <div class="wa-header">
+      <span class="back">‹</span>
+      <div class="avatar">P</div>
+      <div>
+        <div class="name">The Phir Story</div>
+        <div class="status">online</div>
+      </div>
+    </div>
+    <div class="wa-chat" style="min-height: 250px; display: flex; flex-direction: column; justify-content: flex-end;">
+      <div class="wa-msg received">
+        <strong>Sky Blue Kameez Shalwar</strong> has been sold. Your offer has been closed.<br><br>
+        Browse more items at <a href="#" style="color: #53bdeb;">shop.thephirstory.com</a>
+        <div class="time">4:10 PM</div>
+      </div>
+    </div>
+    <div class="wa-input">
+      <input type="text" placeholder="Message">
+      <button class="send">›</button>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 12: EXPIRY ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 12 — Both Parties</div>
+  <div class="screen-title">Offer Expired — 24h Timer Ran Out</div>
+  <div class="screen-desc">Neither party responded in 24 hours. Both get notified. Buyer can always make a new offer.</div>
+
+  <div class="two-col">
+    <div class="wa-phone" style="max-width: 340px;">
+      <div class="wa-header">
+        <span class="back">‹</span>
+        <div class="avatar">P</div>
+        <div>
+          <div class="name">The Phir Story</div>
+          <div class="status">Seller's view</div>
+        </div>
+      </div>
+      <div class="wa-chat" style="min-height: 200px; display: flex; flex-direction: column; justify-content: flex-end;">
+        <div class="wa-msg received">
+          ⏰ The $90 offer on <strong>Sky Blue Kameez Shalwar</strong> has expired.<br><br>
+          Your item is still listed at $120.
+          <div class="time">2:15 PM</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wa-phone" style="max-width: 340px;">
+      <div class="wa-header">
+        <span class="back">‹</span>
+        <div class="avatar">P</div>
+        <div>
+          <div class="name">The Phir Story</div>
+          <div class="status">Buyer's view</div>
+        </div>
+      </div>
+      <div class="wa-chat" style="min-height: 200px; display: flex; flex-direction: column; justify-content: flex-end;">
+        <div class="wa-msg received">
+          ⏰ Your offer of $90 on <strong>Sky Blue Kameez Shalwar</strong> has expired.<br><br>
+          You can make a new offer anytime:<br>
+          Send <strong>OFFER sky-blue-kameez-shalwar</strong>
+          <div class="time">2:15 PM</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 13: SELLER DASHBOARD ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 13 — Seller Dashboard</div>
+  <div class="screen-title">Offers Tab — Full Management View</div>
+  <div class="screen-desc">Sellers can manage all offers from the dashboard. Same actions as WhatsApp — accept, counter, decline — plus full negotiation history.</div>
+
+  <div class="dashboard">
+    <div class="dash-nav">
+      <a href="#">My Listings</a>
+      <a href="#">Items Sold</a>
+      <a href="#" class="active">Offers</a>
+      <a href="#">My Balance</a>
+    </div>
+    <div class="dash-body">
+      <h2>Active Offers</h2>
+
+      <!-- Item 1: Multiple offers -->
+      <div class="offer-group">
+        <div class="offer-group-header">
+          <div>
+            <h3>Sky Blue Kameez Shalwar</h3>
+            <span class="price">Listed at $120</span>
+          </div>
+          <span class="count">3 offers</span>
+        </div>
+
+        <div class="offer-row">
+          <div class="left">
+            <div class="rank-badge top">1</div>
+            <div>
+              <div class="offer-amount">$95</div>
+              <div class="offer-meta">Buyer from NY · 2h ago</div>
+            </div>
+          </div>
+          <span class="status-badge pending">Pending</span>
+          <div class="actions">
+            <button class="accept">Accept</button>
+            <button class="counter-btn">Counter</button>
+          </div>
+        </div>
+
+        <div class="offer-row">
+          <div class="left">
+            <div class="rank-badge">2</div>
+            <div>
+              <div class="offer-amount">$90</div>
+              <div class="offer-meta">Buyer from CA · 5h ago</div>
+            </div>
+          </div>
+          <span class="status-badge pending">Pending</span>
+          <div class="actions">
+            <button class="accept">Accept</button>
+            <button class="counter-btn">Counter</button>
+          </div>
+        </div>
+
+        <div class="offer-row">
+          <div class="left">
+            <div class="rank-badge">3</div>
+            <div>
+              <div class="offer-amount">$75</div>
+              <div class="offer-meta">Buyer from TX · 8h ago</div>
+            </div>
+          </div>
+          <span class="status-badge pending">Pending</span>
+          <div class="actions">
+            <button class="accept">Accept</button>
+            <button class="counter-btn">Counter</button>
+          </div>
+        </div>
+
+        <div class="decline-all">
+          <button>Decline All Offers</button>
+        </div>
+      </div>
+
+      <!-- Item 2: Countered -->
+      <div class="offer-group">
+        <div class="offer-group-header">
+          <div>
+            <h3>Embroidered Lehnga</h3>
+            <span class="price">Listed at $250</span>
+          </div>
+          <span class="count">1 offer</span>
+        </div>
+
+        <div class="offer-row">
+          <div class="left">
+            <div class="rank-badge top">1</div>
+            <div>
+              <div class="offer-amount">$200</div>
+              <div class="offer-meta">Buyer from IL · 3h ago</div>
+            </div>
+          </div>
+          <span class="status-badge countered">Countered $220</span>
+          <div>
+            <div class="waiting">Waiting for buyer · expires in 21h</div>
+          </div>
+        </div>
+
+        <div class="history-timeline">
+          <h4>Negotiation History</h4>
+          <div class="history-item">
+            <div class="dot buyer"></div>
+            <div class="text"><strong>Buyer</strong> offered $200</div>
+            <div class="time-stamp">Today 12:15 PM</div>
+          </div>
+          <div class="history-item">
+            <div class="dot seller"></div>
+            <div class="text"><strong>You</strong> countered at $220</div>
+            <div class="time-stamp">Today 12:40 PM</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Past offers -->
+      <h2 style="margin-top: 30px; color: #888;">Past Offers</h2>
+
+      <div class="offer-group" style="opacity: 0.7;">
+        <div class="offer-group-header">
+          <div>
+            <h3>Gold Thread Dupatta</h3>
+            <span class="price">Listed at $80</span>
+          </div>
+        </div>
+
+        <div class="offer-row">
+          <div class="left">
+            <div class="rank-badge">—</div>
+            <div>
+              <div class="offer-amount" style="color: #999;">$50</div>
+              <div class="offer-meta">2 days ago</div>
+            </div>
+          </div>
+          <span class="status-badge expired">Expired</span>
+          <div></div>
+        </div>
+
+        <div class="offer-row">
+          <div class="left">
+            <div class="rank-badge">—</div>
+            <div>
+              <div class="offer-amount" style="color: #999;">$60</div>
+              <div class="offer-meta">1 day ago</div>
+            </div>
+          </div>
+          <span class="status-badge declined">Declined</span>
+          <div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ==================== SCREEN 14: PAYMENT EXPIRED ==================== -->
+<div class="screen-section">
+  <div class="screen-label">Screen 14 — Payment Timeout</div>
+  <div class="screen-title">Buyer Didn't Pay Within 24h</div>
+  <div class="screen-desc">Offer was accepted, checkout link sent, but buyer didn't complete payment. Draft order is deleted, item goes back to available.</div>
+
+  <div class="two-col">
+    <div class="wa-phone" style="max-width: 340px;">
+      <div class="wa-header">
+        <span class="back">‹</span>
+        <div class="avatar">P</div>
+        <div>
+          <div class="name">The Phir Story</div>
+          <div class="status">Seller's view</div>
+        </div>
+      </div>
+      <div class="wa-chat" style="min-height: 200px; display: flex; flex-direction: column; justify-content: flex-end;">
+        <div class="wa-msg received">
+          ⏰ The buyer didn't complete payment for <strong>Sky Blue Kameez Shalwar</strong> ($95 offer).<br><br>
+          Your item is back on the market at $120.
+          <div class="time">3:22 PM</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wa-phone" style="max-width: 340px;">
+      <div class="wa-header">
+        <span class="back">‹</span>
+        <div class="avatar">P</div>
+        <div>
+          <div class="name">The Phir Story</div>
+          <div class="status">Buyer's view</div>
+        </div>
+      </div>
+      <div class="wa-chat" style="min-height: 200px; display: flex; flex-direction: column; justify-content: flex-end;">
+        <div class="wa-msg received">
+          ⏰ Your checkout link for <strong>Sky Blue Kameez Shalwar</strong> has expired.<br><br>
+          You can make a new offer anytime:<br>
+          Send <strong>OFFER sky-blue-kameez-shalwar</strong>
+          <div class="time">3:22 PM</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align: center; padding: 60px 20px; color: #444; font-size: 14px;">
+  — End of Screens —<br>
+  <span style="color: #25D366;">Phirstory Offer System v1</span>
+</div>
+
+</body>
+</html>

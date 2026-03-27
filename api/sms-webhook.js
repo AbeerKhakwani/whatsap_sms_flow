@@ -446,6 +446,79 @@ export default async function handler(req, res) {
       return await handleSellCommand(phone, conv, res);
     }
 
+    // ─── OFFER RESPONSES ──────────────────────────────────────────────────────
+    // Sellers can reply ACCEPT, REJECT, or COUNTER [amount] to manage bids
+    if (cmd === 'accept' || cmd === 'reject' || cmd.startsWith('counter ')) {
+      // Find seller by phone
+      const { data: seller } = await smsDb.supabase
+        .from('sellers')
+        .select('id, name, email')
+        .eq('phone', phone)
+        .maybeSingle();
+
+      if (!seller) {
+        await sendMessage(phone, "We couldn't find your seller account. Please contact us at thephirstory@gmail.com");
+        return res.status(200).json({ status: 'seller_not_found' });
+      }
+
+      // Find their latest pending/countered offer
+      const { data: offer } = await smsDb.supabase
+        .from('offers')
+        .select('*')
+        .eq('seller_id', seller.id)
+        .in('status', ['pending', 'countered'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!offer) {
+        await sendMessage(phone, "You don't have any active offers to respond to. Check your dashboard at sell.thephirstory.com");
+        return res.status(200).json({ status: 'no_active_offers' });
+      }
+
+      // Call the respond-offer API internally
+      const responseBody = { offerId: offer.id, response: cmd === 'accept' ? 'accept' : cmd === 'reject' ? 'reject' : 'counter' };
+      if (cmd.startsWith('counter ')) {
+        const amt = parseFloat(cmd.replace('counter ', '').replace('$', '').trim());
+        if (isNaN(amt) || amt <= 0) {
+          await sendMessage(phone, 'Please specify a valid amount. Example: COUNTER 150');
+          return res.status(200).json({ status: 'invalid_counter' });
+        }
+        if (offer.counter_round >= 3) {
+          await sendMessage(phone, `You've reached the maximum counter rounds. You can only ACCEPT or REJECT this offer now.`);
+          return res.status(200).json({ status: 'max_rounds' });
+        }
+        responseBody.counterAmount = amt;
+      }
+
+      // Forward to the offer respond endpoint
+      const apiUrl = `https://${process.env.VERCEL_URL || 'sell.thephirstory.com'}/api/seller?action=respond-offer`;
+      const apiRes = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(responseBody)
+      });
+      const apiData = await apiRes.json();
+
+      if (!apiData.success) {
+        await sendMessage(phone, `Something went wrong: ${apiData.error}. Please try again or visit your dashboard.`);
+        return res.status(200).json({ status: 'offer_response_failed' });
+      }
+
+      // Confirm to seller
+      if (cmd === 'accept') {
+        await sendMessage(phone, `✅ Offer accepted! The buyer has been sent a checkout link. We'll notify you once payment is complete.`);
+      } else if (cmd === 'reject') {
+        await sendMessage(phone, `❌ Offer rejected. The buyer has been notified.`);
+      } else {
+        const roundsLeft = 3 - (offer.counter_round + 1);
+        await sendMessage(phone, `💬 Counter offer of $${responseBody.counterAmount} sent to the buyer.${roundsLeft > 0 ? ` ${roundsLeft} counter round(s) remaining.` : ' This was the final round — they must accept or reject.'}`);
+      }
+
+      return res.status(200).json({ status: 'offer_responded', response: responseBody.response });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // State machine
     switch (conv.state) {
       case 'new':

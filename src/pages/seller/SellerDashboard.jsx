@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2 } from 'lucide-react';
+import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2, ArrowUpDown } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
 import SellerLayout from './SellerLayout';
 
@@ -13,6 +13,7 @@ export default function SellerDashboard() {
   const [stats, setStats] = useState({ total: 0, draft: 0, active: 0, sold: 0 });
   const [seller, setSeller] = useState(null);
   const [soldProducts, setSoldProducts] = useState([]);
+  const [rejectedListings, setRejectedListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingListing, setEditingListing] = useState(null);
   const [editForm, setEditForm] = useState({ title: '', price: '', condition: '', description: '' });
@@ -22,6 +23,9 @@ export default function SellerDashboard() {
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [togglingStatus, setTogglingStatus] = useState(null); // productId being toggled
+  const [offers, setOffers] = useState([]);
+  const [counterInputs, setCounterInputs] = useState({}); // offerId -> amount string
+  const [respondingOffer, setRespondingOffer] = useState(null); // offerId being responded to
   const photoInputRef = useRef(null);
 
   // Address modal state
@@ -82,8 +86,9 @@ export default function SellerDashboard() {
         setShowAddressModal(true);
       }
 
-      // Fetch listings
+      // Fetch listings + offers
       fetchListings(sellerEmail);
+      if (authData.seller?.id) fetchOffers(authData.seller.id);
     } catch (error) {
       console.error('Auth error:', error);
       navigate('/login');
@@ -100,12 +105,42 @@ export default function SellerDashboard() {
         setStats(data.stats);
         setSeller(data.seller);
         setSoldProducts(data.soldProducts || []);
+        setRejectedListings(data.rejectedListings || []);
       }
     } catch (error) {
       console.error('Error fetching listings:', error);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function fetchOffers(sellerId) {
+    try {
+      const r = await fetch(`${API_URL}/api/seller?action=get-offers&sellerId=${sellerId}`);
+      const d = await r.json();
+      if (d.success) setOffers(d.offers || []);
+    } catch {}
+  }
+
+  async function respondToOffer(offerId, response, counterAmount) {
+    setRespondingOffer(offerId);
+    try {
+      const r = await fetch(`${API_URL}/api/seller?action=respond-offer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offerId, response, counterAmount: counterAmount ? parseFloat(counterAmount) : undefined })
+      });
+      const d = await r.json();
+      if (d.success) {
+        setOffers(prev => prev.map(o => o.id === offerId ? { ...o, status: d.status, amount: d.counterAmount || o.amount, counter_round: (o.counter_round || 0) + (response === 'counter' ? 1 : 0) } : o));
+        setCounterInputs(prev => { const n = { ...prev }; delete n[offerId]; return n; });
+      } else {
+        alert(d.error || 'Failed to respond');
+      }
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+    setRespondingOffer(null);
   }
 
   function handleLogout() {
@@ -325,6 +360,30 @@ export default function SellerDashboard() {
     } finally {
       setSavingAddress(false);
     }
+  }
+
+  function getSourceBadge(tags) {
+    const tagList = Array.isArray(tags) ? tags : (tags || '').split(',').map(t => t.trim());
+    const sourceTag = tagList.find(t => t.startsWith('source:'));
+    if (!sourceTag) return null;
+    const source = sourceTag.replace('source:', '');
+    const styles = {
+      portal: 'bg-purple-50 text-purple-600',
+      whatsapp: 'bg-green-50 text-green-600',
+      admin: 'bg-blue-50 text-blue-600',
+      email: 'bg-orange-50 text-orange-600'
+    };
+    const labels = {
+      portal: '🌐 Portal',
+      whatsapp: '💬 WhatsApp',
+      admin: '👤 Admin',
+      email: '📧 Email'
+    };
+    return (
+      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${styles[source] || 'bg-gray-50 text-gray-500'}`}>
+        {labels[source] || source}
+      </span>
+    );
   }
 
   function getStatusBadge(listing) {
@@ -564,6 +623,7 @@ export default function SellerDashboard() {
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="font-medium text-gray-900 truncate">{listing.title}</h3>
                       {getStatusBadge(listing)}
+                      {getSourceBadge(listing.tags)}
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-500">
                       <span>{listing.size}</span>
@@ -662,6 +722,206 @@ export default function SellerDashboard() {
             </div>
           )}
         </div>
+
+        {/* Offers Section */}
+        {offers.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="font-medium text-gray-900 flex items-center gap-2">
+                  <ArrowUpDown className="w-4 h-4 text-blue-500" />
+                  Offers
+                  {offers.filter(o => o.status === 'pending' || o.status === 'countered').length > 0 && (
+                    <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full bg-blue-500 text-white">
+                      {offers.filter(o => o.status === 'pending' || o.status === 'countered').length}
+                    </span>
+                  )}
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">Buyers interested in your listings</p>
+              </div>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {offers.map((offer) => {
+                const isActive = offer.status === 'pending' || offer.status === 'countered';
+                const isAccepted = offer.status === 'accepted';
+                const isRejected = offer.status === 'rejected' || offer.status === 'expired' || offer.status === 'withdrawn';
+                const canCounter = (offer.counter_round || 0) < 3;
+                const roundLabel = offer.counter_round ? `Round ${offer.counter_round + 1}` : 'Initial offer';
+                return (
+                  <div key={offer.id} className={`p-4 flex items-start gap-4 ${isRejected ? 'opacity-60' : ''}`}>
+                    {/* Product image */}
+                    <div className="w-14 h-14 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                      {offer.product_image ? (
+                        <img src={getThumbnail(offer.product_image)} alt={offer.product_title} className="w-full h-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400">
+                          <Package className="w-5 h-5" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <h3 className="font-medium text-gray-900 truncate text-sm">{offer.product_title}</h3>
+                        {/* Status badge */}
+                        {isActive && (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                            {offer.status === 'countered' ? 'Countered' : 'New offer'}
+                          </span>
+                        )}
+                        {isAccepted && (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Accepted</span>
+                        )}
+                        {isRejected && (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 capitalize">{offer.status}</span>
+                        )}
+                        <span className="text-xs text-gray-400">{roundLabel}</span>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-sm mb-2">
+                        <span className="font-semibold text-gray-900">${parseFloat(offer.amount).toFixed(2)} <span className="font-normal text-gray-400 text-xs">offered</span></span>
+                        {offer.listing_price && (
+                          <span className="text-gray-500 text-xs">Listed at ${parseFloat(offer.listing_price).toFixed(2)}</span>
+                        )}
+                      </div>
+
+                      {/* Accepted: show checkout status */}
+                      {isAccepted && offer.checkout_url && (
+                        <div className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 inline-block">
+                          Checkout link sent to buyer
+                        </div>
+                      )}
+
+                      {/* Active: action buttons */}
+                      {isActive && (
+                        <div className="flex items-center gap-2 flex-wrap mt-1">
+                          <button
+                            onClick={() => respondToOffer(offer.id, 'accept')}
+                            disabled={respondingOffer === offer.id}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition"
+                          >
+                            {respondingOffer === offer.id ? <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+                            Accept ${parseFloat(offer.amount).toFixed(0)}
+                          </button>
+                          <button
+                            onClick={() => respondToOffer(offer.id, 'reject')}
+                            disabled={respondingOffer === offer.id}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
+                          >
+                            <X className="w-3 h-3" />
+                            Decline
+                          </button>
+                          {canCounter && (
+                            <div className="flex items-center gap-1">
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                                <input
+                                  type="number"
+                                  placeholder="Counter"
+                                  value={counterInputs[offer.id] || ''}
+                                  onChange={e => setCounterInputs(prev => ({ ...prev, [offer.id]: e.target.value }))}
+                                  className="pl-5 pr-2 py-1.5 w-24 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                />
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (!counterInputs[offer.id]) return;
+                                  respondToOffer(offer.id, 'counter', counterInputs[offer.id]);
+                                }}
+                                disabled={!counterInputs[offer.id] || respondingOffer === offer.id}
+                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition"
+                              >
+                                Counter
+                              </button>
+                            </div>
+                          )}
+                          {!canCounter && (
+                            <span className="text-xs text-gray-400 italic">Max counter rounds reached</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Time */}
+                    <div className="text-xs text-gray-400 flex-shrink-0 text-right">
+                      {new Date(offer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Rejected Listings */}
+        {rejectedListings.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200">
+            <div className="px-4 py-3 border-b border-gray-200">
+              <h2 className="font-medium text-gray-900">Rejected Listings</h2>
+              <p className="text-xs text-gray-500 mt-0.5">These listings were not approved. You can resubmit addressing the feedback.</p>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {rejectedListings.map((item) => (
+                <div key={item.id} className="p-4 flex items-start gap-4 opacity-75">
+                  {/* Image */}
+                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 relative">
+                    {item.images?.[0]?.src ? (
+                      <img
+                        src={getThumbnail(item.images[0].src)}
+                        alt={item.title}
+                        className="w-full h-full object-cover grayscale"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-400">
+                        <Package className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-red-500/10" />
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-medium text-gray-600 truncate">{item.title || `${item.designer} ${item.itemType}`}</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        Rejected
+                      </span>
+                      {item.submissionSource && (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          item.submissionSource === 'portal' ? 'bg-purple-50 text-purple-600' :
+                          item.submissionSource === 'whatsapp' ? 'bg-green-50 text-green-600' :
+                          'bg-gray-50 text-gray-500'
+                        }`}>
+                          {item.submissionSource === 'portal' ? '🌐 Portal' :
+                           item.submissionSource === 'whatsapp' ? '💬 WhatsApp' :
+                           item.submissionSource}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-gray-500">
+                      <span>{item.size || 'One Size'}</span>
+                      {item.askingPrice && <span>Asked ${parseFloat(item.askingPrice).toFixed(0)}</span>}
+                    </div>
+                    {item.rejectionReason && (
+                      <div className="mt-2 text-xs">
+                        <span className="text-red-600 font-medium">Reason:</span>{' '}
+                        <span className="text-gray-600">{item.rejectionReason}</span>
+                        {item.rejectionNote && (
+                          <span className="text-gray-500 ml-1">— {item.rejectionNote}</span>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Rejected {new Date(item.rejectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
       </div>
 

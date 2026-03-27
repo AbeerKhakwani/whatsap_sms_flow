@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phirstory Seller Dashboard — Design Prototype v3</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwindcss.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          colors: {
+            brand: { red: '#C91A2B', redDark: '#A01523', gold: '#d28d30', tan: '#d0ab85' },
+            warm: { 50: '#FAF9F7', 100: '#F5EFE6', 200: '#FBF7F0' }
+          },
+          keyframes: {
+            'fade-in': { '0%': { opacity: '0', transform: 'translateY(6px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+            'slide-in': { '0%': { opacity: '0', transform: 'translateX(-8px)' }, '100%': { opacity: '1', transform: 'translateX(0)' } },
+            'count-up': { '0%': { opacity: '0', transform: 'translateY(10px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+            'shimmer': { '0%': { backgroundPosition: '-200% 0' }, '100%': { backgroundPosition: '200% 0' } },
+            'pulse-dot': { '0%, 100%': { opacity: '1' }, '50%': { opacity: '0.4' } },
+          },
+          animation: {
+            'fade-in': 'fade-in 0.4s ease-out',
+            'fade-in-delay': 'fade-in 0.4s ease-out 0.1s both',
+            'fade-in-delay-2': 'fade-in 0.4s ease-out 0.2s both',
+            'fade-in-delay-3': 'fade-in 0.4s ease-out 0.3s both',
+            'slide-in': 'slide-in 0.3s ease-out',
+            'count-up': 'count-up 0.5s ease-out',
+            'shimmer': 'shimmer 1.5s infinite',
+            'pulse-dot': 'pulse-dot 2s ease-in-out infinite',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+
+    /* Card interactions */
+    .card-hover { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+    .card-hover:hover { box-shadow: 0 8px 25px rgba(0,0,0,0.08); transform: translateY(-2px); }
+
+    /* Image zoom on hover */
+    .img-zoom { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+    .group:hover .img-zoom { transform: scale(1.08); }
+
+    /* Sidebar */
+    .sidebar-link { transition: all 0.15s ease; }
+    .sidebar-link:hover { background: #faf9f7; }
+    .sidebar-link.active { border-left-color: #C91A2B; background: linear-gradient(90deg, #fef2f2 0%, #fff 100%); color: #C91A2B; font-weight: 600; }
+
+    /* Tab transitions */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; opacity: 1; animation: fade-in 0.3s ease-out; }
+
+    /* Sold overlay badge */
+    .sold-overlay { position: relative; }
+    .sold-overlay::after {
+      content: 'SOLD';
+      position: absolute; bottom: 8px; right: 8px;
+      background: #C91A2B; color: white;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+      padding: 4px 12px; border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(201, 26, 43, 0.3);
+    }
+
+    /* Skeleton loading shimmer */
+    .skeleton {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
+
+    /* Activity feed timeline line */
+    .activity-dot { position: relative; }
+    .activity-dot::before {
+      content: '';
+      position: absolute; left: 15px; top: 32px; bottom: -16px;
+      width: 1px; background: #e5e7eb;
+    }
+    .activity-dot:last-child::before { display: none; }
+
+    /* Subtle pattern for premium feel */
+    .hero-pattern {
+      background-image: radial-gradient(circle at 25px 25px, rgba(201, 26, 43, 0.02) 2px, transparent 0);
+      background-size: 50px 50px;
+    }
+
+    /* Button press effect */
+    .btn-press:active { transform: scale(0.97); }
+
+    /* Notification badge pulse */
+    .notif-badge { animation: pulse-dot 2s ease-in-out infinite; }
+
+    /* Scrollbar styling */
+    .custom-scroll::-webkit-scrollbar { width: 4px; }
+    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+    /* Earnings number gold glow */
+    .gold-glow { text-shadow: 0 0 20px rgba(210, 141, 48, 0.15); }
+  </style>
+</head>
+<body class="bg-warm-50 min-h-screen">
+
+  <!-- ========== TOP HEADER ========== -->
+  <header class="bg-white/95 backdrop-blur-md border-b border-gray-100/80 sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <!-- Logo -->
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 bg-brand-red rounded-lg flex items-center justify-center shadow-sm shadow-brand-red/20">
+          <span class="text-white font-bold text-sm tracking-tight">P</span>
+        </div>
+        <div>
+          <span class="font-semibold text-gray-900 text-[15px]">The Phir Story</span>
+        </div>
+      </div>
+
+      <!-- Right side -->
+      <div class="flex items-center gap-2.5">
+        <!-- Search (desktop) -->
+        <div class="hidden lg:flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 w-56">
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <input type="text" placeholder="Search listings..." class="bg-transparent text-sm text-gray-600 placeholder-gray-400 outline-none w-full">
+        </div>
+
+        <!-- Notification bell -->
+        <div class="relative w-9 h-9 bg-gray-50 rounded-lg flex items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
+          <svg class="w-[18px] h-[18px] text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+          </svg>
+          <div class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-brand-red rounded-full border-2 border-white notif-badge"></div>
+        </div>
+
+        <!-- Submit CTA -->
+        <a href="#" class="hidden sm:inline-flex bg-brand-red hover:bg-brand-redDark text-white px-4 py-2 rounded-lg text-sm font-medium transition-all btn-press shadow-sm shadow-brand-red/20">
+          + Submit Listing
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========== MAIN LAYOUT: Sidebar + Content ========== -->
+  <div class="max-w-7xl mx-auto flex min-h-[calc(100vh-56px)]">
+
+    <!-- ========== LEFT SIDEBAR (Desktop) ========== -->
+    <aside class="hidden md:flex flex-col w-[300px] border-r border-gray-100 bg-white flex-shrink-0 custom-scroll overflow-y-auto">
+
+      <!-- Seller Profile Card -->
+      <div class="p-5 border-b border-gray-50">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-full bg-gradient-to-br from-brand-red to-brand-gold flex items-center justify-center shadow-sm">
+            <span class="text-white font-bold text-sm">AK</span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold text-gray-900 text-sm truncate">Noor Khan</p>
+            <p class="text-xs text-gray-400 truncate">Seller Account</p>
+          </div>
+          <svg class="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Quick Stats in sidebar -->
+      <div class="px-5 py-4 border-b border-gray-50 bg-gradient-to-b from-warm-50 to-white">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="text-center">
+            <p class="text-lg font-bold text-gray-900">$66</p>
+            <p class="text-[10px] text-gray-400 uppercase tracking-wider font-medium">Paid Out</p>
+          </div>
+          <div class="text-center">
+            <p class="text-lg font-bold text-amber-600">$197</p>
+            <p class="text-[10px] text-amber-600/70 uppercase tracking-wider font-medium">Pending</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="py-3 px-2">
+        <p class="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Menu</p>
+        <a href="#" onclick="switchTab('sales')" class="sidebar-link active flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-700 border-l-4 border-transparent rounded-r-lg mb-0.5" id="nav-sales">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          </svg>
+          My Sales
+          <span class="ml-auto text-[11px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">16</span>
+        </a>
+        <a href="#" onclick="switchTab('balance')" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-700 border-l-4 border-transparent rounded-r-lg mb-0.5" id="nav-balance">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          My Balance
+        </a>
+        <a href="#" onclick="switchTab('activity')" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-700 border-l-4 border-transparent rounded-r-lg mb-0.5" id="nav-activity">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          Activity
+          <span class="ml-auto w-2 h-2 bg-brand-red rounded-full notif-badge"></span>
+        </a>
+        <a href="#" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-400 border-l-4 border-transparent rounded-r-lg mb-0.5 cursor-not-allowed">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+          </svg>
+          My Offers
+          <span class="ml-auto text-[10px] bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full font-medium">Soon</span>
+        </a>
+
+      </nav>
+
+      <!-- IG Feed (sidebar) -->
+      <div class="border-t border-gray-100 px-4 pt-4 pb-2">
+        <div class="flex items-center justify-between mb-2.5">
+          <div class="flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-pink-500" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069z"/></svg>
+            <span class="text-[11px] font-semibold text-gray-700">@thephirstory</span>
+          </div>
+          <a href="https://instagram.com/thephirstory" target="_blank" class="text-[10px] text-pink-500 font-medium hover:underline">Follow</a>
+        </div>
+        <div class="grid grid-cols-3 gap-1.5">
+          <div class="aspect-square bg-gradient-to-br from-rose-100 to-pink-200 rounded-lg overflow-hidden cursor-pointer group relative">
+            <div class="absolute inset-0 flex items-center justify-center text-xl opacity-40 img-zoom">📸</div>
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+          </div>
+          <div class="aspect-square bg-gradient-to-br from-amber-100 to-warm-100 rounded-lg overflow-hidden cursor-pointer group relative">
+            <div class="absolute inset-0 flex items-center justify-center text-xl opacity-40 img-zoom">📸</div>
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+          </div>
+          <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 rounded-lg overflow-hidden cursor-pointer group relative">
+            <div class="absolute inset-0 flex items-center justify-center text-xl opacity-40 img-zoom">📸</div>
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+          </div>
+          <div class="aspect-square bg-gradient-to-br from-teal-100 to-emerald-100 rounded-lg overflow-hidden cursor-pointer group relative">
+            <div class="absolute inset-0 flex items-center justify-center text-xl opacity-40 img-zoom">📸</div>
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+          </div>
+          <div class="aspect-square bg-gradient-to-br from-sky-100 to-blue-100 rounded-lg overflow-hidden cursor-pointer group relative">
+            <div class="absolute inset-0 flex items-center justify-center text-xl opacity-40 img-zoom">📸</div>
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+          </div>
+          <div class="aspect-square bg-gradient-to-br from-orange-100 to-red-100 rounded-lg overflow-hidden cursor-pointer group relative">
+            <div class="absolute inset-0 flex items-center justify-center text-xl opacity-40 img-zoom">📸</div>
+            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Substack / Blog (sidebar) -->
+      <div class="px-4 pt-3 pb-3 border-b border-gray-100">
+        <div class="flex items-center justify-between mb-2.5">
+          <div class="flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-orange-500" fill="currentColor" viewBox="0 0 24 24"><path d="M22.539 8.242H1.46V5.406h21.08v2.836zM1.46 10.812V24L12 18.11 22.54 24V10.812H1.46zM22.54 0H1.46v2.836h21.08V0z"/></svg>
+            <span class="text-[11px] font-semibold text-gray-700">Blog</span>
+          </div>
+          <a href="#" class="text-[10px] text-orange-500 font-medium hover:underline">Subscribe</a>
+        </div>
+
+        <!-- Featured post -->
+        <div class="bg-gradient-to-br from-warm-100 to-brand-tan/10 rounded-xl p-3.5 cursor-pointer card-hover border border-gray-100/60 mb-2.5">
+          <span class="text-[9px] font-bold text-brand-red bg-brand-red/10 px-1.5 py-0.5 rounded-full uppercase tracking-wide">Latest</span>
+          <h4 class="text-[12px] font-semibold text-gray-900 mt-2 leading-snug">How to Price Your Preloved Designer Pieces</h4>
+          <p class="text-[10px] text-gray-400 mt-1.5">Feb 20 &middot; 5 min read</p>
+        </div>
+
+        <!-- Older post -->
+        <div class="flex gap-2.5 items-start cursor-pointer group p-2 -mx-2 rounded-lg hover:bg-gray-50 transition-colors">
+          <div class="w-10 h-10 bg-gradient-to-br from-purple-50 to-indigo-100 rounded-lg flex-shrink-0 flex items-center justify-center">
+            <span class="text-sm opacity-40">📝</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h4 class="text-[11px] font-medium text-gray-800 leading-tight group-hover:text-brand-red transition-colors">Top 10 Pakistani Designers to Watch in 2026</h4>
+            <p class="text-[10px] text-gray-400 mt-0.5">Feb 12 &middot; 4 min</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Account + Help + Sign Out -->
+      <div class="py-2 px-2">
+        <p class="px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Account</p>
+        <a href="#" onclick="switchTab('profile')" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-700 border-l-4 border-transparent rounded-r-lg mb-0.5" id="nav-profile">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+          </svg>
+          Profile
+        </a>
+        <a href="#" class="sidebar-link flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-gray-700 border-l-4 border-transparent rounded-r-lg mb-0.5">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          Settings
+        </a>
+      </div>
+
+      <!-- Help + Sign Out -->
+      <div class="border-t border-gray-100 p-3 mt-auto">
+        <a href="#" class="flex items-center gap-3 px-3 py-2 text-sm text-gray-400 hover:text-gray-600 transition-colors rounded-lg hover:bg-gray-50">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Help & Support
+        </a>
+        <a href="#" class="flex items-center gap-3 px-3 py-2 text-sm text-gray-400 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50/50">
+          <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+          </svg>
+          Sign Out
+        </a>
+      </div>
+    </aside>
+
+    <!-- ========== MAIN CONTENT AREA ========== -->
+    <main class="flex-1 min-w-0 overflow-y-auto custom-scroll">
+
+      <!-- ====== TAB: MY SALES (default) ====== -->
+      <div id="tab-sales" class="tab-content active">
+
+        <!-- NEW ARRIVALS - Top horizontal strip -->
+        <div class="bg-white border-b border-gray-100 px-6 py-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <svg class="w-4 h-4 text-brand-red" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <h3 class="text-sm font-semibold text-gray-900">New Arrivals</h3>
+            </div>
+            <a href="#" class="text-xs text-brand-red font-medium hover:underline">View All &rarr;</a>
+          </div>
+          <div class="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1 snap-x snap-mandatory" style="scrollbar-width: none; -ms-overflow-style: none;">
+            <!-- Arrival 1 -->
+            <div class="flex-shrink-0 w-32 snap-start">
+              <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group border border-gray-100">
+                <div class="aspect-square bg-gradient-to-br from-rose-50 to-pink-100 relative overflow-hidden">
+                  <div class="absolute inset-0 flex items-center justify-center text-3xl opacity-50 img-zoom">👗</div>
+                  <div class="absolute top-1.5 left-1.5">
+                    <span class="text-[8px] font-bold bg-white/90 backdrop-blur-sm text-gray-700 px-1.5 py-0.5 rounded">NEW</span>
+                  </div>
+                </div>
+                <div class="p-2">
+                  <h4 class="text-[11px] font-medium text-gray-900 truncate">Agha Noor Silk Kurta</h4>
+                  <p class="text-[11px] font-bold text-gray-900 mt-0.5">$120</p>
+                </div>
+              </div>
+            </div>
+            <!-- Arrival 2 -->
+            <div class="flex-shrink-0 w-32 snap-start">
+              <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group border border-gray-100">
+                <div class="aspect-square bg-gradient-to-br from-emerald-50 to-teal-100 relative overflow-hidden">
+                  <div class="absolute inset-0 flex items-center justify-center text-3xl opacity-50 img-zoom">👘</div>
+                  <div class="absolute top-1.5 left-1.5">
+                    <span class="text-[8px] font-bold bg-white/90 backdrop-blur-sm text-gray-700 px-1.5 py-0.5 rounded">NEW</span>
+                  </div>
+                </div>
+                <div class="p-2">
+                  <h4 class="text-[11px] font-medium text-gray-900 truncate">Hussain Rehar Formal</h4>
+                  <p class="text-[11px] font-bold text-gray-900 mt-0.5">$285</p>
+                </div>
+              </div>
+            </div>
+            <!-- Arrival 3 -->
+            <div class="flex-shrink-0 w-32 snap-start">
+              <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group border border-gray-100">
+                <div class="aspect-square bg-gradient-to-br from-amber-50 to-yellow-100 relative overflow-hidden">
+                  <div class="absolute inset-0 flex items-center justify-center text-3xl opacity-50 img-zoom">🧣</div>
+                  <div class="absolute top-1.5 left-1.5">
+                    <span class="text-[8px] font-bold bg-white/90 backdrop-blur-sm text-gray-700 px-1.5 py-0.5 rounded">NEW</span>
+                  </div>
+                </div>
+                <div class="p-2">
+                  <h4 class="text-[11px] font-medium text-gray-900 truncate">Faraz Manan Pashmina</h4>
+                  <p class="text-[11px] font-bold text-gray-900 mt-0.5">$195</p>
+                </div>
+              </div>
+            </div>
+            <!-- Arrival 4 -->
+            <div class="flex-shrink-0 w-32 snap-start">
+              <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group border border-gray-100">
+                <div class="aspect-square bg-gradient-to-br from-purple-50 to-violet-100 relative overflow-hidden">
+                  <div class="absolute inset-0 flex items-center justify-center text-3xl opacity-50 img-zoom">👔</div>
+                  <div class="absolute top-1.5 left-1.5">
+                    <span class="text-[8px] font-bold bg-white/90 backdrop-blur-sm text-gray-700 px-1.5 py-0.5 rounded">NEW</span>
+                  </div>
+                </div>
+                <div class="p-2">
+                  <h4 class="text-[11px] font-medium text-gray-900 truncate">Baroque Chantelle</h4>
+                  <p class="text-[11px] font-bold text-gray-900 mt-0.5">$155</p>
+                </div>
+              </div>
+            </div>
+            <!-- Arrival 5 -->
+            <div class="flex-shrink-0 w-32 snap-start">
+              <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group border border-gray-100">
+                <div class="aspect-square bg-gradient-to-br from-sky-50 to-blue-100 relative overflow-hidden">
+                  <div class="absolute inset-0 flex items-center justify-center text-3xl opacity-50 img-zoom">🧥</div>
+                  <div class="absolute top-1.5 left-1.5">
+                    <span class="text-[8px] font-bold bg-white/90 backdrop-blur-sm text-gray-700 px-1.5 py-0.5 rounded">NEW</span>
+                  </div>
+                </div>
+                <div class="p-2">
+                  <h4 class="text-[11px] font-medium text-gray-900 truncate">Crimson Luxury Bridal</h4>
+                  <p class="text-[11px] font-bold text-gray-900 mt-0.5">$420</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Welcome banner -->
+        <div class="bg-white border-b border-gray-100 hero-pattern">
+          <div class="px-6 py-5">
+            <div class="flex items-center justify-between">
+              <div class="animate-fade-in">
+                <h1 class="text-xl font-semibold text-gray-900">Welcome back, Noor</h1>
+                <p class="text-sm text-gray-400 mt-1">You have <span class="text-amber-600 font-medium">2 items</span> awaiting shipment</p>
+              </div>
+              <a href="#" class="bg-brand-red hover:bg-brand-redDark text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all btn-press shadow-sm shadow-brand-red/20 hidden sm:inline-flex items-center gap-2 animate-fade-in-delay">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Submit Listing
+              </a>
+            </div>
+
+            <!-- Stats row -->
+            <div class="flex gap-5 mt-4 animate-fade-in-delay">
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-2xl font-bold text-gray-900">16</span>
+                <span class="text-xs text-gray-400">Listings</span>
+              </div>
+              <div class="w-px h-6 bg-gray-200 self-center"></div>
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-2xl font-bold text-green-600">5</span>
+                <span class="text-xs text-gray-400">Active</span>
+              </div>
+              <div class="w-px h-6 bg-gray-200 self-center"></div>
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-2xl font-bold text-brand-red">4</span>
+                <span class="text-xs text-gray-400">Sold</span>
+              </div>
+              <div class="w-px h-6 bg-gray-200 self-center"></div>
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-2xl font-bold text-amber-500">7</span>
+                <span class="text-xs text-gray-400">Pending</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Filter tabs -->
+        <div class="bg-white border-b border-gray-100 px-6 sticky top-14 z-30">
+          <div class="flex gap-0.5 -mb-px">
+            <button onclick="filterTab(this)" class="filter-btn px-4 py-3 text-sm font-medium text-brand-red border-b-2 border-brand-red transition-colors">All</button>
+            <button onclick="filterTab(this)" class="filter-btn px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-600 border-b-2 border-transparent transition-colors">Active</button>
+            <button onclick="filterTab(this)" class="filter-btn px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-600 border-b-2 border-transparent transition-colors">Pending</button>
+            <button onclick="filterTab(this)" class="filter-btn px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-600 border-b-2 border-transparent transition-colors">Sold</button>
+            <button onclick="filterTab(this)" class="filter-btn px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-600 border-b-2 border-transparent transition-colors">Drafts</button>
+
+            <!-- Sort dropdown (right aligned) -->
+            <div class="ml-auto flex items-center">
+              <span class="text-xs text-gray-400 mr-2">Sort:</span>
+              <select class="text-xs text-gray-600 bg-transparent font-medium outline-none cursor-pointer">
+                <option>Newest First</option>
+                <option>Price: High to Low</option>
+                <option>Price: Low to High</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Listings Grid -->
+        <div class="p-6">
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+
+            <!-- Listing 1 - Active -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group animate-fade-in">
+              <div class="aspect-square bg-gradient-to-br from-rose-100 to-pink-200 relative overflow-hidden">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-60 img-zoom">👗</div>
+                <div class="absolute top-2.5 left-2.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/90 text-white backdrop-blur-sm">ACTIVE</span>
+                </div>
+                <!-- Hover overlay -->
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                  <span class="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-3 py-1.5 rounded-lg backdrop-blur-sm">View Details</span>
+                </div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate group-hover:text-brand-red transition-colors">Sana Safinaz Embroidered Lawn</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Sana Safinaz &middot; Size M</p>
+                <div class="mt-2.5 flex items-baseline gap-2">
+                  <span class="text-sm font-bold text-gray-900">$175</span>
+                  <span class="text-xs text-green-600 font-medium">You earn $135</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 2 - Pending -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group animate-fade-in-delay">
+              <div class="aspect-square bg-gradient-to-br from-amber-50 to-orange-100 relative overflow-hidden">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-60 img-zoom">👘</div>
+                <div class="absolute top-2.5 left-2.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/90 text-white backdrop-blur-sm">PENDING REVIEW</span>
+                </div>
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                  <span class="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-3 py-1.5 rounded-lg backdrop-blur-sm">View Details</span>
+                </div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate group-hover:text-brand-red transition-colors">Elan Festive Collection 2024</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Elan &middot; Size S</p>
+                <div class="mt-2.5 flex items-baseline gap-2">
+                  <span class="text-sm font-bold text-gray-900">$220</span>
+                  <span class="text-xs text-green-600 font-medium">You earn $172</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 3 - Active -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group animate-fade-in-delay-2">
+              <div class="aspect-square bg-gradient-to-br from-purple-50 to-indigo-100 relative overflow-hidden">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-60 img-zoom">🧣</div>
+                <div class="absolute top-2.5 left-2.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/90 text-white backdrop-blur-sm">ACTIVE</span>
+                </div>
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                  <span class="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-3 py-1.5 rounded-lg backdrop-blur-sm">View Details</span>
+                </div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate group-hover:text-brand-red transition-colors">Maria B Bridal Collection</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Maria B &middot; Size L</p>
+                <div class="mt-2.5 flex items-baseline gap-2">
+                  <span class="text-sm font-bold text-gray-900">$350</span>
+                  <span class="text-xs text-green-600 font-medium">You earn $279</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 4 - Sold (Pending Payout) -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group animate-fade-in-delay-3">
+              <div class="aspect-square bg-gradient-to-br from-red-50 to-rose-100 relative overflow-hidden sold-overlay">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-50 img-zoom">👗</div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate">Test Vintage Dress</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Sold for $75</p>
+                <div class="mt-2.5 flex items-center gap-2">
+                  <span class="text-sm font-bold text-green-600">Earned $62</span>
+                  <span class="text-[10px] text-amber-700 font-semibold bg-amber-50 border border-amber-200/50 px-1.5 py-0.5 rounded-md">Pending</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 5 - Sold + Paid -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group">
+              <div class="aspect-square bg-gradient-to-br from-pink-50 to-fuchsia-100 relative overflow-hidden sold-overlay">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-50 img-zoom">👘</div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate">Pink - Zara Shahjahan</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Sold for $75</p>
+                <div class="mt-2.5 flex items-center gap-2">
+                  <span class="text-sm font-bold text-green-600">Earned $33</span>
+                  <span class="text-[10px] text-green-700 font-semibold bg-green-50 border border-green-200/50 px-1.5 py-0.5 rounded-md">&#10003; Paid</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 6 - Active -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group">
+              <div class="aspect-square bg-gradient-to-br from-teal-50 to-emerald-100 relative overflow-hidden">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-60 img-zoom">👔</div>
+                <div class="absolute top-2.5 left-2.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-green-500/90 text-white backdrop-blur-sm">ACTIVE</span>
+                </div>
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                  <span class="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-3 py-1.5 rounded-lg backdrop-blur-sm">View Details</span>
+                </div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate group-hover:text-brand-red transition-colors">Asim Jofa Luxury Lawn</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Asim Jofa &middot; Size M</p>
+                <div class="mt-2.5 flex items-baseline gap-2">
+                  <span class="text-sm font-bold text-gray-900">$95</span>
+                  <span class="text-xs text-green-600 font-medium">You earn $70</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 7 - Pending -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group">
+              <div class="aspect-square bg-gradient-to-br from-sky-50 to-blue-100 relative overflow-hidden">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-60 img-zoom">🧥</div>
+                <div class="absolute top-2.5 left-2.5">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/90 text-white backdrop-blur-sm">PENDING REVIEW</span>
+                </div>
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center">
+                  <span class="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-3 py-1.5 rounded-lg backdrop-blur-sm">View Details</span>
+                </div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate group-hover:text-brand-red transition-colors">Sapphire Winter Shawl</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Sapphire &middot; One Size</p>
+                <div class="mt-2.5 flex items-baseline gap-2">
+                  <span class="text-sm font-bold text-gray-900">$85</span>
+                  <span class="text-xs text-green-600 font-medium">You earn $62</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Listing 8 - Sold + Pending -->
+            <div class="bg-white rounded-xl shadow-sm overflow-hidden card-hover cursor-pointer group">
+              <div class="aspect-square bg-gradient-to-br from-emerald-50 to-teal-100 relative overflow-hidden sold-overlay">
+                <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-50 img-zoom">👗</div>
+              </div>
+              <div class="p-3.5">
+                <h3 class="text-sm font-medium text-gray-900 truncate">Sana Safinaz Lawn - Test</h3>
+                <p class="text-xs text-gray-400 mt-0.5">Sold for $175</p>
+                <div class="mt-2.5 flex items-center gap-2">
+                  <span class="text-sm font-bold text-green-600">Earned $135</span>
+                  <span class="text-[10px] text-amber-700 font-semibold bg-amber-50 border border-amber-200/50 px-1.5 py-0.5 rounded-md">Pending</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+
+      </div>
+
+      <!-- ====== TAB: MY BALANCE ====== -->
+      <div id="tab-balance" class="tab-content">
+        <div class="bg-white border-b border-gray-100 px-6 py-5">
+          <h1 class="text-xl font-semibold text-gray-900">My Balance</h1>
+          <p class="text-sm text-gray-400 mt-0.5">Track your earnings and payout history</p>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <!-- Big earnings cards -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-green-100 relative overflow-hidden">
+              <div class="absolute top-0 right-0 w-24 h-24 bg-green-50 rounded-bl-[60px] opacity-50"></div>
+              <p class="text-sm text-gray-500 font-medium relative">Total Paid Out</p>
+              <p class="text-4xl font-bold text-gray-900 mt-2 relative gold-glow">$66</p>
+              <p class="text-xs text-gray-400 mt-3 relative">Transferred to your account</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-amber-100 relative overflow-hidden">
+              <div class="absolute top-0 right-0 w-24 h-24 bg-amber-50 rounded-bl-[60px] opacity-50"></div>
+              <p class="text-sm text-amber-600 font-medium relative">Pending Payout</p>
+              <p class="text-4xl font-bold text-amber-600 mt-2 relative">$197</p>
+              <p class="text-xs text-gray-400 mt-3 relative">Awaiting delivery confirmation</p>
+            </div>
+          </div>
+
+          <!-- Balance Breakdown -->
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+            <div class="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
+              <h2 class="font-semibold text-gray-900 text-sm">Balance Breakdown</h2>
+              <span class="text-xs text-gray-400">Updated just now</span>
+            </div>
+            <div class="divide-y divide-gray-50">
+              <div class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+                  <span class="text-sm text-gray-600">Pending Shipping</span>
+                </div>
+                <span class="text-sm font-semibold text-gray-900">$62</span>
+              </div>
+              <div class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-2.5 h-2.5 rounded-full bg-blue-400"></div>
+                  <span class="text-sm text-gray-600">In Transit</span>
+                </div>
+                <span class="text-sm font-semibold text-gray-400">$0</span>
+              </div>
+              <div class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
+                  <span class="text-sm text-gray-600">Delivered (clearing)</span>
+                </div>
+                <span class="text-sm font-semibold text-gray-900">$135</span>
+              </div>
+              <div class="px-6 py-3.5 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-2.5 h-2.5 rounded-full bg-green-500"></div>
+                  <span class="text-sm text-gray-600">Available for Payout</span>
+                </div>
+                <span class="text-sm font-semibold text-green-600">$0</span>
+              </div>
+              <div class="px-6 py-3.5 flex items-center justify-between bg-gray-50/80">
+                <div class="flex items-center gap-3">
+                  <div class="w-2.5 h-2.5 rounded-full bg-gray-300"></div>
+                  <span class="text-sm font-medium text-gray-700">Already Paid Out</span>
+                </div>
+                <span class="text-sm font-bold text-gray-900">$66</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Payout History -->
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+            <div class="px-6 py-4 border-b border-gray-50">
+              <h2 class="font-semibold text-gray-900 text-sm">Payout History</h2>
+            </div>
+            <div class="divide-y divide-gray-50">
+              <div class="px-6 py-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Pink - Zara Shahjahan</p>
+                    <p class="text-xs text-gray-400">Jan 15, 2026</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="text-sm font-bold text-green-600">+$33</p>
+                </div>
+              </div>
+              <div class="px-6 py-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Ammara Khan Kaftan</p>
+                    <p class="text-xs text-gray-400">Jan 7, 2026</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="text-sm font-bold text-green-600">+$33</p>
+                </div>
+              </div>
+              <div class="px-6 py-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Test Vintage Dress</p>
+                    <p class="text-xs text-amber-500">Awaiting shipment</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="text-sm font-bold text-amber-600">$62</p>
+                </div>
+              </div>
+              <div class="px-6 py-4 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  </div>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Sana Safinaz Lawn - Test Sale</p>
+                    <p class="text-xs text-amber-500">Awaiting delivery</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="text-sm font-bold text-amber-600">$135</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="text-xs text-gray-400 text-center pb-4">Payouts are processed within 7 business days after delivery confirmation.</p>
+        </div>
+      </div>
+
+      <!-- ====== TAB: ACTIVITY ====== -->
+      <div id="tab-activity" class="tab-content">
+        <div class="bg-white border-b border-gray-100 px-6 py-5">
+          <h1 class="text-xl font-semibold text-gray-900">Activity</h1>
+          <p class="text-sm text-gray-400 mt-0.5">Everything happening with your listings</p>
+        </div>
+
+        <div class="p-6">
+          <div class="space-y-0">
+
+            <!-- Activity item 1 - Sale! -->
+            <div class="activity-dot flex gap-4 pb-6">
+              <div class="flex-shrink-0 w-8 h-8 bg-brand-red rounded-full flex items-center justify-center shadow-sm shadow-brand-red/20">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Item sold!</p>
+                    <p class="text-sm text-gray-500 mt-0.5"><span class="font-medium">Test Vintage Dress</span> was purchased for $75</p>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap ml-4">2 hours ago</span>
+                </div>
+                <div class="mt-2 bg-brand-red/5 border border-brand-red/10 rounded-lg p-3">
+                  <p class="text-xs text-brand-red font-medium">Action needed: Ship this item within 5 business days</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity item 2 - Listing approved -->
+            <div class="activity-dot flex gap-4 pb-6">
+              <div class="flex-shrink-0 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Listing approved</p>
+                    <p class="text-sm text-gray-500 mt-0.5"><span class="font-medium">Sana Safinaz Embroidered Lawn</span> is now live on the store</p>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap ml-4">Yesterday</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity item 3 - Payout -->
+            <div class="activity-dot flex gap-4 pb-6">
+              <div class="flex-shrink-0 w-8 h-8 bg-brand-gold rounded-full flex items-center justify-center">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Payout sent</p>
+                    <p class="text-sm text-gray-500 mt-0.5"><span class="font-medium text-green-600">$33.00</span> transferred for Pink - Zara Shahjahan</p>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap ml-4">Jan 15</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity item 4 - Delivery confirmed -->
+            <div class="activity-dot flex gap-4 pb-6">
+              <div class="flex-shrink-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Delivery confirmed</p>
+                    <p class="text-sm text-gray-500 mt-0.5"><span class="font-medium">Pink - Zara Shahjahan</span> was delivered to buyer</p>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap ml-4">Jan 12</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity item 5 - Another sale -->
+            <div class="activity-dot flex gap-4 pb-6">
+              <div class="flex-shrink-0 w-8 h-8 bg-brand-red rounded-full flex items-center justify-center shadow-sm shadow-brand-red/20">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Item sold!</p>
+                    <p class="text-sm text-gray-500 mt-0.5"><span class="font-medium">Sana Safinaz Lawn</span> was purchased for $175</p>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap ml-4">Jan 10</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity item 6 - Payout -->
+            <div class="flex gap-4 pb-6">
+              <div class="flex-shrink-0 w-8 h-8 bg-brand-gold rounded-full flex items-center justify-center">
+                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Payout sent</p>
+                    <p class="text-sm text-gray-500 mt-0.5"><span class="font-medium text-green-600">$33.00</span> transferred for Ammara Khan Kaftan</p>
+                  </div>
+                  <span class="text-xs text-gray-400 whitespace-nowrap ml-4">Jan 7</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== TAB: PROFILE ====== -->
+      <div id="tab-profile" class="tab-content">
+        <div class="bg-white border-b border-gray-100 px-6 py-5">
+          <h1 class="text-xl font-semibold text-gray-900">Profile</h1>
+          <p class="text-sm text-gray-400 mt-0.5">Manage your account and shipping details</p>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <!-- Profile card -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+            <div class="flex items-center gap-4">
+              <div class="w-16 h-16 rounded-full bg-gradient-to-br from-brand-red to-brand-gold flex items-center justify-center shadow-md">
+                <span class="text-white font-bold text-xl">AK</span>
+              </div>
+              <div class="flex-1">
+                <h2 class="text-lg font-semibold text-gray-900">Noor Khan</h2>
+                <p class="text-sm text-gray-400">noor@example.com</p>
+                <div class="flex items-center gap-3 mt-2">
+                  <span class="text-xs bg-brand-red/10 text-brand-red px-2 py-0.5 rounded-full font-medium">Verified Seller</span>
+                  <span class="text-xs text-gray-400">Member since Dec 2025</span>
+                </div>
+              </div>
+              <button class="text-sm text-brand-red font-medium hover:underline btn-press">Edit</button>
+            </div>
+          </div>
+
+          <!-- Shipping Address -->
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+            <div class="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
+              <h2 class="font-semibold text-gray-900 text-sm">Shipping Address</h2>
+              <button class="text-sm text-brand-red font-medium hover:underline btn-press">Edit</button>
+            </div>
+            <div class="p-6">
+              <p class="text-sm text-gray-700 font-medium">Noor Khan</p>
+              <p class="text-sm text-gray-500 mt-1">123 Main Street, Apt 4B</p>
+              <p class="text-sm text-gray-500">Karachi, Sindh 75500</p>
+              <p class="text-sm text-gray-500">Pakistan</p>
+              <p class="text-sm text-gray-500 mt-2">+92 300 1234567</p>
+            </div>
+          </div>
+
+          <!-- Payment -->
+          <div class="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+            <div class="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
+              <h2 class="font-semibold text-gray-900 text-sm">Payment Details</h2>
+              <button class="text-sm text-brand-red font-medium hover:underline btn-press">Edit</button>
+            </div>
+            <div class="p-6">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center border border-gray-100">
+                  <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-gray-900">Bank Transfer</p>
+                  <p class="text-xs text-gray-400">Account ending in ****4567</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ========== MOBILE BOTTOM NAV ========== -->
+  <nav class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md shadow-[0_-1px_10px_rgba(0,0,0,0.06)] md:hidden z-50" style="padding-bottom: env(safe-area-inset-bottom)">
+    <div class="flex items-center justify-around h-16">
+      <a href="#" onclick="switchTab('sales')" class="flex flex-col items-center gap-0.5 text-brand-red" id="mob-sales">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+        </svg>
+        <span class="text-[10px] font-medium">Sales</span>
+      </a>
+      <a href="#" onclick="switchTab('balance')" class="flex flex-col items-center gap-0.5 text-gray-400" id="mob-balance">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="text-[10px] font-medium">Balance</span>
+      </a>
+      <a href="#" class="flex flex-col items-center -mt-4">
+        <div class="w-13 h-13 bg-brand-red rounded-full flex items-center justify-center shadow-lg shadow-brand-red/30 w-[52px] h-[52px]">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
+          </svg>
+        </div>
+        <span class="text-[10px] font-semibold text-brand-red mt-1">Sell</span>
+      </a>
+      <a href="#" onclick="switchTab('activity')" class="flex flex-col items-center gap-0.5 text-gray-400 relative" id="mob-activity">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        <span class="text-[10px] font-medium">Activity</span>
+        <div class="absolute -top-0.5 right-1 w-2 h-2 bg-brand-red rounded-full"></div>
+      </a>
+      <a href="#" onclick="switchTab('profile')" class="flex flex-col items-center gap-0.5 text-gray-400" id="mob-profile">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+        </svg>
+        <span class="text-[10px] font-medium">Profile</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="h-20 md:hidden"></div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+
+      document.querySelectorAll('.sidebar-link[id^="nav-"]').forEach(el => el.classList.remove('active'));
+      const navEl = document.getElementById('nav-' + tab);
+      if (navEl) navEl.classList.add('active');
+
+      document.querySelectorAll('[id^="mob-"]').forEach(el => {
+        el.classList.remove('text-brand-red');
+        el.classList.add('text-gray-400');
+      });
+      const mobEl = document.getElementById('mob-' + tab);
+      if (mobEl) {
+        mobEl.classList.remove('text-gray-400');
+        mobEl.classList.add('text-brand-red');
+      }
+
+      event.preventDefault();
+    }
+
+    function filterTab(btn) {
+      document.querySelectorAll('.filter-btn').forEach(el => {
+        el.classList.remove('text-brand-red', 'border-brand-red');
+        el.classList.add('text-gray-400', 'border-transparent');
+      });
+      btn.classList.remove('text-gray-400', 'border-transparent');
+      btn.classList.add('text-brand-red', 'border-brand-red');
+    }
+  </script>
+
+</body>
+</html>

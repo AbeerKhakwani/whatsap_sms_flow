@@ -16,6 +16,8 @@ const SellerDetail = lazy(() => import('./pages/SellerDetail'));
 const Transactions = lazy(() => import('./pages/Transactions'));
 const Scripts = lazy(() => import('./pages/Scripts'));
 const Settings = lazy(() => import('./pages/Settings'));
+const ListingsManager = lazy(() => import('./pages/ListingsManager'));
+const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
 
 // Store — unified buyer/seller prototype
 const StoreFront  = lazy(() => import('./pages/store/StoreFront'));
@@ -76,7 +78,9 @@ export default function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/sellers" element={<Sellers />} />
                 <Route path="/sellers/:id" element={<SellerDetail />} />
+                <Route path="/listings" element={<ListingsManager />} />
                 <Route path="/transactions" element={<Transactions />} />
+                <Route path="/activity" element={<ActivityFeed />} />
                 <Route path="/scripts" element={<Scripts />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>

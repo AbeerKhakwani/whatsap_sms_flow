@@ -3,7 +3,7 @@
 // Also handles Shopify order webhooks
 
 import crypto from 'crypto';
-import { getProduct, updateProduct, fulfillOrder } from '../lib/shopify.js';
+import { getProduct, updateProduct, fulfillOrder, createDraftOrder } from '../lib/shopify.js';
 import { validateUpdate } from '../lib/security.js';
 import { getShippingLabel, getShippingInstructions, WAREHOUSE_ADDRESS } from '../lib/shipping.js';
 import { getSellerMessages } from '../lib/messages.js';
@@ -315,9 +315,39 @@ export default async function handler(req, res) {
           );
         }
 
-        // If price changed, update pricing metafields
+        // If price changed, update pricing metafields + notify admin + sync Supabase
         if (safeData.price !== undefined) {
-          await updatePricingMetafields(productId, safeData.price, seller.commission_rate || 18);
+          const { commissionRate, askingPrice, payout, listingFee } = await updatePricingMetafields(productId, safeData.price, seller.commission_rate || 18);
+
+          // Notify admin of price change + log to messages (sellerId = logged to activity feed)
+          const newListingPrice = parseFloat(safeData.price);
+          await sendEmail({
+            sellerId: seller.id,
+            to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
+            subject: `Price updated: ${product.title}`,
+            html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px;">
+              <h3>Seller Updated Listing Price</h3>
+              <p><strong>${seller.name || seller.email}</strong> changed the price of <strong>${product.title}</strong>.</p>
+              <table style="border-collapse:collapse;width:100%">
+                <tr><td style="padding:6px 12px;color:#888;">New listing price</td><td style="padding:6px 12px;font-weight:bold;">$${newListingPrice.toFixed(2)}</td></tr>
+                <tr><td style="padding:6px 12px;color:#888;">Shipping fee</td><td style="padding:6px 12px;">$${listingFee.toFixed(2)}</td></tr>
+                <tr><td style="padding:6px 12px;color:#888;">Seller asking</td><td style="padding:6px 12px;">$${askingPrice.toFixed(2)}</td></tr>
+                <tr><td style="padding:6px 12px;color:#888;">Commission</td><td style="padding:6px 12px;">${commissionRate}%</td></tr>
+                <tr><td style="padding:6px 12px;color:#888;"><strong>Seller payout</strong></td><td style="padding:6px 12px;color:#16a34a;font-weight:bold;">$${payout.toFixed(2)}</td></tr>
+              </table>
+            </div>`,
+            context: 'price_updated',
+            metadata: { productId, productTitle: product.title, newPrice: newListingPrice, payout, commissionRate }
+          }).catch(e => console.error('Admin price-change email failed:', e.message));
+
+          // Sync Supabase listings table with new pricing
+          await supabase.from('listings').update({
+            asking_price: askingPrice,
+            listing_price: newListingPrice,
+            updated_at: new Date().toISOString()
+          }).eq('shopify_product_id', productId.toString()).catch(e => {
+            console.error('Listings table sync failed (non-fatal):', e.message);
+          });
         }
       }
 
@@ -334,10 +364,12 @@ export default async function handler(req, res) {
         const revisedTags = [...productTags.filter(t => t !== 'needs-revision'), 'seller-revised'];
         await updateProduct(productId, { tags: revisedTags.join(', ') });
         await sendEmail({
+          sellerId: seller.id,
           to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
           subject: `Seller revised listing: ${product.title}`,
           html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px;"><h3 style="color:#2563eb;">Listing Updated by Seller</h3><p><strong>${seller.name || seller.email}</strong> has updated their listing <strong>${product.title}</strong> after your revision request.</p><p>Please re-review it in the admin panel.</p></div>`,
-          context: 'seller_revised'
+          context: 'seller_revised',
+          metadata: { productId, productTitle: product.title }
         });
       }
 
@@ -1382,6 +1414,348 @@ export default async function handler(req, res) {
           createdAt: r.created_at
         }))
       });
+    }
+
+    // ─── OFFER SYSTEM ────────────────────────────────────────────────────────
+
+    // SUBMIT OFFER — buyer submits a bid (public, no auth)
+    if (action === 'submit-offer' && req.method === 'POST') {
+      const { productId, buyerEmail, buyerPhone, amount, note } = req.body;
+
+      if (!productId || !buyerEmail || !amount) {
+        return res.status(400).json({ error: 'productId, buyerEmail, and amount required' });
+      }
+
+      // Fetch product from Shopify to get title, price, image, seller metafields
+      const product = await getProduct(productId);
+      if (!product) return res.status(404).json({ error: 'Product not found' });
+
+      const listingPrice = parseFloat(product.variants?.[0]?.price) || 0;
+      const minBid = listingPrice * 0.5;
+
+      if (parseFloat(amount) < minBid) {
+        return res.status(400).json({ error: `Minimum bid is $${minBid.toFixed(2)} (50% of listing price)` });
+      }
+      if (parseFloat(amount) >= listingPrice) {
+        return res.status(400).json({ error: `Bid must be less than the listing price of $${listingPrice.toFixed(2)}` });
+      }
+
+      // Get seller from metafields
+      const { fetchMetafields: fm, getSellerEmail: gse, getSellerId: gsi } = await import('../lib/shopify-metafields.js');
+      const metafields = await fm(productId);
+      const sellerEmail = gse(metafields);
+      const sellerId = gsi(metafields);
+
+      let seller = null;
+      if (sellerId) {
+        const { data } = await supabase.from('sellers').select('id, name, email, phone').eq('id', sellerId).single();
+        seller = data;
+      }
+      if (!seller && sellerEmail) {
+        const { data } = await supabase.from('sellers').select('id, name, email, phone').ilike('email', sellerEmail).single();
+        seller = data;
+      }
+
+      const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+      // Insert offer
+      const { data: offer, error: offerErr } = await supabase.from('offers').insert({
+        product_id: productId.toString(),
+        product_title: product.title,
+        product_image: product.images?.[0]?.src || null,
+        listing_price: listingPrice,
+        seller_id: seller?.id || null,
+        buyer_email: buyerEmail.toLowerCase(),
+        buyer_phone: buyerPhone || null,
+        amount: parseFloat(amount),
+        note: note || null,
+        status: 'pending',
+        counter_round: 0,
+        last_action_by: 'buyer',
+        history: JSON.stringify([{ by: 'buyer', amount: parseFloat(amount), note: note || null, at: new Date().toISOString() }]),
+        expires_at: expiresAt
+      }).select().single();
+
+      if (offerErr) return res.status(400).json({ error: offerErr.message });
+
+      // Notify seller — WhatsApp + email (no buyer info shown)
+      const dashboardUrl = `https://sell.thephirstory.com/seller`;
+      if (seller) {
+        // WhatsApp
+        if (seller.phone) {
+          // template: new_offer_received ({{1}}=name, {{2}}=title, {{3}}=offer $, {{4}}=listed $)
+          await sendWhatsApp({
+            sellerId: seller.id,
+            to: seller.phone,
+            template: 'new_offer_received',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: product.title },
+                  { type: 'text', text: parseFloat(amount).toFixed(2) },
+                  { type: 'text', text: listingPrice.toFixed(2) }
+                ]
+              }
+            ],
+            context: 'new_offer',
+            metadata: { offerId: offer.id, productId, amount }
+          });
+        }
+        // Email
+        if (seller.email) {
+          await sendEmail({
+            sellerId: seller.id,
+            to: seller.email,
+            subject: `New bid on "${product.title}"`,
+            html: `<p>Hi ${seller.name || 'there'},</p>
+              <p>You received a new bid on your listing <strong>${product.title}</strong>.</p>
+              <table style="border:1px solid #eee;border-radius:8px;padding:12px;margin:16px 0;">
+                <tr><td style="color:#888">Offer amount</td><td><strong>$${parseFloat(amount).toFixed(2)}</strong></td></tr>
+                <tr><td style="color:#888">Listed price</td><td>$${listingPrice.toFixed(2)}</td></tr>
+                <tr><td style="color:#888">Expires</td><td>48 hours</td></tr>
+              </table>
+              <p><a href="${dashboardUrl}" style="background:#18181b;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Accept / Reject / Counter →</a></p>
+              <p style="color:#888;font-size:12px;">Buyer contact details are not shared — all transactions go through The Phir Story.</p>`,
+            context: 'new_offer',
+            metadata: { offerId: offer.id }
+          });
+        }
+      }
+
+      return res.status(200).json({ success: true, offerId: offer.id, expiresAt });
+    }
+
+    // RESPOND TO OFFER — seller accepts/rejects/counters (from dashboard or WA parsing)
+    if (action === 'respond-offer' && req.method === 'POST') {
+      const { offerId, response: resp, counterAmount, sellerId: respSellerId } = req.body;
+
+      if (!offerId || !resp) return res.status(400).json({ error: 'offerId and response required' });
+      if (!['accept', 'reject', 'counter'].includes(resp)) {
+        return res.status(400).json({ error: 'response must be accept, reject, or counter' });
+      }
+      if (resp === 'counter' && !counterAmount) {
+        return res.status(400).json({ error: 'counterAmount required for counter' });
+      }
+
+      const { data: offer, error: fetchErr } = await supabase
+        .from('offers').select('*').eq('id', offerId).single();
+
+      if (fetchErr || !offer) return res.status(404).json({ error: 'Offer not found' });
+      if (!['pending', 'countered'].includes(offer.status)) {
+        return res.status(400).json({ error: `Offer is already ${offer.status}` });
+      }
+      if (resp === 'counter' && offer.counter_round >= 3) {
+        return res.status(400).json({ error: 'Maximum counter rounds reached. Must accept or reject.' });
+      }
+
+      const history = Array.isArray(offer.history) ? offer.history : JSON.parse(offer.history || '[]');
+      const now = new Date().toISOString();
+
+      if (resp === 'reject') {
+        await supabase.from('offers').update({
+          status: 'rejected', responded_at: now, last_action_by: 'seller', updated_at: now
+        }).eq('id', offerId);
+
+        // Notify buyer via email
+        await sendEmail({
+          to: offer.buyer_email,
+          subject: `Your offer on "${offer.product_title}" was not accepted`,
+          html: `<p>Hi there,</p><p>Unfortunately the seller did not accept your offer of <strong>$${offer.amount}</strong> on <strong>${offer.product_title}</strong>.</p><p>The listing may still be available at the full price.</p>`,
+          context: 'offer_rejected'
+        });
+
+        return res.status(200).json({ success: true, status: 'rejected' });
+      }
+
+      if (resp === 'accept') {
+        // Create Shopify draft order at agreed price
+        let checkoutUrl = null;
+        let draftOrderId = null;
+        try {
+          const product = await getProduct(offer.product_id);
+          const variantId = product?.variants?.[0]?.id;
+          if (variantId) {
+            const draft = await createDraftOrder({
+              variantId,
+              price: offer.amount,
+              buyerEmail: offer.buyer_email,
+              productTitle: offer.product_title,
+              offerId: offer.id
+            });
+            checkoutUrl = draft.invoiceUrl;
+            draftOrderId = draft.id;
+          }
+        } catch (draftErr) {
+          console.error('Draft order failed:', draftErr.message);
+        }
+
+        const checkoutExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+        await supabase.from('offers').update({
+          status: 'accepted', responded_at: now, accepted_at: now,
+          last_action_by: 'seller', checkout_url: checkoutUrl,
+          draft_order_id: draftOrderId?.toString(),
+          checkout_expires_at: checkoutExpiry, updated_at: now,
+          history: JSON.stringify([...history, { by: 'seller', action: 'accepted', amount: offer.amount, at: now }])
+        }).eq('id', offerId);
+
+        // Auto-reject other pending offers on same product
+        const { data: otherOffers } = await supabase.from('offers')
+          .select('id, buyer_email, product_title')
+          .eq('product_id', offer.product_id)
+          .in('status', ['pending', 'countered'])
+          .neq('id', offerId);
+
+        if (otherOffers?.length) {
+          await supabase.from('offers').update({ status: 'rejected', updated_at: now })
+            .in('id', otherOffers.map(o => o.id));
+          // Notify other buyers
+          for (const o of otherOffers) {
+            await sendEmail({
+              to: o.buyer_email,
+              subject: `Your offer on "${o.product_title}" is no longer available`,
+              html: `<p>Hi there,</p><p>Unfortunately this item is no longer available — another offer was accepted first.</p>`,
+              context: 'offer_outbid'
+            });
+          }
+        }
+
+        // Notify winning buyer
+        await sendEmail({
+          to: offer.buyer_email,
+          subject: `Your offer was accepted! Complete your purchase`,
+          html: `<p>Great news! Your offer of <strong>$${offer.amount}</strong> on <strong>${offer.product_title}</strong> was accepted.</p>
+            ${checkoutUrl
+              ? `<p><a href="${checkoutUrl}" style="background:#18181b;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;font-size:16px;">Complete Purchase →</a></p><p style="color:#888;font-size:12px;">This link expires in 24 hours.</p>`
+              : `<p>Our team will send you a payment link shortly.</p>`
+            }`,
+          context: 'offer_accepted'
+        });
+
+        // Notify buyer via WhatsApp — template: offer_accepted_buyer ({{1}}=amount, {{2}}=title)
+        if (offer.buyer_phone) {
+          await sendWhatsApp({
+            to: offer.buyer_phone,
+            template: 'offer_accepted_buyer',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: String(offer.amount) },
+                  { type: 'text', text: offer.product_title }
+                ]
+              }
+            ],
+            context: 'offer_accepted'
+          });
+        }
+
+        return res.status(200).json({ success: true, status: 'accepted', checkoutUrl });
+      }
+
+      if (resp === 'counter') {
+        const newAmount = parseFloat(counterAmount);
+        const newRound = offer.counter_round + 1;
+
+        await supabase.from('offers').update({
+          status: 'countered', amount: newAmount, counter_round: newRound,
+          last_action_by: 'seller', responded_at: now, updated_at: now,
+          history: JSON.stringify([...history, { by: 'seller', action: 'counter', amount: newAmount, at: now }])
+        }).eq('id', offerId);
+
+        const roundsLeft = 3 - newRound;
+
+        // Notify buyer of counter
+        await sendEmail({
+          to: offer.buyer_email,
+          subject: `Counter offer on "${offer.product_title}"`,
+          html: `<p>The seller has countered your offer on <strong>${offer.product_title}</strong>.</p>
+            <table style="border:1px solid #eee;border-radius:8px;padding:12px;margin:16px 0;">
+              <tr><td style="color:#888">Your offer</td><td><strong>$${offer.amount}</strong></td></tr>
+              <tr><td style="color:#888">Counter offer</td><td><strong>$${newAmount.toFixed(2)}</strong></td></tr>
+              ${roundsLeft > 0 ? `<tr><td style="color:#888">Rounds remaining</td><td>${roundsLeft}</td></tr>` : '<tr><td colspan="2" style="color:#e67e22">This is the final counter — you must accept or reject.</td></tr>'}
+            </table>
+            <p>Reply to this email or visit our store to respond. We'll add a direct link here soon.</p>`,
+          context: 'offer_countered'
+        });
+
+        // template: offer_countered_buyer ({{1}}=title, {{2}}=original $, {{3}}=counter $)
+        if (offer.buyer_phone) {
+          await sendWhatsApp({
+            to: offer.buyer_phone,
+            template: 'offer_countered_buyer',
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: offer.product_title },
+                  { type: 'text', text: String(offer.amount) },
+                  { type: 'text', text: newAmount.toFixed(2) }
+                ]
+              }
+            ],
+            context: 'offer_countered'
+          });
+        }
+
+        return res.status(200).json({ success: true, status: 'countered', counterAmount: newAmount, roundsLeft });
+      }
+    }
+
+    // GET OFFERS FOR SELLER — seller views their incoming offers
+    if (action === 'get-offers' && req.method === 'GET') {
+      const { sellerId: qSellerId, email: qEmail } = req.query;
+
+      let sellerId = qSellerId;
+      if (!sellerId && qEmail) {
+        const { data: s } = await supabase.from('sellers').select('id').ilike('email', qEmail).single();
+        sellerId = s?.id;
+      }
+      if (!sellerId) return res.status(400).json({ error: 'sellerId or email required' });
+
+      const { data: offers } = await supabase
+        .from('offers')
+        .select('id, product_id, product_title, product_image, listing_price, amount, status, counter_round, last_action_by, history, checkout_url, expires_at, responded_at, created_at')
+        .eq('seller_id', sellerId)
+        .order('created_at', { ascending: false });
+
+      return res.status(200).json({ success: true, offers: offers || [] });
+    }
+
+    // GET ALL OFFERS — admin view
+    if (action === 'all-offers' && req.method === 'GET') {
+      const statusFilter = req.query.status;
+      let query = supabase.from('offers')
+        .select('id, product_id, product_title, product_image, listing_price, amount, status, counter_round, last_action_by, history, checkout_url, checkout_expires_at, expires_at, responded_at, accepted_at, created_at, seller_id, buyer_email')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (statusFilter) query = query.eq('status', statusFilter);
+
+      const { data: offers } = await query;
+
+      // Enrich with seller names (without exposing buyer details beyond email to admin)
+      const sellerIds = [...new Set((offers || []).map(o => o.seller_id).filter(Boolean))];
+      const { data: sellers } = await supabase.from('sellers').select('id, name, email').in('id', sellerIds.length ? sellerIds : ['none']);
+      const sellersById = Object.fromEntries((sellers || []).map(s => [s.id, s]));
+
+      const enriched = (offers || []).map(o => ({
+        ...o,
+        seller: sellersById[o.seller_id] || null
+      }));
+
+      const stats = {
+        total: enriched.length,
+        pending: enriched.filter(o => o.status === 'pending').length,
+        countered: enriched.filter(o => o.status === 'countered').length,
+        accepted: enriched.filter(o => o.status === 'accepted').length,
+        rejected: enriched.filter(o => o.status === 'rejected').length,
+        totalAcceptedValue: enriched.filter(o => o.status === 'accepted').reduce((s, o) => s + (o.amount || 0), 0)
+      };
+
+      return res.status(200).json({ success: true, offers: enriched, stats });
     }
 
     return res.status(400).json({ error: 'Invalid action' });

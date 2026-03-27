@@ -165,6 +165,16 @@ export default async function handler(req, res) {
       // Generate token
       const token = generateSellerToken(seller);
 
+      // Track last dashboard login
+      try {
+        await supabase
+          .from('sellers')
+          .update({ last_dashboard_login: new Date().toISOString() })
+          .eq('id', seller.id);
+      } catch (loginErr) {
+        console.error('Login tracking error (non-fatal):', loginErr);
+      }
+
       return res.status(200).json({
         success: true,
         token,
@@ -194,7 +204,7 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Invalid token' });
       }
 
-      // Get fresh seller data
+      // Get fresh seller data and update last login
       const { data: seller } = await supabase
         .from('sellers')
         .select('*')
@@ -203,6 +213,16 @@ export default async function handler(req, res) {
 
       if (!seller) {
         return res.status(401).json({ error: 'Seller not found' });
+      }
+
+      // Track last dashboard login
+      try {
+        await supabase
+          .from('sellers')
+          .update({ last_dashboard_login: new Date().toISOString() })
+          .eq('id', seller.id);
+      } catch (loginErr) {
+        console.error('Login tracking error (non-fatal):', loginErr);
       }
 
       return res.status(200).json({
