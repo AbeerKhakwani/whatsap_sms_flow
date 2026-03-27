@@ -86,6 +86,12 @@ export default function SellerProfile() {
     account: ''
   });
 
+  // Sync activeTab when URL search params change (e.g. bottom nav taps while already on /seller/profile)
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab) setActiveTab(tab);
+  }, [searchParams]);
+
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
