@@ -628,7 +628,7 @@ export default function SellerProfile() {
     setEditingListing(listing);
     setEditForm({
       title: listing.title,
-      price: listing.price,
+      price: listing.sellerAskingPrice || listing.price,
       condition: listing.condition || '',
       description: listing.description || ''
     });
@@ -674,7 +674,7 @@ export default function SellerProfile() {
           email: seller?.email,
           productId: editingListing.id,
           title: editForm.title,
-          price: parseFloat(editForm.price),
+          askingPrice: parseFloat(editForm.price),
           condition: editForm.condition,
           description: editForm.description
         })
@@ -724,7 +724,7 @@ export default function SellerProfile() {
       setListings(prev =>
         prev.map(l =>
           l.id === editingListing.id
-            ? { ...l, title: editForm.title, price: parseFloat(editForm.price), condition: editForm.condition, description: editForm.description, images: finalImages, image: finalImages[0]?.src || l.image }
+            ? { ...l, title: editForm.title, sellerAskingPrice: data.listing?.sellerAskingPrice ?? parseFloat(editForm.price), sellerPayout: data.listing?.sellerPayout ?? l.sellerPayout, condition: editForm.condition, description: editForm.description, images: finalImages, image: finalImages[0]?.src || l.image }
             : l
         )
       );
@@ -865,12 +865,12 @@ export default function SellerProfile() {
                     </div>
                     {listing.isSold ? (
                       <div className="mt-2 flex items-center gap-4 text-xs">
-                        <span className="text-gray-500">Sold for: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span></span>
+                        <span className="text-gray-500">Sold for: <span className="font-medium text-gray-700">${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}</span></span>
                         <span className="text-green-600 font-medium">You earned: ${listing.sellerPayout?.toFixed(2)}</span>
                       </div>
                     ) : (
                       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
-                        <span className="text-gray-500">Listed: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span></span>
+                        <span className="text-gray-500">Your price: <span className="font-medium text-gray-700">${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}</span></span>
                         <span className="text-gray-500">You'll get: <span className="font-medium text-green-600">${listing.sellerPayout?.toFixed(2)}</span></span>
                       </div>
                     )}
