@@ -1331,15 +1331,24 @@ export default async function handler(req, res) {
         for (const s of sellers || []) sellerMap[s.id] = s;
       }
 
-      const activity = (messages || []).map(m => ({
-        id: m.id,
-        context: m.context,
-        seller: sellerMap[m.seller_id] || null,
-        content: m.content,
-        subject: m.subject,
-        metadata: m.metadata,
-        createdAt: m.created_at
-      }));
+      // Deduplicate: one entry per (seller, context, productId, minute) — WA + email both log the same event
+      const seen = new Set();
+      const activity = (messages || []).reduce((acc, m) => {
+        const productId = m.metadata?.productId || m.metadata?.shopifyProductId || '';
+        const key = `${m.seller_id}|${m.context}|${productId}|${(m.created_at || '').slice(0, 16)}`;
+        if (seen.has(key)) return acc;
+        seen.add(key);
+        acc.push({
+          id: m.id,
+          context: m.context,
+          seller: sellerMap[m.seller_id] || null,
+          content: m.content,
+          subject: m.subject,
+          metadata: m.metadata,
+          createdAt: m.created_at
+        });
+        return acc;
+      }, []);
 
       return res.status(200).json({ success: true, activity, recentSales: recentSales || [] });
     }
