@@ -393,13 +393,16 @@ export default async function handler(req, res) {
           }).catch(e => console.error('Admin price-change email failed:', e.message));
 
           // Sync Supabase listings table with new pricing
-          await supabase.from('listings').update({
-            asking_price: askingPrice,
-            listing_price: newListingPrice,
-            updated_at: new Date().toISOString()
-          }).eq('shopify_product_id', productId.toString()).catch(e => {
+          try {
+            const { error: syncErr } = await supabase.from('listings').update({
+              asking_price: askingPrice,
+              listing_price: newListingPrice,
+              updated_at: new Date().toISOString()
+            }).eq('shopify_product_id', productId.toString());
+            if (syncErr) console.error('Listings table sync failed (non-fatal):', syncErr.message);
+          } catch (e) {
             console.error('Listings table sync failed (non-fatal):', e.message);
-          });
+          }
         }
       }
 
