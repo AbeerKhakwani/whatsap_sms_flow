@@ -4,6 +4,7 @@ import { lazy, Suspense } from 'react';
 // Eager load - needed immediately
 import SellerLogin from './pages/seller/SellerLogin';
 import SellerDashboard from './pages/seller/SellerDashboard';
+import SellerDashboardPreview from './pages/seller/SellerDashboardPreview';
 
 // Lazy load - only when needed
 const SellerSubmit = lazy(() => import('./pages/seller/SellerSubmit'));
@@ -56,6 +57,7 @@ export default function App() {
 
           {/* Legacy seller routes (redirect-friendly) */}
           <Route path="/seller" element={<SellerDashboard />} />
+          <Route path="/seller/preview" element={<SellerDashboardPreview />} />
           <Route path="/seller/login" element={<SellerLogin />} />
           <Route path="/seller/submit" element={<SellerSubmit />} />
           <Route path="/seller/profile" element={<SellerProfile />} />

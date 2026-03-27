@@ -1,10 +1,52 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink, LogOut, ChevronRight, X, Plus, Camera, Trash2, RotateCcw, XCircle, Home, User, MapPin, Loader2, ArrowUpDown, AlertCircle } from 'lucide-react';
+import {
+  Package, DollarSign, Clock, CheckCircle, Edit2, ExternalLink,
+  ChevronRight, X, Plus, Trash2, RotateCcw, XCircle,
+  Loader2, ArrowUpDown, AlertCircle, Camera, MapPin
+} from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
 import SellerLayout from './SellerLayout';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+
+// Parse revision fields — uses explicit array from admin if available, else regex fallback
+function parseRevisionNeeds(note, fields) {
+  if (fields?.length) {
+    return {
+      photos:       fields.includes('photos'),
+      price:        fields.includes('price'),
+      designer:     fields.includes('designer'),
+      measurements: fields.includes('measurements'),
+      description:  fields.includes('description'),
+      title:        fields.includes('title'),
+    };
+  }
+  return {
+    photos:       /photo|image|picture|tag|clearer|more pic/i.test(note),
+    price:        /price|cost|amount|\$|pricing/i.test(note),
+    designer:     /designer|brand|label|vendor/i.test(note),
+    measurements: /measurement|size|dimension|fit/i.test(note),
+    description:  /description|detail|condition|material/i.test(note),
+    title:        /title|name|rename/i.test(note),
+  };
+}
+
+function daysLeft(deadline) {
+  if (!deadline) return null;
+  const diff = new Date(deadline) - new Date();
+  if (diff <= 0) return 0;
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function StatusBadge({ listing }) {
+  if (listing.isSold) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 uppercase tracking-wide">Sold</span>;
+  if (listing.tags?.includes('needs-revision')) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 uppercase tracking-wide">Action Required</span>;
+  if (listing.tags?.includes('seller-revised')) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700 uppercase tracking-wide">Under Review</span>;
+  if (listing.tags?.includes('delisted')) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500 uppercase tracking-wide">Delisted</span>;
+  if (listing.status === 'active') return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 uppercase tracking-wide">Live</span>;
+  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-100 text-yellow-700 uppercase tracking-wide">Pending Review</span>;
+}
 
 export default function SellerDashboard() {
   const navigate = useNavigate();
@@ -15,6 +57,12 @@ export default function SellerDashboard() {
   const [soldProducts, setSoldProducts] = useState([]);
   const [rejectedListings, setRejectedListings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [offers, setOffers] = useState([]);
+  const [counterInputs, setCounterInputs] = useState({});
+  const [respondingOffer, setRespondingOffer] = useState(null);
+  const [togglingStatus, setTogglingStatus] = useState(null);
+
+  // Edit modal state
   const [editingListing, setEditingListing] = useState(null);
   const [editForm, setEditForm] = useState({ title: '', price: '', condition: '', description: '' });
   const [existingImages, setExistingImages] = useState([]);
@@ -22,112 +70,75 @@ export default function SellerDashboard() {
   const [newPhotos, setNewPhotos] = useState([]);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
-  const [togglingStatus, setTogglingStatus] = useState(null); // productId being toggled
-  const [offers, setOffers] = useState([]);
-  const [counterInputs, setCounterInputs] = useState({}); // offerId -> amount string
-  const [respondingOffer, setRespondingOffer] = useState(null); // offerId being responded to
   const photoInputRef = useRef(null);
 
-  // Address modal state
+  // Revision edit modal state
+  const [revisionListing, setRevisionListing] = useState(null);
+  const [revisionForm, setRevisionForm] = useState({ price: '', designer: '', title: '', measurements: '', description: '' });
+  const [revisionPhotos, setRevisionPhotos] = useState([]);
+  const [submittingRevision, setSubmittingRevision] = useState(false);
+  const revisionPhotoRef = useRef(null);
+
+  // Address modal
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
-  const [shippingAddress, setShippingAddress] = useState({
-    full_name: '',
-    street_address: '',
-    city: '',
-    state: '',
-    postal_code: '',
-    country: 'USA'
-  });
+  const [shippingAddress, setShippingAddress] = useState({ full_name: '', street_address: '', city: '', state: '', postal_code: '', country: 'USA' });
 
   useEffect(() => {
     const token = localStorage.getItem('seller_token');
     const storedEmail = localStorage.getItem('seller_email');
-
-    // If no token, redirect to login
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-
-    // Verify token with API
+    if (!token) { navigate('/login'); return; }
     verifyAndFetch(token, storedEmail);
   }, [navigate]);
 
-  async function verifyAndFetch(token, storedEmail) {
-    try {
-      // Verify token
-      const authRes = await fetch(`${API_URL}/api/auth`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ action: 'verify-token' })
-      });
-
-      const authData = await authRes.json();
-
-      if (!authRes.ok || !authData.success) {
-        // Token invalid - redirect to login
-        localStorage.removeItem('seller_token');
-        localStorage.removeItem('seller_email');
-        navigate('/login');
-        return;
-      }
-
-      // Use email from token verification
-      const sellerEmail = authData.seller.email || storedEmail;
-      setEmail(sellerEmail);
-      setSeller(authData.seller);
-
-      // Show address modal if user doesn't have an address
-      if (!authData.seller.has_address) {
-        setShowAddressModal(true);
-      }
-
-      // Fetch listings + offers
-      fetchListings(sellerEmail);
-      if (authData.seller?.id) fetchOffers(authData.seller.id);
-    } catch (error) {
-      console.error('Auth error:', error);
-      navigate('/login');
-    }
-  }
-
   function applyListingsData(data) {
-    setListings(data.listings);
-    setStats(data.stats);
+    setListings(data.listings || []);
+    setStats(data.stats || { total: 0, draft: 0, active: 0, sold: 0 });
     setSeller(data.seller);
     setSoldProducts(data.soldProducts || []);
     setRejectedListings(data.rejectedListings || []);
   }
 
+  async function verifyAndFetch(token, storedEmail) {
+    try {
+      const authRes = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ action: 'verify-token' })
+      });
+      const authData = await authRes.json();
+      if (!authRes.ok || !authData.success) {
+        localStorage.removeItem('seller_token');
+        localStorage.removeItem('seller_email');
+        navigate('/login');
+        return;
+      }
+      const sellerEmail = authData.seller.email || storedEmail;
+      setEmail(sellerEmail);
+      setSeller(authData.seller);
+      if (!authData.seller.has_address) setShowAddressModal(true);
+      fetchListings(sellerEmail);
+      if (authData.seller?.id) fetchOffers(authData.seller.id);
+    } catch {
+      navigate('/login');
+    }
+  }
+
   async function fetchListings(sellerEmail) {
     const cacheKey = `listings_cache_${sellerEmail}`;
-
-    // Show stale data instantly while fetching fresh
     try {
       const cached = localStorage.getItem(cacheKey);
-      if (cached) {
-        applyListingsData(JSON.parse(cached));
-        setLoading(false);
-      }
+      if (cached) { applyListingsData(JSON.parse(cached)); setLoading(false); }
     } catch {}
-
     try {
-      const response = await fetch(`/api/seller?action=listings&email=${encodeURIComponent(sellerEmail)}`);
-      const data = await response.json();
-
+      const res = await fetch(`/api/seller?action=listings&email=${encodeURIComponent(sellerEmail)}`);
+      const data = await res.json();
       if (data.success) {
         applyListingsData(data);
         try { localStorage.setItem(cacheKey, JSON.stringify(data)); } catch {}
       }
-    } catch (error) {
-      console.error('Error fetching listings:', error);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   }
 
   async function fetchOffers(sellerId) {
@@ -148,14 +159,10 @@ export default function SellerDashboard() {
       });
       const d = await r.json();
       if (d.success) {
-        setOffers(prev => prev.map(o => o.id === offerId ? { ...o, status: d.status, amount: d.counterAmount || o.amount, counter_round: (o.counter_round || 0) + (response === 'counter' ? 1 : 0) } : o));
+        setOffers(prev => prev.map(o => o.id === offerId ? { ...o, status: d.status, amount: d.counterAmount || o.amount } : o));
         setCounterInputs(prev => { const n = { ...prev }; delete n[offerId]; return n; });
-      } else {
-        alert(d.error || 'Failed to respond');
       }
-    } catch (e) {
-      alert('Error: ' + e.message);
-    }
+    } catch {}
     setRespondingOffer(null);
   }
 
@@ -167,1047 +174,639 @@ export default function SellerDashboard() {
 
   function openEditModal(listing) {
     setEditingListing(listing);
-    setEditForm({
-      title: listing.title,
-      price: listing.price,
-      condition: listing.condition || '',
-      description: listing.description || ''
-    });
+    // Show seller's asking price (not the Shopify price which includes the $10 platform fee)
+    setEditForm({ title: listing.title, price: listing.sellerAskingPrice || listing.price, condition: listing.condition || '', description: listing.description || '' });
     setExistingImages(listing.images || []);
     setImagesToDelete([]);
     setNewPhotos([]);
     setUploadProgress('');
   }
 
-  function handlePhotoSelect(e) {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
+  function openRevisionModal(listing) {
+    setRevisionListing(listing);
+    // Pre-fill with seller's asking price (not the Shopify price with fee)
+    setRevisionForm({ price: listing.sellerAskingPrice || listing.price || '', designer: listing.designer || '', title: listing.title || '', measurements: '', description: listing.description || '' });
+    setRevisionPhotos([]);
+  }
 
-    files.forEach(file => {
+  function handlePhotoSelect(e) {
+    Array.from(e.target.files).forEach(file => {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        setNewPhotos(prev => [...prev, {
-          preview: e.target.result,
-          file,
-          base64: e.target.result.split(',')[1]
-        }]);
-      };
+      reader.onload = ev => setNewPhotos(prev => [...prev, { preview: ev.target.result, file, base64: ev.target.result.split(',')[1] }]);
       reader.readAsDataURL(file);
     });
   }
 
-  function removeNewPhoto(index) {
-    setNewPhotos(prev => prev.filter((_, i) => i !== index));
-  }
-
-  function markImageForDeletion(image) {
-    setImagesToDelete(prev => [...prev, image]);
-    setExistingImages(prev => prev.filter(img => img.id !== image.id));
+  function handleRevisionPhotoSelect(e) {
+    Array.from(e.target.files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = ev => setRevisionPhotos(prev => [...prev, { preview: ev.target.result, file, base64: ev.target.result.split(',')[1] }]);
+      reader.readAsDataURL(file);
+    });
   }
 
   async function handleSaveEdit() {
     if (!editingListing) return;
     setSaving(true);
-
     try {
-      // Save listing details
-      const response = await fetch('/api/seller?action=update', {
+      const res = await fetch('/api/seller?action=update', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          productId: editingListing.id,
-          title: editForm.title,
-          price: parseFloat(editForm.price),
-          condition: editForm.condition,
-          description: editForm.description
-        })
+        body: JSON.stringify({ email, productId: editingListing.id, title: editForm.title, askingPrice: parseFloat(editForm.price), condition: editForm.condition, description: editForm.description })
       });
+      const data = await res.json();
+      if (!data.success) { alert(data.error || 'Failed to save'); setSaving(false); return; }
 
-      const data = await response.json();
-
-      if (!data.success) {
-        alert(data.error || 'Failed to save');
-        setSaving(false);
-        return;
-      }
-
-      // Delete images marked for deletion
       if (imagesToDelete.length > 0) {
         for (let i = 0; i < imagesToDelete.length; i++) {
-          setUploadProgress(`Removing photo ${i + 1} of ${imagesToDelete.length}...`);
-          try {
-            await fetch('/api/product-image?action=delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                productId: editingListing.id,
-                imageId: imagesToDelete[i].id
-              })
-            });
-          } catch (err) {
-            console.error('Photo delete error:', err);
-          }
+          setUploadProgress(`Removing photo ${i+1}...`);
+          await fetch('/api/product-image?action=delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: editingListing.id, imageId: imagesToDelete[i].id }) }).catch(() => {});
         }
       }
-
-      // Upload new photos if any
       const finalImages = [...existingImages];
       if (newPhotos.length > 0) {
         for (let i = 0; i < newPhotos.length; i++) {
-          setUploadProgress(`Uploading photo ${i + 1} of ${newPhotos.length}...`);
-          try {
-            const photoRes = await fetch('/api/product-image?action=add', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                productId: editingListing.id,
-                base64: newPhotos[i].base64,
-                filename: newPhotos[i].file?.name || `photo-${i + 1}.jpg`
-              })
-            });
-            const photoData = await photoRes.json();
-            if (photoData.success) {
-              finalImages.push({ id: photoData.imageId, src: newPhotos[i].preview });
-            }
-          } catch (err) {
-            console.error('Photo upload error:', err);
-          }
+          setUploadProgress(`Uploading photo ${i+1} of ${newPhotos.length}...`);
+          const pRes = await fetch('/api/product-image?action=add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: editingListing.id, base64: newPhotos[i].base64, filename: newPhotos[i].file?.name || `photo-${i}.jpg` }) }).catch(() => ({ json: async () => ({}) }));
+          const pData = await pRes.json();
+          if (pData.success) finalImages.push({ id: pData.imageId, src: newPhotos[i].preview });
+        }
+      }
+      setListings(prev => prev.map(l => l.id === editingListing.id ? { ...l, title: editForm.title, sellerAskingPrice: parseFloat(editForm.price), condition: editForm.condition, description: editForm.description, images: finalImages, image: finalImages[0]?.src || l.image } : l));
+      setEditingListing(null);
+      setUploadProgress('');
+    } catch { alert('Something went wrong'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleSubmitRevision() {
+    if (!revisionListing) return;
+    const reqs = parseRevisionNeeds(revisionListing.revisionNote || '', revisionListing.revisionFields);
+    setSubmittingRevision(true);
+
+    try {
+      // Upload any new photos first
+      if (revisionPhotos.length > 0) {
+        for (let i = 0; i < revisionPhotos.length; i++) {
+          setUploadProgress(`Uploading photo ${i+1} of ${revisionPhotos.length}...`);
+          await fetch('/api/product-image?action=add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: revisionListing.id, base64: revisionPhotos[i].base64, filename: revisionPhotos[i].file?.name || `photo-${i}.jpg` }) }).catch(() => {});
         }
       }
 
-      // Update local state
-      setListings(prev =>
-        prev.map(l =>
-          l.id === editingListing.id
-            ? {
-                ...l,
-                title: editForm.title,
-                price: parseFloat(editForm.price),
-                condition: editForm.condition,
-                description: editForm.description,
-                images: finalImages,
-                image: finalImages[0]?.src || l.image
-              }
-            : l
-        )
-      );
-      setEditingListing(null);
-      setUploadProgress('');
-    } catch (error) {
-      alert('Something went wrong');
-    } finally {
-      setSaving(false);
-    }
+      // Build update payload from filled fields
+      const updatePayload = { email, productId: revisionListing.id };
+      if (reqs.price && revisionForm.price) updatePayload.askingPrice = parseFloat(revisionForm.price);
+      if (reqs.title && revisionForm.title) updatePayload.title = revisionForm.title;
+      if (reqs.description && revisionForm.description) updatePayload.description = revisionForm.description;
+      if (reqs.designer && revisionForm.designer) updatePayload.designer = revisionForm.designer;
+      if (reqs.measurements && revisionForm.measurements) updatePayload.measurements = revisionForm.measurements;
+
+      const res = await fetch('/api/seller?action=update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatePayload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Update local listing — flip tag to seller-revised
+        setListings(prev => prev.map(l => {
+          if (l.id !== revisionListing.id) return l;
+          const newTags = [...(l.tags || []).filter(t => t !== 'needs-revision'), 'seller-revised'];
+          return { ...l, tags: newTags, revisionNote: null, revisionDeadline: null, ...(updatePayload.askingPrice && { sellerAskingPrice: updatePayload.askingPrice }), ...(updatePayload.title && { title: updatePayload.title }) };
+        }));
+        setRevisionListing(null);
+        setRevisionPhotos([]);
+        setUploadProgress('');
+      } else {
+        alert(data.error || 'Failed to submit update');
+      }
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { setSubmittingRevision(false); }
   }
 
   async function toggleListingStatus(listing) {
     const isDelisted = listing.tags?.includes('delisted');
     const action = isDelisted ? 'relist' : 'delist';
     setTogglingStatus(listing.id);
-
     try {
-      const response = await fetch(`/api/seller?action=${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, productId: listing.id })
-      });
-
-      const data = await response.json();
-
+      const res = await fetch(`/api/seller?action=${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, productId: listing.id }) });
+      const data = await res.json();
       if (data.success) {
-        // Update local state - update status and tags
-        setListings(prev =>
-          prev.map(l => {
-            if (l.id !== listing.id) return l;
-            let newTags;
-            if (action === 'delist') {
-              newTags = [...(l.tags || []).filter(t => t !== 'pending-approval'), 'delisted'];
-            } else {
-              newTags = [...(l.tags || []).filter(t => t !== 'delisted'), 'pending-approval'];
-            }
-            return { ...l, status: data.status, tags: newTags };
-          })
-        );
-
-        // Update stats
-        if (action === 'delist') {
-          setStats(prev => ({ ...prev, active: prev.active - 1 }));
-        } else {
-          setStats(prev => ({ ...prev, draft: prev.draft + 1 }));
-        }
-      } else {
-        alert(`Failed to ${action}: ` + (data.error || 'Unknown error'));
-      }
-    } catch (error) {
-      alert(`Failed to ${action}: ` + error.message);
-    } finally {
-      setTogglingStatus(null);
-    }
-  }
-
-  function isAddressValid() {
-    return shippingAddress.street_address && shippingAddress.city &&
-           shippingAddress.state && shippingAddress.postal_code;
+        setListings(prev => prev.map(l => {
+          if (l.id !== listing.id) return l;
+          const newTags = action === 'delist'
+            ? [...(l.tags || []).filter(t => t !== 'pending-approval'), 'delisted']
+            : [...(l.tags || []).filter(t => t !== 'delisted'), 'pending-approval'];
+          return { ...l, status: data.status, tags: newTags };
+        }));
+      } else { alert(`Failed: ` + (data.error || '')); }
+    } catch (e) { alert(e.message); }
+    setTogglingStatus(null);
   }
 
   async function handleSaveAddress() {
-    if (!isAddressValid()) return;
-
+    if (!shippingAddress.street_address || !shippingAddress.city || !shippingAddress.state || !shippingAddress.postal_code) return;
     setSavingAddress(true);
     try {
-      const res = await fetch(`${API_URL}/api/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'update-address',
-          email,
-          shipping_address: shippingAddress
-        })
-      });
-
+      const res = await fetch(`${API_URL}/api/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update-address', email, shipping_address: shippingAddress }) });
       const data = await res.json();
-      if (data.success) {
-        setSeller({ ...seller, has_address: true, shipping_address: shippingAddress });
-        setShowAddressModal(false);
-      }
-    } catch (err) {
-      console.error('Failed to save address:', err);
-    } finally {
-      setSavingAddress(false);
-    }
+      if (data.success) { setSeller(s => ({ ...s, has_address: true })); setShowAddressModal(false); }
+    } catch {}
+    setSavingAddress(false);
   }
 
-  function getSourceBadge(tags) {
-    const tagList = Array.isArray(tags) ? tags : (tags || '').split(',').map(t => t.trim());
-    const sourceTag = tagList.find(t => t.startsWith('source:'));
-    if (!sourceTag) return null;
-    const source = sourceTag.replace('source:', '');
-    const styles = {
-      portal: 'bg-purple-50 text-purple-600',
-      whatsapp: 'bg-green-50 text-green-600',
-      admin: 'bg-blue-50 text-blue-600',
-      email: 'bg-orange-50 text-orange-600'
-    };
-    const labels = {
-      portal: '🌐 Portal',
-      whatsapp: '💬 WhatsApp',
-      admin: '👤 Admin',
-      email: '📧 Email'
-    };
-    return (
-      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${styles[source] || 'bg-gray-50 text-gray-500'}`}>
-        {labels[source] || source}
-      </span>
-    );
-  }
-
-  function getStatusBadge(listing) {
-    if (listing.isSold) {
-      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Sold</span>;
-    }
-    if (listing.tags?.includes('needs-revision')) {
-      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Action Required</span>;
-    }
-    if (listing.tags?.includes('seller-revised')) {
-      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Under Review</span>;
-    }
-    if (listing.tags?.includes('delisted')) {
-      return <span className="px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">Delisted</span>;
-    }
-    const styles = {
-      draft: 'bg-yellow-100 text-yellow-800',
-      active: 'bg-green-100 text-green-800',
-      archived: 'bg-gray-100 text-gray-800'
-    };
-    const labels = {
-      draft: 'Pending Review',
-      active: 'Live',
-      archived: 'Archived'
-    };
-    return (
-      <span className={`px-2 py-1 rounded-full text-xs font-medium ${styles[listing.status] || styles.draft}`}>
-        {labels[listing.status] || listing.status}
-      </span>
-    );
-  }
+  const needsRevision = listings.filter(l => l.tags?.includes('needs-revision'));
+  const activeLiistings = listings.filter(l => !l.isSold);
+  const pendingOffers = offers.filter(o => o.status === 'pending' || o.status === 'countered');
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <video
-          autoPlay
-          loop
-          muted
-          playsInline
-          className="w-full h-full object-cover"
-        >
-          <source src="/loading.mov" type="video/quicktime" />
-          <source src="/loading.mov" type="video/mp4" />
-        </video>
+      <div className="min-h-screen bg-[#FAF9F7] flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-[#C91A2B] border-t-transparent rounded-full animate-spin" style={{ borderWidth: '3px' }} />
       </div>
     );
   }
 
   return (
-    <SellerLayout seller={seller} email={email} onLogout={handleLogout}>
-      <div className="px-4 py-8 md:px-0 md:py-0">
-        {/* Earnings Banner */}
-        {seller && (
-          <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-green-700">Total Earned</p>
-                <p className="text-2xl font-bold text-green-800">${seller.totalEarnings?.toFixed(0) || 0}</p>
-                <p className="text-xs text-green-600 mt-1">Each listing shows your payout amount</p>
-              </div>
-              {seller.pendingPayout > 0 && (
-                <div className="text-right">
-                  <p className="text-sm text-amber-700">Pending Payout</p>
-                  <p className="text-2xl font-bold text-amber-600">${seller.pendingPayout?.toFixed(0)}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+    <SellerLayout seller={seller} email={email} onLogout={handleLogout} revisionCount={needsRevision.length}>
+      <div className="px-4 pt-6 pb-4 md:px-0 md:pt-0 space-y-5">
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gray-100 rounded-lg">
-                <Package className="w-5 h-5 text-gray-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-semibold text-gray-900">{stats.total}</p>
-                <p className="text-sm text-gray-500">Total Listings</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-yellow-100 rounded-lg">
-                <Clock className="w-5 h-5 text-yellow-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-semibold text-gray-900">{stats.draft}</p>
-                <p className="text-sm text-gray-500">Pending</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-100 rounded-lg">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-semibold text-gray-900">{stats.active}</p>
-                <p className="text-sm text-gray-500">Live</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <DollarSign className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-semibold text-gray-900">{stats.sold}</p>
-                <p className="text-sm text-gray-500">Sold</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Latest Sold Item */}
-        {soldProducts.length > 0 && (() => {
-          const latest = soldProducts[0];
+        {/* ── REVISION ALERTS ── */}
+        {needsRevision.map(listing => {
+          const days = daysLeft(listing.revisionDeadline);
+          const urgent = days !== null && days <= 2;
           return (
-            <div className="mb-8 bg-white rounded-lg border border-gray-200">
-              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <h2 className="font-medium text-gray-900">Latest Sale</h2>
-                <Link
-                  to="/seller/profile?tab=sales"
-                  className="text-sm text-green-600 hover:text-green-700 font-medium flex items-center gap-1"
-                >
-                  View all {soldProducts.length} sales
-                  <ChevronRight className="w-4 h-4" />
-                </Link>
-              </div>
-              <div className="p-4 flex items-center justify-between">
-                <div>
-                  <h3 className="font-medium text-gray-900">{latest.title}</h3>
-                  <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
-                    {latest.brand && <span>{latest.brand}</span>}
-                    <span>Sold for ${latest.retailPrice}</span>
-                    <span className="text-green-600 font-medium">You earned ${latest.earnings?.toFixed(2)}</span>
-                  </div>
-                  {latest.status === 'SOLD_WITH_PAYOUT' && latest.paymentNote && (
-                    <p className="text-xs text-green-600 mt-2">{latest.paymentNote}</p>
-                  )}
+            <div key={listing.id} className={`rounded-2xl border-2 p-4 ${urgent ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+              <div className="flex items-start gap-3">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${urgent ? 'bg-red-100' : 'bg-amber-100'}`}>
+                  <AlertCircle className={`w-4 h-4 ${urgent ? 'text-red-600' : 'text-amber-600'}`} />
                 </div>
-                <div className="text-right flex flex-col items-end gap-1">
-                  {latest.shippingStatus === 'pending_label' && latest.status !== 'SOLD_WITH_PAYOUT' ? (
-                    <Link
-                      to="/seller/profile?tab=sales"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-                    >
-                      📦 Get Shipping Label
-                    </Link>
-                  ) : latest.shippingStatus === 'label_created' ? (
-                    <Link
-                      to="/seller/profile?tab=sales"
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
-                    >
-                      🏷️ Label Ready — Print & Ship
-                    </Link>
-                  ) : latest.shippingStatus === 'shipped' ? (
-                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                      📦 Shipped
-                    </span>
-                  ) : latest.shippingStatus === 'delivered' ? (
-                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      ✅ Delivered
-                    </span>
-                  ) : null}
-                  {latest.status === 'SOLD_WITH_PAYOUT' ? (
-                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      Paid Out
-                    </span>
-                  ) : (
-                    <span className="inline-block px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                      Pending Payout
-                    </span>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-semibold text-sm ${urgent ? 'text-red-800' : 'text-amber-800'}`}>
+                    {urgent && days === 0 ? '⚠️ Action overdue — listing will be deactivated soon' : `Update required for "${listing.title}"`}
+                  </p>
+                  {listing.revisionNote && (
+                    <p className={`text-sm mt-1 font-medium ${urgent ? 'text-red-700' : 'text-amber-700'}`}>
+                      "{listing.revisionNote}"
+                    </p>
                   )}
-                  {latest.status === 'SOLD_WITH_PAYOUT' && latest.paidAt && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      {new Date(latest.paidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {days !== null && (
+                    <p className={`text-xs mt-1 ${urgent ? 'text-red-600' : 'text-amber-600'}`}>
+                      {days === 0 ? 'Overdue — update now to keep this listing' : `${days} day${days === 1 ? '' : 's'} left to update, or this listing will be deactivated`}
                     </p>
                   )}
                 </div>
+                <button
+                  onClick={() => openRevisionModal(listing)}
+                  className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors ${urgent ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-500 hover:bg-amber-600'}`}
+                >
+                  Update Now
+                </button>
               </div>
             </div>
           );
-        })()}
+        })}
 
-        {/* Listings */}
-        <div className="bg-white rounded-lg border border-gray-200">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <h2 className="font-medium text-gray-900">Your Listings</h2>
+        {/* ── EARNINGS HERO ── */}
+        {seller && (
+          <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-5 text-white">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">Total Earned</p>
+                <p className="text-3xl font-bold mt-1">${(seller.totalEarnings || 0).toFixed(0)}</p>
+              </div>
+              {(seller.pendingPayout || 0) > 0 && (
+                <div className="text-right">
+                  <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">Pending</p>
+                  <p className="text-2xl font-bold text-amber-400 mt-1">${(seller.pendingPayout || 0).toFixed(0)}</p>
+                </div>
+              )}
+            </div>
+            <p className="text-gray-500 text-xs mt-3">Commission deducted — your payout shown per listing</p>
+          </div>
+        )}
+
+        {/* ── STATS ── */}
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: 'Total', value: stats.total, color: 'text-gray-900' },
+            { label: 'Pending', value: stats.draft, color: 'text-yellow-600' },
+            { label: 'Live', value: stats.active, color: 'text-green-600' },
+            { label: 'Sold', value: stats.sold, color: 'text-blue-600' },
+          ].map(s => (
+            <div key={s.label} className="bg-white rounded-2xl border border-gray-100 p-3 text-center shadow-sm">
+              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+              <p className="text-[11px] text-gray-400 font-medium mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* ── OFFERS BADGE ── */}
+        {pendingOffers.length > 0 && (
+          <Link to="/seller/profile?tab=offers" className="flex items-center justify-between bg-white border border-gray-100 rounded-2xl px-4 py-3 shadow-sm hover:shadow-md transition-all group">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-blue-50 rounded-full flex items-center justify-center">
+                <ArrowUpDown className="w-4 h-4 text-blue-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-gray-900 text-sm">{pendingOffers.length} pending offer{pendingOffers.length > 1 ? 's' : ''}</p>
+                <p className="text-xs text-gray-400">Buyers are interested — respond now</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-600 transition-colors" />
+          </Link>
+        )}
+
+        {/* ── LISTINGS GRID ── */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-bold text-gray-900 text-base">Your Listings</h2>
+            <Link to="/submit" className="text-xs text-[#C91A2B] font-semibold flex items-center gap-1 hover:underline">
+              <Plus className="w-3.5 h-3.5" /> Add New
+            </Link>
           </div>
 
           {listings.length === 0 ? (
-            <div className="p-12 text-center">
-              <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-              <p className="text-gray-500 mb-4">No listings yet</p>
-              <Link
-                to="/submit"
-                className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition"
-              >
+            <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
+              <Package className="w-12 h-12 mx-auto text-gray-200 mb-4" />
+              <p className="text-gray-400 text-sm mb-4">No listings yet</p>
+              <Link to="/submit" className="inline-flex items-center gap-2 bg-[#C91A2B] text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-[#a81523] transition-colors">
                 Submit your first listing
-                <ChevronRight className="w-4 h-4" />
               </Link>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100">
-              {listings.map((listing) => (
-                <div key={listing.id} className="flex flex-col">
-                  {/* Revision Banner */}
-                  {listing.tags?.includes('needs-revision') && (
-                    <div className="mx-4 mt-4 mb-0 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-amber-800">Update needed before approval</p>
-                          {listing.revisionNote && (
-                            <p className="text-sm text-amber-700 mt-0.5">"{listing.revisionNote}"</p>
-                          )}
-                          <p className="text-xs text-amber-600 mt-1">
-                            Click <strong>Edit</strong> below to update your listing and resubmit for review.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {listing.tags?.includes('seller-revised') && (
-                    <div className="mx-4 mt-4 mb-0 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                      <div className="flex items-start gap-2">
-                        <CheckCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                        <p className="text-sm text-blue-700">Your update has been submitted — we're reviewing it now.</p>
-                      </div>
-                    </div>
-                  )}
-
-                <div className="p-4 flex items-start gap-4 hover:bg-gray-50">
-                  {/* Image */}
-                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
-                    {listing.image ? (
-                      <img
-                        src={getThumbnail(listing.image)}
-                        alt={listing.title}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-400">
-                        <Package className="w-6 h-6" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-medium text-gray-900 truncate">{listing.title}</h3>
-                      {getStatusBadge(listing)}
-                      {getSourceBadge(listing.tags)}
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span>{listing.size}</span>
-                      <span>{listing.condition}</span>
-                    </div>
-                    {/* Pricing breakdown */}
-                    {listing.isSold ? (
-                      <div className="mt-2 flex items-center gap-4 text-xs">
-                        <span className="text-gray-500">
-                          Sold for: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span>
-                        </span>
-                        <span className="text-green-600 font-medium">
-                          You earned: ${listing.sellerPayout?.toFixed(2)}
-                        </span>
-                        <span className="text-gray-400">
-                          ({100 - (listing.commissionRate || 18)}% of ${listing.sellerAskingPrice?.toFixed(2)})
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="mt-2 flex items-center gap-4 text-xs">
-                        <span className="text-gray-500">
-                          Listed: <span className="font-medium text-gray-700">${listing.price?.toFixed(2)}</span>
-                        </span>
-                        <span className="text-gray-500">
-                          You asked: <span className="text-gray-700">${listing.sellerAskingPrice?.toFixed(2)}</span>
-                        </span>
-                        <span className="text-gray-500">
-                          You'll get: <span className="font-medium text-green-600">${listing.sellerPayout?.toFixed(2)}</span>
-                          <span className="text-gray-400 ml-1">({100 - (listing.commissionRate || 18)}%)</span>
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2">
-                    {/* Edit button - not for sold items */}
-                    {!listing.isSold && (
-                      <button
-                        onClick={() => openEditModal(listing)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        Edit
-                      </button>
-                    )}
-                    {/* Delist button - only for active (live) items */}
-                    {!listing.isSold && listing.status === 'active' && !listing.tags?.includes('delisted') && (
-                      <button
-                        onClick={() => toggleListingStatus(listing)}
-                        disabled={togglingStatus === listing.id}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition text-gray-600 hover:text-red-600 hover:bg-red-50 ${
-                          togglingStatus === listing.id ? 'opacity-50' : ''
-                        }`}
-                      >
-                        {togglingStatus === listing.id ? (
-                          <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <XCircle className="w-3.5 h-3.5" />
-                        )}
-                        Delist
-                      </button>
-                    )}
-                    {/* Relist button - for delisted items, goes to pending review */}
-                    {!listing.isSold && listing.tags?.includes('delisted') && (
-                      <button
-                        onClick={() => toggleListingStatus(listing)}
-                        disabled={togglingStatus === listing.id}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition text-gray-600 hover:text-green-600 hover:bg-green-50 ${
-                          togglingStatus === listing.id ? 'opacity-50' : ''
-                        }`}
-                      >
-                        {togglingStatus === listing.id ? (
-                          <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        )}
-                        Relist
-                      </button>
-                    )}
-                    {/* View on website */}
-                    {listing.status === 'active' && listing.handle && (
-                      <a
-                        href={`https://thephirstory.com/products/${listing.handle}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        View Listing
-                      </a>
-                    )}
-                  </div>
-                </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Offers Section */}
-        {offers.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-              <div>
-                <h2 className="font-medium text-gray-900 flex items-center gap-2">
-                  <ArrowUpDown className="w-4 h-4 text-blue-500" />
-                  Offers
-                  {offers.filter(o => o.status === 'pending' || o.status === 'countered').length > 0 && (
-                    <span className="inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full bg-blue-500 text-white">
-                      {offers.filter(o => o.status === 'pending' || o.status === 'countered').length}
-                    </span>
-                  )}
-                </h2>
-                <p className="text-xs text-gray-500 mt-0.5">Buyers interested in your listings</p>
-              </div>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {offers.map((offer) => {
-                const isActive = offer.status === 'pending' || offer.status === 'countered';
-                const isAccepted = offer.status === 'accepted';
-                const isRejected = offer.status === 'rejected' || offer.status === 'expired' || offer.status === 'withdrawn';
-                const canCounter = (offer.counter_round || 0) < 3;
-                const roundLabel = offer.counter_round ? `Round ${offer.counter_round + 1}` : 'Initial offer';
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {listings.map(listing => {
+                const needsRev = listing.tags?.includes('needs-revision');
+                const isDelisted = listing.tags?.includes('delisted');
+                const days = needsRev ? daysLeft(listing.revisionDeadline) : null;
                 return (
-                  <div key={offer.id} className={`p-4 flex items-start gap-4 ${isRejected ? 'opacity-60' : ''}`}>
-                    {/* Product image */}
-                    <div className="w-14 h-14 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
-                      {offer.product_image ? (
-                        <img src={getThumbnail(offer.product_image)} alt={offer.product_title} className="w-full h-full object-cover" loading="lazy" />
+                  <div
+                    key={listing.id}
+                    className={`bg-white rounded-2xl border overflow-hidden transition-all hover:shadow-md ${needsRev ? 'border-amber-300 ring-2 ring-amber-200' : 'border-gray-100'}`}
+                  >
+                    {/* Image */}
+                    <div className="relative aspect-[4/5] bg-gray-50 overflow-hidden">
+                      {listing.image ? (
+                        <img src={getThumbnail(listing.image)} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-400">
-                          <Package className="w-5 h-5" />
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Package className="w-8 h-8 text-gray-200" />
+                        </div>
+                      )}
+                      {/* Status overlay */}
+                      <div className="absolute top-2 left-2">
+                        <StatusBadge listing={listing} />
+                      </div>
+                      {/* Revision days warning */}
+                      {needsRev && days !== null && (
+                        <div className={`absolute bottom-2 left-2 right-2 text-center py-1 rounded-lg text-[10px] font-bold ${days <= 2 ? 'bg-red-500 text-white' : 'bg-amber-500 text-white'}`}>
+                          {days === 0 ? 'Overdue!' : `${days}d left`}
+                        </div>
+                      )}
+                      {/* Sold overlay */}
+                      {listing.isSold && (
+                        <div className="absolute inset-0 bg-black/20 flex items-end justify-end p-2">
+                          <span className="bg-[#C91A2B] text-white text-[10px] font-bold px-2 py-1 rounded-lg">SOLD</span>
                         </div>
                       )}
                     </div>
 
                     {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <h3 className="font-medium text-gray-900 truncate text-sm">{offer.product_title}</h3>
-                        {/* Status badge */}
-                        {isActive && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                            {offer.status === 'countered' ? 'Countered' : 'New offer'}
-                          </span>
-                        )}
-                        {isAccepted && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Accepted</span>
-                        )}
-                        {isRejected && (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 capitalize">{offer.status}</span>
-                        )}
-                        <span className="text-xs text-gray-400">{roundLabel}</span>
-                      </div>
-
-                      <div className="flex items-center gap-4 text-sm mb-2">
-                        <span className="font-semibold text-gray-900">${parseFloat(offer.amount).toFixed(2)} <span className="font-normal text-gray-400 text-xs">offered</span></span>
-                        {offer.listing_price && (
-                          <span className="text-gray-500 text-xs">Listed at ${parseFloat(offer.listing_price).toFixed(2)}</span>
-                        )}
-                      </div>
-
-                      {/* Accepted: show checkout status */}
-                      {isAccepted && offer.checkout_url && (
-                        <div className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 inline-block">
-                          Checkout link sent to buyer
+                    <div className="p-3">
+                      <p className="font-semibold text-gray-900 text-xs truncate">{listing.title}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{listing.size} · {listing.condition}</p>
+                      <div className="mt-2 pt-2 border-t border-gray-50 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">${(listing.sellerAskingPrice || listing.price)?.toFixed(0)}</p>
+                          <p className="text-[10px] text-green-600 font-medium">→ ${listing.sellerPayout?.toFixed(0)}</p>
                         </div>
-                      )}
-
-                      {/* Active: action buttons */}
-                      {isActive && (
-                        <div className="flex items-center gap-2 flex-wrap mt-1">
-                          <button
-                            onClick={() => respondToOffer(offer.id, 'accept')}
-                            disabled={respondingOffer === offer.id}
-                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition"
-                          >
-                            {respondingOffer === offer.id ? <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle className="w-3 h-3" />}
-                            Accept ${parseFloat(offer.amount).toFixed(0)}
-                          </button>
-                          <button
-                            onClick={() => respondToOffer(offer.id, 'reject')}
-                            disabled={respondingOffer === offer.id}
-                            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
-                          >
-                            <X className="w-3 h-3" />
-                            Decline
-                          </button>
-                          {canCounter && (
-                            <div className="flex items-center gap-1">
-                              <div className="relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
-                                <input
-                                  type="number"
-                                  placeholder="Counter"
-                                  value={counterInputs[offer.id] || ''}
-                                  onChange={e => setCounterInputs(prev => ({ ...prev, [offer.id]: e.target.value }))}
-                                  className="pl-5 pr-2 py-1.5 w-24 text-xs border border-gray-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                                />
-                              </div>
+                        {/* Actions */}
+                        <div className="flex items-center gap-1">
+                          {needsRev ? (
+                            <button
+                              onClick={() => openRevisionModal(listing)}
+                              className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold rounded-lg transition-colors"
+                            >
+                              Update
+                            </button>
+                          ) : !listing.isSold && (
+                            <>
                               <button
-                                onClick={() => {
-                                  if (!counterInputs[offer.id]) return;
-                                  respondToOffer(offer.id, 'counter', counterInputs[offer.id]);
-                                }}
-                                disabled={!counterInputs[offer.id] || respondingOffer === offer.id}
-                                className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition"
+                                onClick={() => openEditModal(listing)}
+                                className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                                title="Edit"
                               >
-                                Counter
+                                <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                            </div>
-                          )}
-                          {!canCounter && (
-                            <span className="text-xs text-gray-400 italic">Max counter rounds reached</span>
+                              {listing.status === 'active' && !isDelisted && (
+                                <button
+                                  onClick={() => toggleListingStatus(listing)}
+                                  disabled={togglingStatus === listing.id}
+                                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Delist"
+                                >
+                                  {togglingStatus === listing.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                                </button>
+                              )}
+                              {isDelisted && (
+                                <button
+                                  onClick={() => toggleListingStatus(listing)}
+                                  disabled={togglingStatus === listing.id}
+                                  className="p-1.5 text-gray-400 hover:text-green-500 hover:bg-green-50 rounded-lg transition-colors"
+                                  title="Relist"
+                                >
+                                  {togglingStatus === listing.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                                </button>
+                              )}
+                              {listing.status === 'active' && listing.handle && (
+                                <a href={`https://thephirstory.com/products/${listing.handle}`} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="View live">
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                            </>
                           )}
                         </div>
-                      )}
-                    </div>
-
-                    {/* Time */}
-                    <div className="text-xs text-gray-400 flex-shrink-0 text-right">
-                      {new Date(offer.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        )}
-
-        {/* Rejected Listings */}
-        {rejectedListings.length > 0 && (
-          <div className="bg-white rounded-lg border border-gray-200">
-            <div className="px-4 py-3 border-b border-gray-200">
-              <h2 className="font-medium text-gray-900">Rejected Listings</h2>
-              <p className="text-xs text-gray-500 mt-0.5">These listings were not approved. You can resubmit addressing the feedback.</p>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {rejectedListings.map((item) => (
-                <div key={item.id} className="p-4 flex items-start gap-4 opacity-75">
-                  {/* Image */}
-                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0 relative">
-                    {item.images?.[0]?.src ? (
-                      <img
-                        src={getThumbnail(item.images[0].src)}
-                        alt={item.title}
-                        className="w-full h-full object-cover grayscale"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-400">
-                        <Package className="w-6 h-6" />
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-red-500/10" />
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-medium text-gray-600 truncate">{item.title || `${item.designer} ${item.itemType}`}</h3>
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                        Rejected
-                      </span>
-                      {item.submissionSource && (
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                          item.submissionSource === 'portal' ? 'bg-purple-50 text-purple-600' :
-                          item.submissionSource === 'whatsapp' ? 'bg-green-50 text-green-600' :
-                          'bg-gray-50 text-gray-500'
-                        }`}>
-                          {item.submissionSource === 'portal' ? '🌐 Portal' :
-                           item.submissionSource === 'whatsapp' ? '💬 WhatsApp' :
-                           item.submissionSource}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span>{item.size || 'One Size'}</span>
-                      {item.askingPrice && <span>Asked ${parseFloat(item.askingPrice).toFixed(0)}</span>}
-                    </div>
-                    {item.rejectionReason && (
-                      <div className="mt-2 text-xs">
-                        <span className="text-red-600 font-medium">Reason:</span>{' '}
-                        <span className="text-gray-600">{item.rejectionReason}</span>
-                        {item.rejectionNote && (
-                          <span className="text-gray-500 ml-1">— {item.rejectionNote}</span>
-                        )}
-                      </div>
-                    )}
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      Rejected {new Date(item.rejectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
       </div>
 
-      {/* Edit Modal */}
+      {/* ══ REVISION EDIT MODAL ══ */}
+      {revisionListing && (() => {
+        const reqs = parseRevisionNeeds(revisionListing.revisionNote || '', revisionListing.revisionFields);
+        const hasAnyReq = Object.values(reqs).some(Boolean);
+        const isValid = (
+          (!reqs.photos || revisionPhotos.length > 0) &&
+          (!reqs.price || (revisionForm.price && parseFloat(revisionForm.price) > 0)) &&
+          (!reqs.designer || revisionForm.designer.trim()) &&
+          (!reqs.title || revisionForm.title.trim()) &&
+          (!reqs.measurements || revisionForm.measurements.trim()) &&
+          (!reqs.description || revisionForm.description.trim())
+        );
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+              <div className="p-5 border-b border-gray-100 flex items-start justify-between">
+                <div>
+                  <h3 className="font-bold text-gray-900 text-base">Update Required</h3>
+                  <p className="text-xs text-gray-400 mt-0.5 truncate max-w-[280px]">{revisionListing.title}</p>
+                </div>
+                <button onClick={() => setRevisionListing(null)} className="p-1.5 hover:bg-gray-100 rounded-xl">
+                  <X className="w-4 h-4 text-gray-400" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* The note */}
+                {revisionListing.revisionNote && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                    <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">Requested change</p>
+                    <p className="text-sm text-amber-800 font-medium">"{revisionListing.revisionNote}"</p>
+                  </div>
+                )}
+
+                {/* Dynamic fields */}
+                {reqs.photos && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Add Photos <span className="text-red-500">*</span></label>
+                    <input ref={revisionPhotoRef} type="file" accept="image/*" multiple className="hidden" onChange={handleRevisionPhotoSelect} />
+                    <button onClick={() => revisionPhotoRef.current?.click()} className="w-full border-2 border-dashed border-gray-200 rounded-xl py-4 flex flex-col items-center gap-2 text-gray-400 hover:border-[#C91A2B] hover:text-[#C91A2B] transition-colors">
+                      <Camera className="w-6 h-6" />
+                      <span className="text-sm font-medium">Tap to add photos</span>
+                    </button>
+                    {revisionPhotos.length > 0 && (
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {revisionPhotos.map((p, i) => (
+                          <div key={i} className="relative w-16 h-16 rounded-xl overflow-hidden bg-gray-100">
+                            <img src={p.preview} className="w-full h-full object-cover" />
+                            <button onClick={() => setRevisionPhotos(prev => prev.filter((_, j) => j !== i))} className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                              <X className="w-2.5 h-2.5 text-white" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {reqs.price && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Your New Asking Price (CAD) <span className="text-red-500">*</span></label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">$</span>
+                      <input
+                        type="number"
+                        value={revisionForm.price}
+                        onChange={e => setRevisionForm(f => ({ ...f, price: e.target.value }))}
+                        className="w-full pl-7 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]"
+                        placeholder="0.00"
+                        step="0.01"
+                        min="0"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {reqs.designer && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Designer / Brand <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={revisionForm.designer}
+                      onChange={e => setRevisionForm(f => ({ ...f, designer: e.target.value }))}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]"
+                      placeholder="e.g. Gul Ahmed, Sana Safinaz..."
+                    />
+                  </div>
+                )}
+
+                {reqs.title && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Listing Title <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={revisionForm.title}
+                      onChange={e => setRevisionForm(f => ({ ...f, title: e.target.value }))}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]"
+                    />
+                  </div>
+                )}
+
+                {reqs.measurements && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Measurements <span className="text-red-500">*</span></label>
+                    <textarea
+                      value={revisionForm.measurements}
+                      onChange={e => setRevisionForm(f => ({ ...f, measurements: e.target.value }))}
+                      rows={2}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B] resize-none"
+                      placeholder="e.g. Bust: 38in, Waist: 32in, Length: 54in"
+                    />
+                  </div>
+                )}
+
+                {reqs.description && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Description / Condition <span className="text-red-500">*</span></label>
+                    <textarea
+                      value={revisionForm.description}
+                      onChange={e => setRevisionForm(f => ({ ...f, description: e.target.value }))}
+                      rows={3}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B] resize-none"
+                    />
+                  </div>
+                )}
+
+                {!hasAnyReq && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">What did you update? <span className="text-red-500">*</span></label>
+                    <textarea
+                      value={revisionForm.description}
+                      onChange={e => setRevisionForm(f => ({ ...f, description: e.target.value }))}
+                      rows={3}
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B] resize-none"
+                      placeholder="Describe what you changed..."
+                    />
+                  </div>
+                )}
+
+                {uploadProgress && <p className="text-xs text-gray-400 text-center">{uploadProgress}</p>}
+
+                <button
+                  onClick={handleSubmitRevision}
+                  disabled={submittingRevision || !isValid}
+                  className="w-full py-3.5 bg-[#C91A2B] hover:bg-[#a81523] text-white font-bold rounded-2xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2 text-sm"
+                >
+                  {submittingRevision ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit Update'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ══ REGULAR EDIT MODAL ══ */}
       {editingListing && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg my-8">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <h3 className="font-medium text-gray-900">Edit Listing</h3>
-              <button
-                onClick={() => setEditingListing(null)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-bold text-gray-900">Edit Listing</h3>
+              <button onClick={() => setEditingListing(null)} className="p-1.5 hover:bg-gray-100 rounded-xl">
+                <X className="w-4 h-4 text-gray-400" />
               </button>
             </div>
-
-            <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="p-5 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                <input
-                  type="text"
-                  value={editForm.title}
-                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                />
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Title</label>
+                <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]" />
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Price ($)</label>
-                  <input
-                    type="number"
-                    value={editForm.price}
-                    onChange={(e) => setEditForm({ ...editForm, price: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  />
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Your Asking Price (CAD)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                  <input type="number" value={editForm.price} onChange={e => setEditForm(f => ({ ...f, price: e.target.value }))} className="w-full pl-7 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]" step="0.01" min="0" />
                 </div>
+                <p className="text-[11px] text-gray-400 mt-1">A platform fee is added separately on the buyer-facing listing</p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Condition</label>
+                <select value={editForm.condition} onChange={e => setEditForm(f => ({ ...f, condition: e.target.value }))} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B] bg-white">
+                  <option value="">Select</option>
+                  <option value="New with tags">New with tags</option>
+                  <option value="Like new">Like new</option>
+                  <option value="Gently used">Gently used</option>
+                  <option value="Used">Used</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} rows={3} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B] resize-none" />
+              </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
-                  <select
-                    value={editForm.condition}
-                    onChange={(e) => setEditForm({ ...editForm, condition: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  >
-                    <option value="">Select...</option>
-                    <option value="New with tags">New with tags</option>
-                    <option value="Like new">Like new</option>
-                    <option value="Excellent">Excellent</option>
-                    <option value="Good">Good</option>
-                    <option value="Fair">Fair</option>
-                  </select>
+              {/* Photos */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Photos</label>
+                <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoSelect} />
+                <div className="flex gap-2 flex-wrap">
+                  {existingImages.map(img => (
+                    <div key={img.id} className="relative w-16 h-16 rounded-xl overflow-hidden bg-gray-100">
+                      <img src={getThumbnail(img.src)} className="w-full h-full object-cover" />
+                      <button onClick={() => { setImagesToDelete(prev => [...prev, img]); setExistingImages(prev => prev.filter(i => i.id !== img.id)); }} className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                        <X className="w-2.5 h-2.5 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                  {newPhotos.map((p, i) => (
+                    <div key={i} className="relative w-16 h-16 rounded-xl overflow-hidden bg-gray-100">
+                      <img src={p.preview} className="w-full h-full object-cover" />
+                      <button onClick={() => setNewPhotos(prev => prev.filter((_, j) => j !== i))} className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                        <X className="w-2.5 h-2.5 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                  <button onClick={() => photoInputRef.current?.click()} className="w-16 h-16 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center text-gray-300 hover:border-[#C91A2B] hover:text-[#C91A2B] transition-colors">
+                    <Plus className="w-5 h-5" />
+                  </button>
                 </div>
+                {uploadProgress && <p className="text-xs text-gray-400 mt-1">{uploadProgress}</p>}
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <textarea
-                  value={editForm.description}
-                  onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none resize-none"
-                  placeholder="Describe your item..."
-                />
-              </div>
-
-              {/* Photos Section */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Photos</label>
-
-                {/* Existing Images */}
-                {existingImages.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-xs text-gray-500 mb-2">Current photos (tap to remove):</p>
-                    <div className="flex flex-wrap gap-2">
-                      {existingImages.map((img, idx) => (
-                        <div key={img.id || idx} className="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100 group">
-                          <img src={img.src || img} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => markImageForDeletion(img)}
-                            className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
-                          >
-                            <Trash2 className="w-5 h-5 text-white" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* New Photos */}
-                {newPhotos.length > 0 && (
-                  <div className="mb-3">
-                    <p className="text-xs text-gray-500 mb-2">New photos to add:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {newPhotos.map((photo, idx) => (
-                        <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100">
-                          <img src={photo.preview} alt={`New ${idx + 1}`} className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => removeNewPhoto(idx)}
-                            className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Add Photos Button */}
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handlePhotoSelect}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => photoInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-green-500 hover:text-green-600 transition"
-                >
-                  <Camera className="w-5 h-5" />
-                  <span>Add More Photos</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="px-4 py-3 border-t border-gray-200">
-              {uploadProgress && (
-                <p className="text-sm text-green-600 mb-2 text-center">{uploadProgress}</p>
-              )}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setEditingListing(null)}
-                  disabled={saving}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveEdit}
-                  disabled={saving}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition"
-                >
-                  {saving ? (uploadProgress || 'Saving...') : 'Save'}
-                </button>
-              </div>
+              <button onClick={handleSaveEdit} disabled={saving} className="w-full py-3.5 bg-gray-900 hover:bg-gray-800 text-white font-bold rounded-2xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2 text-sm">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Changes'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Address Modal */}
+      {/* ══ ADDRESS MODAL ══ */}
       {showAddressModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
-                  <MapPin className="w-6 h-6 text-amber-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium text-gray-900">Add Shipping Address</h3>
-                  <p className="text-sm text-gray-500">Required to create shipping labels when items sell</p>
-                </div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6">
+            <div className="text-center mb-5">
+              <div className="w-12 h-12 bg-[#fef2f2] rounded-full flex items-center justify-center mx-auto mb-3">
+                <MapPin className="w-6 h-6 text-[#C91A2B]" />
               </div>
-
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  value={shippingAddress.full_name}
-                  onChange={(e) => setShippingAddress({ ...shippingAddress, full_name: e.target.value })}
-                  placeholder="Full Name"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                />
-                <input
-                  type="text"
-                  value={shippingAddress.street_address}
-                  onChange={(e) => setShippingAddress({ ...shippingAddress, street_address: e.target.value })}
-                  placeholder="Street Address"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="text"
-                    value={shippingAddress.city}
-                    onChange={(e) => setShippingAddress({ ...shippingAddress, city: e.target.value })}
-                    placeholder="City"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  />
-                  <input
-                    type="text"
-                    value={shippingAddress.state}
-                    onChange={(e) => setShippingAddress({ ...shippingAddress, state: e.target.value })}
-                    placeholder="State"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="text"
-                    value={shippingAddress.postal_code}
-                    onChange={(e) => setShippingAddress({ ...shippingAddress, postal_code: e.target.value })}
-                    placeholder="ZIP Code"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  />
-                  <input
-                    type="text"
-                    value={shippingAddress.country}
-                    onChange={(e) => setShippingAddress({ ...shippingAddress, country: e.target.value })}
-                    placeholder="Country"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => setShowAddressModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50"
-                >
-                  Later
-                </button>
-                <button
-                  onClick={handleSaveAddress}
-                  disabled={!isAddressValid() || savingAddress}
-                  className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {savingAddress ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <MapPin className="w-4 h-4" />
-                      Save Address
-                    </>
-                  )}
-                </button>
-              </div>
+              <h3 className="font-bold text-gray-900 text-lg">Add your address</h3>
+              <p className="text-sm text-gray-400 mt-1">Required for shipping when your items sell</p>
             </div>
+            <div className="space-y-3">
+              {[
+                { key: 'full_name', label: 'Full Name', placeholder: 'Your full name' },
+                { key: 'street_address', label: 'Street Address', placeholder: '123 Main St' },
+                { key: 'city', label: 'City', placeholder: 'Toronto' },
+                { key: 'state', label: 'Province/State', placeholder: 'ON' },
+                { key: 'postal_code', label: 'Postal Code', placeholder: 'M5V 2K1' },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">{f.label}</label>
+                  <input
+                    type="text"
+                    value={shippingAddress[f.key]}
+                    onChange={e => setShippingAddress(s => ({ ...s, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]"
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={handleSaveAddress}
+              disabled={savingAddress || !shippingAddress.street_address || !shippingAddress.city || !shippingAddress.state || !shippingAddress.postal_code}
+              className="mt-5 w-full py-3.5 bg-[#C91A2B] hover:bg-[#a81523] text-white font-bold rounded-2xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2 text-sm"
+            >
+              {savingAddress ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Address'}
+            </button>
+            <button onClick={() => setShowAddressModal(false)} className="mt-2 w-full py-2 text-sm text-gray-400 hover:text-gray-600">
+              Skip for now
+            </button>
           </div>
         </div>
       )}

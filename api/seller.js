@@ -94,6 +94,14 @@ export default async function handler(req, res) {
           const isDelisted = product.tags?.includes('delisted');
           const isSold = !isDelisted && (inventory === 0 || product.status === 'archived');
           const revisionNote = getMetafieldValue(metafields, 'custom', 'revision_note') || null;
+          const revisionRequestedAt = getMetafieldValue(metafields, 'custom', 'revision_requested_at') || null;
+          const revisionDeadline = revisionRequestedAt
+            ? new Date(new Date(revisionRequestedAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+            : null;
+          const revisionFieldsRaw = getMetafieldValue(metafields, 'custom', 'revision_fields') || null;
+          let revisionFields = null;
+          try { revisionFields = revisionFieldsRaw ? JSON.parse(revisionFieldsRaw) : null; } catch {}
+
 
           _listings.push({
             id: product.id,
@@ -115,7 +123,9 @@ export default async function handler(req, res) {
             sellerPayout,
             inventory,
             isSold,
-            revisionNote
+            revisionNote,
+            revisionDeadline,
+            revisionFields
           });
           _stats.total++;
           if (isSold) _stats.sold++;
@@ -127,6 +137,27 @@ export default async function handler(req, res) {
         _listings.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         return { listings: _listings, stats: _stats };
       });
+
+      // Auto-delist listings whose revision deadline has passed
+      const now = new Date();
+      for (const listing of listings) {
+        if (listing.tags?.includes('needs-revision') && listing.revisionDeadline && now > new Date(listing.revisionDeadline)) {
+          try {
+            const delistedTags = [...(listing.tags || []).filter(t => t !== 'needs-revision'), 'delisted'];
+            await updateProduct(listing.id, { status: 'archived', tags: delistedTags.join(', ') });
+            listing.tags = delistedTags;
+            await cacheBust(cacheKeyListings(email));
+            await sendEmail({
+              to: seller.email,
+              subject: `Your listing "${listing.title}" has been deactivated`,
+              html: `<p>Hi ${seller.name || 'there'}, your listing <strong>${listing.title}</strong> was deactivated because the requested update was not made within 7 days. Please contact us to resubmit.</p>`,
+              context: 'listing_deactivated'
+            }).catch(() => {});
+          } catch (e) {
+            console.error('Auto-delist failed:', e.message);
+          }
+        }
+      }
 
       // Get transactions from database (source of truth for sold items)
       const { data: transactions } = await supabase
@@ -251,7 +282,7 @@ export default async function handler(req, res) {
 
     // UPDATE LISTING
     if (action === 'update' && (req.method === 'PUT' || req.method === 'POST')) {
-      const { email, productId, title, price, description, condition } = req.body;
+      const { email, productId, title, askingPrice, description, condition, designer, measurements } = req.body;
 
       if (!email || !productId) {
         return res.status(400).json({ error: 'Email and product ID required' });
@@ -262,7 +293,7 @@ export default async function handler(req, res) {
         title,
         description,
         condition,
-        price
+        price: askingPrice  // validate the asking price value
       });
 
       if (!validation.valid) {
@@ -292,7 +323,12 @@ export default async function handler(req, res) {
 
       const updates = {};
       if (safeData.title) updates.title = safeData.title;
-      if (safeData.description !== undefined) updates.body_html = safeData.description;
+      // Append measurements to description if provided
+      const fullDescription = measurements
+        ? (safeData.description ? `${safeData.description}\n\nMeasurements: ${measurements}` : `Measurements: ${measurements}`)
+        : safeData.description;
+      if (fullDescription !== undefined) updates.body_html = fullDescription;
+      if (designer) updates.vendor = designer.trim();
 
       // Get current product to update variant
       const product = await getProduct(productId);
@@ -300,7 +336,21 @@ export default async function handler(req, res) {
 
       if (variant) {
         const variantUpdates = { id: variant.id };
-        if (safeData.price !== undefined) variantUpdates.price = safeData.price.toString();
+
+        // Pricing: seller provides their asking price — we add the listing fee to get Shopify price
+        let shopifyListingPrice = undefined;
+        if (safeData.price !== undefined) {
+          const pricingMeta = await fetchMetafields(productId);
+          const feeRaw = getMetafieldValue(pricingMeta, 'pricing', 'listing_fee');
+          let listingFeeForCalc = 10;
+          if (feeRaw) {
+            try { listingFeeForCalc = parseFloat(JSON.parse(feeRaw).amount) || 10; }
+            catch { listingFeeForCalc = parseFloat(feeRaw) || 10; }
+          }
+          shopifyListingPrice = parseFloat(safeData.price) + listingFeeForCalc;
+          variantUpdates.price = shopifyListingPrice.toFixed(2);
+        }
+
         if (safeData.condition) variantUpdates.option3 = safeData.condition;
 
         if (Object.keys(variantUpdates).length > 1) {
@@ -318,11 +368,11 @@ export default async function handler(req, res) {
         }
 
         // If price changed, update pricing metafields + notify admin + sync Supabase
-        if (safeData.price !== undefined) {
-          const { commissionRate, askingPrice, payout, listingFee } = await updatePricingMetafields(productId, safeData.price, seller.commission_rate || 18);
+        if (shopifyListingPrice !== undefined) {
+          const { commissionRate, askingPrice, payout, listingFee } = await updatePricingMetafields(productId, shopifyListingPrice, seller.commission_rate || 18);
 
           // Notify admin of price change + log to messages (sellerId = logged to activity feed)
-          const newListingPrice = parseFloat(safeData.price);
+          const newListingPrice = shopifyListingPrice;
           await sendEmail({
             sellerId: seller.id,
             to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',

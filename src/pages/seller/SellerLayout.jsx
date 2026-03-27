@@ -1,49 +1,47 @@
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
-import { Home, Package, DollarSign, Tag, User, Plus, LogOut, ShoppingBag, ChevronRight } from 'lucide-react';
+import { Home, Package, DollarSign, Tag, User, Plus, LogOut, ShoppingBag, AlertCircle } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Dashboard', icon: Home, path: '/' },
+  { id: 'dashboard', label: 'Home', icon: Home, path: '/' },
   { id: 'listings', label: 'My Listings', icon: Package, path: '/seller/profile?tab=listings' },
   { id: 'sales', label: 'My Sales', icon: ShoppingBag, path: '/seller/profile?tab=sales' },
-  { id: 'balance', label: 'My Balance', icon: DollarSign, path: '/seller/profile?tab=balance', comingSoon: false },
-  { id: 'offers', label: 'My Offers', icon: Tag, path: '/seller/profile?tab=offers', comingSoon: true },
+  { id: 'balance', label: 'My Balance', icon: DollarSign, path: '/seller/profile?tab=balance' },
   { id: 'profile', label: 'Profile', icon: User, path: '/seller/profile?tab=profile' },
 ];
 
-export default function SellerLayout({ children, seller, email, onLogout }) {
+export default function SellerLayout({ children, seller, email, onLogout, revisionCount = 0 }) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
 
   function getActiveNav() {
     const path = location.pathname;
     const tab = searchParams.get('tab');
-
-    if (path === '/' || path === '/seller') {
-      return 'dashboard';
-    }
-    if (path === '/seller/profile' || path === '/profile') {
-      return tab || 'sales';
-    }
+    if (path === '/' || path === '/seller') return 'dashboard';
+    if (path === '/seller/profile' || path === '/profile') return tab || 'sales';
     return 'dashboard';
   }
 
   const activeNav = getActiveNav();
+  const initials = (seller?.name || email || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20 md:pb-0">
-      {/* Header - Desktop */}
-      <header className="bg-white border-b border-gray-200 hidden md:block sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#FAF9F7] pb-20 md:pb-0" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Desktop Header */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-gray-100 hidden md:block sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2.5">
+            <img src="/logo.svg" alt="The Phir Story" className="h-8" />
+          </Link>
           <div className="flex items-center gap-3">
-            <Link to="/">
-              <img src="/logo.svg" alt="The Phir Story" className="h-8" />
-            </Link>
-            <span className="text-sm text-gray-500 border-l border-gray-200 pl-3">Seller Portal</span>
-          </div>
-          <div className="flex items-center gap-3">
+            {revisionCount > 0 && (
+              <div className="flex items-center gap-1.5 bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-full text-xs font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" />
+                {revisionCount} listing{revisionCount > 1 ? 's' : ''} need{revisionCount === 1 ? 's' : ''} update
+              </div>
+            )}
             <Link
               to="/submit"
-              className="flex items-center gap-2 bg-[#C91A2B] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#a81523] transition"
+              className="flex items-center gap-2 bg-[#C91A2B] hover:bg-[#a81523] text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm"
             >
               <Plus className="w-4 h-4" />
               Submit Listing
@@ -52,114 +50,129 @@ export default function SellerLayout({ children, seller, email, onLogout }) {
         </div>
       </header>
 
-      {/* Header - Mobile */}
-      <header className="bg-white border-b border-gray-200 md:hidden sticky top-0 z-40">
+      {/* Mobile Header */}
+      <header className="bg-white border-b border-gray-100 md:hidden sticky top-0 z-40">
         <div className="px-4 py-3 flex items-center justify-between">
-          <div className="w-10" />
-          <Link to="/">
+          <Link to="/" className="flex items-center">
             <img src="/logo.svg" alt="The Phir Story" className="h-7" />
           </Link>
-          <Link
-            to="/seller/profile?tab=profile"
-            className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200"
-          >
-            <User className="w-5 h-5" />
-          </Link>
+          <div className="flex items-center gap-2">
+            {revisionCount > 0 && (
+              <span className="w-5 h-5 bg-amber-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                {revisionCount}
+              </span>
+            )}
+            <Link
+              to="/seller/profile?tab=profile"
+              className="w-9 h-9 rounded-full bg-gradient-to-br from-[#C91A2B] to-[#d28d30] flex items-center justify-center text-white text-xs font-bold shadow-sm"
+            >
+              {initials}
+            </Link>
+          </div>
         </div>
       </header>
 
-      {/* Bottom Nav - Mobile */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 safe-area-pb">
-        <div className="flex items-center justify-around py-2">
-          <Link
-            to="/"
-            className={`flex flex-col items-center py-2 px-4 ${activeNav === 'dashboard' ? 'text-[#C91A2B]' : 'text-gray-500'}`}
-          >
-            <Home className="w-6 h-6" />
-            <span className="text-xs mt-1 font-medium">Home</span>
+      {/* Mobile Bottom Nav */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 md:hidden z-50">
+        <div className="flex items-center justify-around py-1">
+          <Link to="/" className={`flex flex-col items-center py-2 px-3 gap-0.5 ${activeNav === 'dashboard' ? 'text-[#C91A2B]' : 'text-gray-400'}`}>
+            <Home className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Home</span>
           </Link>
-          <Link
-            to="/submit"
-            className="flex flex-col items-center py-2 px-6 -mt-4 bg-[#C91A2B] text-white rounded-full shadow-lg"
-          >
-            <Plus className="w-7 h-7" />
-            <span className="text-xs mt-0.5 font-medium">Sell</span>
+          <Link to="/seller/profile?tab=listings" className={`flex flex-col items-center py-2 px-3 gap-0.5 ${activeNav === 'listings' ? 'text-[#C91A2B]' : 'text-gray-400'}`}>
+            <Package className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Listings</span>
           </Link>
-          <Link
-            to="/seller/profile"
-            className={`flex flex-col items-center py-2 px-4 ${activeNav !== 'dashboard' ? 'text-[#C91A2B]' : 'text-gray-500'}`}
-          >
-            <User className="w-6 h-6" />
-            <span className="text-xs mt-1">Profile</span>
+          <Link to="/submit" className="flex flex-col items-center -mt-5">
+            <div className="w-14 h-14 bg-[#C91A2B] rounded-full flex items-center justify-center shadow-lg shadow-red-200">
+              <Plus className="w-7 h-7 text-white" />
+            </div>
+            <span className="text-[10px] font-medium text-[#C91A2B] mt-0.5">Sell</span>
+          </Link>
+          <Link to="/seller/profile?tab=sales" className={`flex flex-col items-center py-2 px-3 gap-0.5 ${activeNav === 'sales' ? 'text-[#C91A2B]' : 'text-gray-400'}`}>
+            <ShoppingBag className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Sales</span>
+          </Link>
+          <Link to="/seller/profile?tab=profile" className={`flex flex-col items-center py-2 px-3 gap-0.5 ${activeNav === 'profile' ? 'text-[#C91A2B]' : 'text-gray-400'}`}>
+            <User className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Profile</span>
           </Link>
         </div>
       </nav>
 
       {/* Desktop Layout: Sidebar + Content */}
-      <div className="hidden md:flex">
+      <div className="hidden md:flex max-w-7xl mx-auto">
         {/* Sidebar */}
-        <div className="w-64 bg-white border-r border-gray-200 min-h-[calc(100vh-65px)] sticky top-[65px] self-start">
-          {/* User info */}
-          <div className="p-4 border-b border-gray-200">
+        <aside className="w-72 bg-white border-r border-gray-100 min-h-[calc(100vh-56px)] sticky top-14 self-start flex flex-col overflow-y-auto">
+          {/* Profile card */}
+          <div className="p-5 border-b border-gray-50">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
-                <User className="w-6 h-6 text-gray-500" />
+              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#C91A2B] to-[#d28d30] flex items-center justify-center shadow-sm flex-shrink-0">
+                <span className="text-white font-bold text-sm">{initials}</span>
               </div>
               <div className="min-w-0 flex-1">
-                <p className="font-medium text-gray-900 truncate">{email || seller?.email}</p>
-                <p className="text-sm text-gray-500">Seller Account</p>
+                <p className="font-semibold text-gray-900 text-sm truncate">{seller?.name || 'Seller'}</p>
+                <p className="text-xs text-gray-400 truncate">{email}</p>
               </div>
             </div>
           </div>
 
-          {/* Navigation */}
-          <nav className="py-2">
+          {/* Quick stats */}
+          {seller && (
+            <div className="px-5 py-4 border-b border-gray-50 bg-gradient-to-b from-[#FAF9F7] to-white">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="text-center">
+                  <p className="text-lg font-bold text-gray-900">${(seller.totalEarnings || 0).toFixed(0)}</p>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider font-medium">Paid Out</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-amber-600">${(seller.pendingPayout || 0).toFixed(0)}</p>
+                  <p className="text-[10px] text-amber-600/70 uppercase tracking-wider font-medium">Pending</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Nav */}
+          <nav className="py-3 px-2 flex-1">
             {NAV_ITEMS.map(item => {
               const isActive = activeNav === item.id;
               return (
                 <Link
                   key={item.id}
-                  to={item.comingSoon ? '#' : item.path}
-                  onClick={item.comingSoon ? (e) => e.preventDefault() : undefined}
-                  className={`w-full flex items-center justify-between px-4 py-3 text-left transition ${
+                  to={item.path}
+                  className={`flex items-center gap-3 px-4 py-2.5 rounded-xl mb-0.5 text-sm transition-all ${
                     isActive
-                      ? 'bg-gray-100 text-gray-900 font-medium border-l-4 border-[#C91A2B]'
-                      : item.comingSoon
-                        ? 'text-gray-400 cursor-not-allowed'
-                        : 'text-gray-700 hover:bg-gray-50'
+                      ? 'bg-[#fef2f2] text-[#C91A2B] font-semibold border-l-4 border-[#C91A2B]'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <item.icon className="w-5 h-5" />
-                    <span>{item.label}</span>
-                  </div>
-                  {item.comingSoon && (
-                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">Soon</span>
-                  )}
+                  <item.icon className="w-4 h-4 flex-shrink-0" />
+                  <span>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
 
           {/* Logout */}
-          <div className="border-t border-gray-200 mt-2 pt-2">
+          <div className="p-3 border-t border-gray-50">
             <button
               onClick={onLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
+              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-xl transition-all"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="w-4 h-4" />
               <span>Sign Out</span>
             </button>
           </div>
-        </div>
+        </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 p-6 max-w-4xl">
+        {/* Main */}
+        <main className="flex-1 min-w-0 p-6 max-w-4xl">
           {children}
         </main>
       </div>
 
-      {/* Mobile Layout */}
+      {/* Mobile Content */}
       <div className="md:hidden">
         {children}
       </div>
