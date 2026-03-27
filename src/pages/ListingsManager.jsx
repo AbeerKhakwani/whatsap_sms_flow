@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AlertTriangle, CheckCircle, Search, ChevronDown, Loader2, ExternalLink, Edit2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Search, ChevronDown, Loader2, ExternalLink, Edit2, X, AlertCircle } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -62,6 +62,13 @@ function SellerSearch({ value, onChange }) {
   );
 }
 
+const QUICK_NOTES = [
+  'Please update the price',
+  'Please update the designer name',
+  'Please submit a clearer photo of the tag',
+  'Please add more photos',
+];
+
 function ListingRow({ listing, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [seller, setSeller] = useState(null);
@@ -69,6 +76,31 @@ function ListingRow({ listing, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
+  const [showRevision, setShowRevision] = useState(false);
+  const [revisionNote, setRevisionNote] = useState('');
+  const [sendingRevision, setSendingRevision] = useState(false);
+
+  async function sendRevision() {
+    if (!revisionNote.trim()) return;
+    setSendingRevision(true);
+    try {
+      const r = await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
+        body: JSON.stringify({ shopifyProductId: listing.id, note: revisionNote.trim() })
+      });
+      const d = await r.json();
+      if (d.success) {
+        setShowRevision(false);
+        setRevisionNote('');
+      } else {
+        alert(d.error || 'Failed to send revision request');
+      }
+    } catch (e) {
+      alert(e.message);
+    }
+    setSendingRevision(false);
+  }
 
   async function save() {
     if (!seller) return;
@@ -173,15 +205,58 @@ function ListingRow({ listing, onSaved }) {
             {error && <p className="text-[10px] text-red-500 w-full">{error}</p>}
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            {saved && <CheckCircle size={14} className="text-emerald-500" />}
-            <button
-              onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
-              className="flex items-center gap-1 text-xs text-stone-500 hover:text-stone-900"
-            >
-              <Edit2 size={12} />
-              {listing.hasSeller ? 'Edit' : 'Assign'}
-            </button>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              {saved && <CheckCircle size={14} className="text-emerald-500" />}
+              <button
+                onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
+                className="flex items-center gap-1 text-xs text-stone-500 hover:text-stone-900"
+              >
+                <Edit2 size={12} />
+                {listing.hasSeller ? 'Edit' : 'Assign'}
+              </button>
+              <button
+                onClick={() => { setShowRevision(v => !v); setRevisionNote(''); }}
+                className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800"
+              >
+                <AlertCircle size={12} />
+                Revise
+              </button>
+            </div>
+
+            {/* Inline revision form */}
+            {showRevision && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+                <div className="flex flex-wrap gap-1">
+                  {QUICK_NOTES.map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setRevisionNote(n)}
+                      className={`px-2 py-0.5 rounded-full text-[10px] border transition-colors ${revisionNote === n ? 'bg-amber-200 border-amber-400 text-amber-900 font-medium' : 'bg-white border-amber-200 text-amber-700 hover:bg-amber-100'}`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={revisionNote}
+                  onChange={e => setRevisionNote(e.target.value)}
+                  placeholder="What needs to be updated..."
+                  rows={2}
+                  className="w-full text-xs px-2 py-1.5 border border-amber-200 rounded focus:outline-none resize-none bg-white"
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => setShowRevision(false)} className="px-3 py-1 text-xs text-stone-500 border border-stone-200 rounded hover:bg-stone-50">Cancel</button>
+                  <button
+                    onClick={sendRevision}
+                    disabled={sendingRevision || !revisionNote.trim()}
+                    className="px-3 py-1 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded disabled:opacity-50 flex items-center gap-1"
+                  >
+                    {sendingRevision ? <Loader2 size={11} className="animate-spin" /> : 'Send'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </td>
