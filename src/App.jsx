@@ -17,6 +17,12 @@ const Transactions = lazy(() => import('./pages/Transactions'));
 const Scripts = lazy(() => import('./pages/Scripts'));
 const Settings = lazy(() => import('./pages/Settings'));
 
+// Store — unified buyer/seller prototype
+const StoreFront  = lazy(() => import('./pages/store/StoreFront'));
+const ShopPage    = lazy(() => import('./pages/store/ShopPage'));
+const ItemPage    = lazy(() => import('./pages/store/ItemPage'));
+const AccountPage = lazy(() => import('./pages/store/AccountPage'));
+
 // Loading splash screen
 function Loading() {
   return (
@@ -52,6 +58,12 @@ export default function App() {
           <Route path="/seller/submit" element={<SellerSubmit />} />
           <Route path="/seller/profile" element={<SellerProfile />} />
           <Route path="/profile" element={<SellerProfile />} />
+
+          {/* Store — buyer-facing prototype */}
+          <Route path="/store" element={<StoreFront />} />
+          <Route path="/store/shop" element={<ShopPage />} />
+          <Route path="/store/item/:id" element={<ItemPage />} />
+          <Route path="/store/account" element={<AccountPage />} />
 
           {/* Admin Login */}
           <Route path="/admin" element={<AdminLogin />} />
