@@ -379,9 +379,18 @@ function ListingCard({ listing, onSaved, onRevise }) {
       {/* Image */}
       <div className="relative aspect-[3/4] bg-stone-100 overflow-hidden">
         {listing.image
-          ? <img src={listing.image} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
+          ? <img src={listing.image} alt={listing.title} className={`w-full h-full object-cover ${listing.isSold ? 'grayscale opacity-60' : ''}`} loading="lazy" />
           : <div className="w-full h-full flex items-center justify-center text-stone-300 text-4xl">📷</div>
         }
+        {/* Sold overlay */}
+        {listing.isSold && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="px-3 py-1 text-xs font-black tracking-widest uppercase rotate-[-15deg] shadow-lg"
+              style={{ background: 'rgba(37,99,235,0.85)', color: '#fff', border: '2px solid rgba(255,255,255,0.4)', borderRadius: 6 }}>
+              SOLD
+            </span>
+          </div>
+        )}
         {/* Status badge overlay */}
         <div className="absolute top-2 left-2">
           <StatusBadge tags={listing.tags} />

@@ -1322,6 +1322,7 @@ export default async function handler(req, res) {
               tags: p.tags,
               price: parseFloat(p.variants?.[0]?.price) || 0,
               image: p.images?.[0]?.src || null,
+              isSold: (p.variants?.[0]?.inventory_quantity ?? 1) === 0,
               sellerEmail: seller?.email || sellerEmail || null,
               sellerName: seller?.name || null,
               sellerId: seller?.id || sellerId || null,
