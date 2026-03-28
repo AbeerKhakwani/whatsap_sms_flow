@@ -795,13 +795,6 @@ export default function SellerProfile() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold text-gray-900">My Listings</h2>
-          <Link
-            to="/submit"
-            className="flex items-center gap-2 bg-[#C91A2B] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#a81523] transition"
-          >
-            <Plus className="w-4 h-4" />
-            Submit Listing
-          </Link>
         </div>
 
         {/* Stats */}
