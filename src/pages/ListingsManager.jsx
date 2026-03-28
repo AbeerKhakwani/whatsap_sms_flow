@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AlertTriangle, CheckCircle, Search, ChevronDown, Loader2, ExternalLink, Edit2, X, AlertCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Search, Loader2, ExternalLink, Edit2, X, AlertCircle, Send, Eye, MessageSquare, Mail, ChevronRight, ChevronLeft, Tag } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+const PORTAL_URL = 'https://sell.thephirstory.com';
 
-function SellerSearch({ value, onChange }) {
-  const [query, setQuery] = useState(value?.name || '');
+// ─── Seller search autocomplete ────────────────────────────────────────────
+function SellerSearch({ onChange }) {
+  const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -34,26 +36,22 @@ function SellerSearch({ value, onChange }) {
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-1 border border-stone-200 rounded-lg px-2 py-1.5 bg-white">
+      <div className="flex items-center gap-1.5 border border-stone-200 rounded-lg px-2.5 py-1.5 bg-white focus-within:ring-2 focus-within:ring-stone-300">
         <Search size={12} className="text-stone-400 flex-none" />
         <input
           value={query}
           onChange={e => { setQuery(e.target.value); if (!e.target.value) onChange(null); }}
           placeholder="Search seller..."
-          className="text-xs outline-none w-36"
+          className="text-xs outline-none w-40"
         />
         {loading && <Loader2 size={11} className="animate-spin text-stone-400" />}
       </div>
       {open && results.length > 0 && (
-        <div className="absolute z-20 top-full left-0 mt-1 w-64 bg-white border border-stone-200 rounded-lg shadow-lg overflow-hidden">
+        <div className="absolute z-30 top-full left-0 mt-1 w-64 bg-white border border-stone-200 rounded-xl shadow-xl overflow-hidden">
           {results.map(s => (
-            <button
-              key={s.id}
-              onClick={() => select(s)}
-              className="w-full text-left px-3 py-2 hover:bg-stone-50 text-xs"
-            >
-              <p className="font-medium text-stone-900">{s.name || '—'}</p>
-              <p className="text-stone-400">{s.email}</p>
+            <button key={s.id} onClick={() => select(s)} className="w-full text-left px-3 py-2.5 hover:bg-stone-50 border-b border-stone-50 last:border-0">
+              <p className="text-xs font-semibold text-stone-900">{s.name || '—'}</p>
+              <p className="text-[11px] text-stone-400">{s.email}</p>
             </button>
           ))}
         </div>
@@ -62,54 +60,293 @@ function SellerSearch({ value, onChange }) {
   );
 }
 
-const REVISION_FIELD_OPTIONS = [
-  { key: 'photos',       label: 'Photos',       hint: 'Add clearer / more photos' },
-  { key: 'price',        label: 'Price',         hint: 'Update asking price' },
-  { key: 'designer',     label: 'Designer',      hint: 'Correct the brand name' },
-  { key: 'measurements', label: 'Measurements',  hint: 'Add size measurements' },
-  { key: 'description',  label: 'Description',   hint: 'Improve condition details' },
-  { key: 'title',        label: 'Title',         hint: 'Rename the listing' },
+// ─── Revision field options ─────────────────────────────────────────────────
+const REVISION_FIELDS = [
+  { key: 'photos',       label: 'Photos',       hint: 'Add clearer / more photos',       icon: '📷' },
+  { key: 'price',        label: 'Price',         hint: 'Update asking price',             icon: '💰' },
+  { key: 'designer',     label: 'Designer',      hint: 'Correct the brand name',         icon: '🏷️' },
+  { key: 'measurements', label: 'Measurements',  hint: 'Add size measurements',          icon: '📏' },
+  { key: 'description',  label: 'Description',   hint: 'Improve condition details',      icon: '📝' },
+  { key: 'title',        label: 'Title',         hint: 'Rename the listing',             icon: '✏️' },
 ];
 
-const FIELD_LABELS = { photos: 'photos', price: 'price', designer: 'designer/brand name', measurements: 'measurements', description: 'description/condition', title: 'listing title' };
+const FIELD_LABELS = {
+  photos: 'photos', price: 'price', designer: 'designer/brand name',
+  measurements: 'measurements', description: 'description/condition', title: 'listing title'
+};
 
-function ListingRow({ listing, onSaved }) {
-  const [editing, setEditing] = useState(false);
-  const [seller, setSeller] = useState(null);
-  const [rate, setRate] = useState(listing.commissionRate || 18);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState(null);
-  const [showRevision, setShowRevision] = useState(false);
-  const [revisionFields, setRevisionFields] = useState({});
-  const [revisionNote, setRevisionNote] = useState('');
-  const [sendingRevision, setSendingRevision] = useState(false);
+function buildNote(fields, extraNote) {
+  const selected = Object.keys(fields).filter(k => fields[k]);
+  const fieldList = selected.map(k => FIELD_LABELS[k]).join(', ');
+  return `Please update the following: ${fieldList}${extraNote.trim() ? `. ${extraNote.trim()}` : '.'}`;
+}
 
-  async function sendRevision() {
-    const selectedFields = Object.keys(revisionFields).filter(k => revisionFields[k]);
-    if (selectedFields.length === 0) return;
-    const fieldList = selectedFields.map(k => FIELD_LABELS[k]).join(', ');
-    const builtNote = `Please update the following: ${fieldList}${revisionNote.trim() ? `. ${revisionNote.trim()}` : '.'}`;
-    setSendingRevision(true);
+// ─── WA preview bubble ──────────────────────────────────────────────────────
+function WAPreview({ sellerName, productTitle, note }) {
+  const msg = `Hi ${sellerName || 'there'}! We've reviewed your listing "${productTitle}" and need a small update before we can approve it:\n\n"${note}"\n\nPlease update your listing here: ${PORTAL_URL}\n\nThank you! 🙏`;
+  return (
+    <div className="bg-[#E5DDD5] rounded-xl p-4 min-h-[180px] flex items-end">
+      <div className="max-w-[85%] bg-white rounded-2xl rounded-bl-sm px-3.5 py-2.5 shadow-sm">
+        <p className="text-[12px] text-stone-800 whitespace-pre-wrap leading-relaxed">{msg}</p>
+        <p className="text-[10px] text-stone-400 text-right mt-1">11:30 AM</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Email preview ──────────────────────────────────────────────────────────
+function EmailPreview({ sellerName, productTitle, note }) {
+  return (
+    <div className="border border-stone-200 rounded-xl overflow-hidden text-sm">
+      {/* Email chrome */}
+      <div className="bg-stone-50 px-4 py-2.5 border-b border-stone-200 space-y-1">
+        <p className="text-xs text-stone-500"><span className="font-medium text-stone-700">From:</span> The Phir Story &lt;hello@thephirstory.com&gt;</p>
+        <p className="text-xs text-stone-500"><span className="font-medium text-stone-700">Subject:</span> Action needed: Update your listing – {productTitle}</p>
+      </div>
+      {/* Body */}
+      <div className="p-4 space-y-3 text-[13px] text-stone-700 leading-relaxed">
+        <p>Hi {sellerName || 'there'},</p>
+        <p>Thanks for submitting your listing <strong>{productTitle}</strong>. We'd love to approve it — we just need one small update first:</p>
+        <div className="bg-amber-50 border-l-4 border-amber-400 px-3 py-2.5 rounded-r-lg text-amber-900 font-medium text-[12px]">
+          {note}
+        </div>
+        <p>Please log in to your seller portal to make the update:</p>
+        <div>
+          <span className="inline-block bg-green-600 text-white text-[12px] font-medium px-4 py-2 rounded-lg">Update My Listing</span>
+        </div>
+        <p>Once updated, we'll re-review and approve it as quickly as possible.</p>
+        <p>Thank you!<br /><span className="font-medium">The Phir Story Team</span></p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Revision modal (2-step) ────────────────────────────────────────────────
+function RevisionModal({ listing, onClose, onSent }) {
+  const [step, setStep] = useState('compose'); // 'compose' | 'preview'
+  const [previewTab, setPreviewTab] = useState('whatsapp');
+  const [fields, setFields] = useState({});
+  const [extraNote, setExtraNote] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const selectedFields = Object.keys(fields).filter(k => fields[k]);
+  const hasFields = selectedFields.length > 0;
+  const note = hasFields ? buildNote(fields, extraNote) : '';
+
+  async function send() {
+    setSending(true);
     try {
       const r = await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
-        body: JSON.stringify({ shopifyProductId: listing.id, note: builtNote, fields: selectedFields })
+        body: JSON.stringify({ shopifyProductId: listing.id, note, fields: selectedFields })
       });
       const d = await r.json();
       if (d.success) {
-        setShowRevision(false);
-        setRevisionFields({});
-        setRevisionNote('');
+        onSent(listing.id);
+        onClose();
       } else {
         alert(d.error || 'Failed to send revision request');
       }
     } catch (e) {
       alert(e.message);
     }
-    setSendingRevision(false);
+    setSending(false);
   }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-stone-100">
+          <div>
+            <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Request Revision</p>
+            <p className="text-sm font-semibold text-stone-900 truncate max-w-[340px]">{listing.title}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-stone-100 rounded-lg transition-colors">
+            <X size={16} className="text-stone-500" />
+          </button>
+        </div>
+
+        {/* Step indicator */}
+        <div className="flex border-b border-stone-100">
+          {['compose', 'preview'].map((s, i) => (
+            <button
+              key={s}
+              onClick={() => s === 'preview' && hasFields ? setStep('preview') : s === 'compose' ? setStep('compose') : null}
+              className={`flex-1 py-2.5 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors border-b-2 ${
+                step === s ? 'text-stone-900 border-stone-900' : 'text-stone-400 border-transparent hover:text-stone-600'
+              }`}
+            >
+              {i === 0 ? <Edit2 size={11} /> : <Eye size={11} />}
+              {s === 'compose' ? '1. Compose' : '2. Preview'}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-y-auto flex-1">
+
+          {/* ── STEP 1: Compose ── */}
+          {step === 'compose' && (
+            <div className="p-5 space-y-5">
+              {/* Field toggles */}
+              <div>
+                <p className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">What needs updating?</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {REVISION_FIELDS.map(({ key, label, hint, icon }) => {
+                    const checked = !!fields[key];
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setFields(f => ({ ...f, [key]: !f[key] }))}
+                        className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-all ${
+                          checked
+                            ? 'bg-amber-50 border-amber-400 shadow-sm'
+                            : 'bg-stone-50 border-stone-200 hover:border-stone-300 hover:bg-white'
+                        }`}
+                      >
+                        <div className={`w-5 h-5 rounded-md flex-shrink-0 border-2 flex items-center justify-center mt-0.5 transition-all ${
+                          checked ? 'bg-amber-500 border-amber-500' : 'border-stone-300 bg-white'
+                        }`}>
+                          {checked && <svg className="w-3 h-3 text-white" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        </div>
+                        <div>
+                          <p className={`text-xs font-semibold leading-none ${checked ? 'text-amber-900' : 'text-stone-700'}`}>
+                            {icon} {label}
+                          </p>
+                          <p className={`text-[10px] mt-1 leading-snug ${checked ? 'text-amber-700' : 'text-stone-400'}`}>{hint}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Extra note */}
+              <div>
+                <p className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-2">
+                  Additional note <span className="normal-case font-normal text-stone-400">(optional)</span>
+                </p>
+                <textarea
+                  value={extraNote}
+                  onChange={e => setExtraNote(e.target.value)}
+                  placeholder="Any specific instructions for the seller…"
+                  rows={2}
+                  className="w-full px-3 py-2.5 text-sm border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                />
+              </div>
+
+              {/* Note preview */}
+              {hasFields && (
+                <div className="bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-3">
+                  <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1">Message to seller</p>
+                  <p className="text-xs text-stone-700 leading-relaxed">{note}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── STEP 2: Preview ── */}
+          {step === 'preview' && (
+            <div className="p-5 space-y-4">
+              {/* Channel tabs */}
+              <div className="flex gap-1 bg-stone-100 rounded-lg p-1">
+                <button
+                  onClick={() => setPreviewTab('whatsapp')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    previewTab === 'whatsapp' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'
+                  }`}
+                >
+                  <MessageSquare size={11} /> WhatsApp
+                </button>
+                <button
+                  onClick={() => setPreviewTab('email')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    previewTab === 'email' ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'
+                  }`}
+                >
+                  <Mail size={11} /> Email
+                </button>
+              </div>
+
+              {previewTab === 'whatsapp' && (
+                <WAPreview
+                  sellerName={listing.sellerName}
+                  productTitle={listing.title}
+                  note={note}
+                />
+              )}
+              {previewTab === 'email' && (
+                <EmailPreview
+                  sellerName={listing.sellerName}
+                  productTitle={listing.title}
+                  note={note}
+                />
+              )}
+
+              <p className="text-[10px] text-stone-400 text-center">
+                {listing.sellerName ? `Sending to ${listing.sellerName}` : 'Seller name not set'}
+                {listing.sellerEmail ? ` · ${listing.sellerEmail}` : ''}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-stone-100 flex items-center gap-3">
+          {step === 'compose' ? (
+            <>
+              <button onClick={onClose} className="px-4 py-2 text-sm text-stone-500 border border-stone-200 rounded-xl hover:bg-stone-50 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={() => setStep('preview')}
+                disabled={!hasFields}
+                className="ml-auto flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-stone-900 text-white rounded-xl hover:bg-stone-800 disabled:opacity-40 transition-colors"
+              >
+                Preview <ChevronRight size={14} />
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => setStep('compose')} className="flex items-center gap-1.5 px-4 py-2 text-sm text-stone-500 border border-stone-200 rounded-xl hover:bg-stone-50 transition-colors">
+                <ChevronLeft size={14} /> Back
+              </button>
+              <button
+                onClick={send}
+                disabled={sending}
+                className="ml-auto flex items-center gap-2 px-5 py-2 text-sm font-medium bg-amber-500 hover:bg-amber-600 text-white rounded-xl disabled:opacity-50 transition-colors"
+              >
+                {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {sending ? 'Sending…' : 'Send Request'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Status badge ───────────────────────────────────────────────────────────
+function StatusBadge({ tags }) {
+  const tagList = (tags || '').split(', ').map(t => t.trim());
+  if (tagList.includes('needs-revision'))  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Revision</span>;
+  if (tagList.includes('seller-revised'))  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700">Re-review</span>;
+  if (tagList.includes('delisted'))        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-500">Delisted</span>;
+  if (tagList.includes('pending-approval')) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-100 text-yellow-700">Pending</span>;
+  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Live</span>;
+}
+
+// ─── Table row ──────────────────────────────────────────────────────────────
+function ListingRow({ listing, onSaved, onRevise }) {
+  const [editing, setEditing] = useState(false);
+  const [seller, setSeller] = useState(null);
+  const [rate, setRate] = useState(listing.commissionRate || 18);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
 
   async function save() {
     if (!seller) return;
@@ -118,10 +355,7 @@ function ListingRow({ listing, onSaved }) {
     try {
       const r = await fetch(`${API_URL}/api/admin-listings?action=fix-listing-seller`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('admin_token')}`
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
         body: JSON.stringify({ productId: listing.id, sellerId: seller.id, commissionRate: rate })
       });
       const d = await r.json();
@@ -137,154 +371,121 @@ function ListingRow({ listing, onSaved }) {
   }
 
   return (
-    <tr className="border-b border-stone-100 hover:bg-stone-50 transition-colors">
+    <tr className="border-b border-stone-100 hover:bg-stone-50/60 transition-colors group">
       {/* Image + title */}
       <td className="py-3 px-4">
         <div className="flex items-center gap-3">
           {listing.image
-            ? <img src={listing.image} alt="" className="w-10 h-12 rounded-lg object-cover flex-none" />
-            : <div className="w-10 h-12 rounded-lg bg-stone-100 flex-none" />
+            ? <img src={listing.image} alt="" className="w-9 h-11 rounded-lg object-cover flex-none shadow-sm" />
+            : <div className="w-9 h-11 rounded-lg bg-stone-100 flex-none" />
           }
-          <div>
-            <p className="text-sm font-medium text-stone-900 leading-tight">{listing.title}</p>
-            <p className="text-xs text-amber-700 font-semibold">{listing.designer}</p>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-stone-900 truncate max-w-[200px] leading-tight">{listing.title}</p>
+            <p className="text-[11px] text-amber-700 font-semibold mt-0.5">{listing.designer}</p>
             <a
               href={listing.shopifyAdminUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-[10px] text-stone-400 hover:text-stone-600 flex items-center gap-0.5 mt-0.5"
+              className="text-[10px] text-stone-400 hover:text-stone-600 flex items-center gap-0.5 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
             >
-              Shopify <ExternalLink size={9} />
+              Shopify <ExternalLink size={8} />
             </a>
           </div>
         </div>
       </td>
 
-      {/* Price */}
-      <td className="py-3 px-4 text-sm text-stone-700">${listing.price.toFixed(2)}</td>
+      {/* Status */}
+      <td className="py-3 px-4"><StatusBadge tags={listing.tags} /></td>
 
-      {/* Seller */}
+      {/* Price + payout */}
       <td className="py-3 px-4">
-        {saved || listing.hasSeller ? (
-          <div>
-            <p className="text-xs font-medium text-stone-900">{listing.sellerName || listing.sellerEmail || '—'}</p>
-            {listing.sellerEmail && <p className="text-[10px] text-stone-400">{listing.sellerEmail}</p>}
-          </div>
-        ) : (
-          <span className="flex items-center gap-1 text-xs text-amber-700">
-            <AlertTriangle size={11} /> No seller
-          </span>
+        <p className="text-sm font-semibold text-stone-800">${(listing.sellerAskingPrice || listing.price || 0).toFixed(0)}</p>
+        {listing.sellerPayout > 0 && (
+          <p className="text-[11px] text-green-600 font-medium">→ ${listing.sellerPayout.toFixed(0)}</p>
         )}
       </td>
 
-      {/* Commission */}
-      <td className="py-3 px-4 text-xs text-stone-600">
-        {listing.commissionRate}%
-        {listing.sellerPayout > 0 && (
-          <span className="text-stone-400 ml-1">(payout ${listing.sellerPayout.toFixed(2)})</span>
+      {/* Seller */}
+      <td className="py-3 px-4">
+        {editing ? (
+          <div className="space-y-2">
+            <SellerSearch onChange={setSeller} />
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 border border-stone-200 rounded-lg px-2 py-1 bg-white w-20">
+                <input
+                  type="number"
+                  value={rate}
+                  onChange={e => setRate(Number(e.target.value))}
+                  min={0} max={50}
+                  className="text-xs outline-none w-full"
+                />
+                <span className="text-xs text-stone-400">%</span>
+              </div>
+              <button onClick={save} disabled={!seller || saving} className="px-2.5 py-1 bg-stone-900 text-white text-xs rounded-lg disabled:opacity-40 flex items-center gap-1">
+                {saving ? <Loader2 size={10} className="animate-spin" /> : 'Save'}
+              </button>
+              <button onClick={() => setEditing(false)} className="p-1 text-stone-400 hover:text-stone-700">
+                <X size={12} />
+              </button>
+            </div>
+            {error && <p className="text-[10px] text-red-500">{error}</p>}
+          </div>
+        ) : (
+          <div>
+            {saved || listing.hasSeller ? (
+              <>
+                <p className="text-xs font-medium text-stone-900">{listing.sellerName || '—'}</p>
+                {listing.sellerEmail && <p className="text-[10px] text-stone-400 truncate max-w-[150px]">{listing.sellerEmail}</p>}
+                {listing.commissionRate && <p className="text-[10px] text-stone-400">{listing.commissionRate}% commission</p>}
+              </>
+            ) : (
+              <span className="flex items-center gap-1 text-xs text-amber-600 font-medium">
+                <AlertTriangle size={11} /> No seller
+              </span>
+            )}
+          </div>
         )}
       </td>
 
       {/* Actions */}
       <td className="py-3 px-4">
-        {editing ? (
-          <div className="flex items-start gap-2 flex-wrap">
-            <SellerSearch value={null} onChange={setSeller} />
-            <div className="flex items-center gap-1 border border-stone-200 rounded-lg px-2 py-1.5 bg-white w-20">
-              <input
-                type="number"
-                value={rate}
-                onChange={e => setRate(Number(e.target.value))}
-                min={0}
-                max={50}
-                className="text-xs outline-none w-full"
-              />
-              <span className="text-xs text-stone-400">%</span>
-            </div>
-            <button
-              onClick={save}
-              disabled={!seller || saving}
-              className="px-3 py-1.5 bg-stone-900 text-white text-xs rounded-lg disabled:opacity-40 flex items-center gap-1"
-            >
-              {saving ? <Loader2 size={11} className="animate-spin" /> : 'Save'}
-            </button>
-            <button onClick={() => setEditing(false)} className="p-1.5 text-stone-400 hover:text-stone-700">
-              <X size={13} />
-            </button>
-            {error && <p className="text-[10px] text-red-500 w-full">{error}</p>}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              {saved && <CheckCircle size={14} className="text-emerald-500" />}
+        <div className="flex items-center gap-1.5">
+          {!editing && (
+            <>
               <button
                 onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
-                className="flex items-center gap-1 text-xs text-stone-500 hover:text-stone-900"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-stone-500 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors"
+                title={listing.hasSeller ? 'Edit seller' : 'Assign seller'}
               >
-                <Edit2 size={12} />
+                <Edit2 size={11} />
                 {listing.hasSeller ? 'Edit' : 'Assign'}
               </button>
-              <button
-                onClick={() => { setShowRevision(v => !v); setRevisionNote(''); }}
-                className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800"
-              >
-                <AlertCircle size={12} />
-                Revise
-              </button>
-            </div>
-
-            {/* Inline revision form */}
-            {showRevision && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2 min-w-[260px]">
-                <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wide">Select fields to update</p>
-                <div className="grid grid-cols-2 gap-1">
-                  {REVISION_FIELD_OPTIONS.map(({ key, label, hint }) => (
-                    <label key={key} className={`flex items-start gap-1.5 p-1.5 rounded cursor-pointer transition-colors ${revisionFields[key] ? 'bg-amber-200' : 'hover:bg-amber-100'}`}>
-                      <input
-                        type="checkbox"
-                        checked={!!revisionFields[key]}
-                        onChange={e => setRevisionFields(f => ({ ...f, [key]: e.target.checked }))}
-                        className="mt-0.5 accent-amber-600 flex-shrink-0"
-                      />
-                      <div>
-                        <p className="text-[10px] font-semibold text-amber-900">{label}</p>
-                        <p className="text-[9px] text-amber-700">{hint}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                <textarea
-                  value={revisionNote}
-                  onChange={e => setRevisionNote(e.target.value)}
-                  placeholder="Optional extra note for seller..."
-                  rows={2}
-                  className="w-full text-xs px-2 py-1.5 border border-amber-200 rounded focus:outline-none resize-none bg-white"
-                />
-                <div className="flex gap-2">
-                  <button onClick={() => { setShowRevision(false); setRevisionFields({}); setRevisionNote(''); }} className="px-3 py-1 text-xs text-stone-500 border border-stone-200 rounded hover:bg-stone-50">Cancel</button>
-                  <button
-                    onClick={sendRevision}
-                    disabled={sendingRevision || Object.values(revisionFields).every(v => !v)}
-                    className="px-3 py-1 text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded disabled:opacity-50 flex items-center gap-1"
-                  >
-                    {sendingRevision ? <Loader2 size={11} className="animate-spin" /> : 'Send Request'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+              {listing.hasSeller && (
+                <button
+                  onClick={() => onRevise(listing)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors"
+                >
+                  <AlertCircle size={11} />
+                  Revise
+                </button>
+              )}
+            </>
+          )}
+          {saved && <CheckCircle size={14} className="text-emerald-500 ml-1" />}
+        </div>
       </td>
     </tr>
   );
 }
 
+// ─── Main page ───────────────────────────────────────────────────────────────
 export default function ListingsManager() {
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('missing'); // 'all' | 'missing' | 'assigned'
+  const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [stats, setStats] = useState({ total: 0, missing: 0 });
+  const [revisionTarget, setRevisionTarget] = useState(null); // listing being revised
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -304,63 +505,94 @@ export default function ListingsManager() {
 
   function handleSaved(updated) {
     setListings(prev => prev.map(l => l.id === updated.id ? updated : l));
-    setStats(prev => ({ ...prev, missing: prev.missing - 1 }));
+    setStats(prev => ({ ...prev, missing: Math.max(0, prev.missing - 1) }));
   }
 
+  function handleRevisionSent(productId) {
+    setListings(prev => prev.map(l => {
+      if (l.id !== productId) return l;
+      const tagList = (l.tags || '').split(', ').filter(t => t && t !== 'pending-approval' && t !== 'seller-revised');
+      return { ...l, tags: [...tagList, 'needs-revision'].join(', ') };
+    }));
+  }
+
+  const FILTERS = [
+    { id: 'all',      label: 'All',                     count: stats.total },
+    { id: 'missing',  label: 'Missing seller',           count: stats.missing },
+    { id: 'assigned', label: 'Assigned',                 count: stats.total - stats.missing },
+    { id: 'revision', label: 'Needs revision',           count: listings.filter(l => l.tags?.includes('needs-revision')).length },
+  ];
+
   const filtered = listings
-    .filter(l => filter === 'missing' ? !l.hasSeller : filter === 'assigned' ? l.hasSeller : true)
-    .filter(l => !search || l.title.toLowerCase().includes(search.toLowerCase()) || l.designer.toLowerCase().includes(search.toLowerCase()));
+    .filter(l => {
+      if (filter === 'missing')  return !l.hasSeller;
+      if (filter === 'assigned') return l.hasSeller;
+      if (filter === 'revision') return l.tags?.includes('needs-revision') || l.tags?.includes('seller-revised');
+      return true;
+    })
+    .filter(l => !search || l.title.toLowerCase().includes(search.toLowerCase()) || l.designer?.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div>
-      <div className="flex items-start justify-between mb-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-900">Listings</h1>
-          <p className="text-sm text-stone-500 mt-1">{stats.total} active listings · {stats.missing} missing seller</p>
+          <p className="text-sm text-stone-500 mt-0.5">
+            {stats.total} active · {stats.missing} missing seller
+            {listings.filter(l => l.tags?.includes('needs-revision')).length > 0 && (
+              <> · <span className="text-amber-600 font-medium">{listings.filter(l => l.tags?.includes('needs-revision')).length} awaiting revision</span></>
+            )}
+          </p>
         </div>
-        <button onClick={load} className="text-xs text-stone-500 hover:text-stone-900 border border-stone-200 rounded-lg px-3 py-1.5">
+        <button onClick={load} className="text-xs text-stone-500 hover:text-stone-900 border border-stone-200 rounded-xl px-3 py-2 transition-colors hover:bg-stone-50">
           Refresh
         </button>
       </div>
 
-      {/* Stats bar */}
+      {/* Missing seller alert */}
       {stats.missing > 0 && (
-        <div className="mb-5 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-          <AlertTriangle size={16} className="text-amber-600 flex-none" />
+        <div className="mb-5 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <AlertTriangle size={15} className="text-amber-600 flex-none" />
           <p className="text-sm text-amber-800">
-            <strong>{stats.missing} listings</strong> are missing seller info — orders for these won't be tracked to a seller.
+            <strong>{stats.missing} listing{stats.missing > 1 ? 's' : ''}</strong> missing seller — orders won't be tracked.
           </p>
+          <button onClick={() => setFilter('missing')} className="ml-auto text-xs text-amber-700 font-medium underline underline-offset-2 hover:text-amber-900">
+            View
+          </button>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex gap-1 bg-stone-100 rounded-lg p-1">
-          {[
-            { id: 'missing', label: `Missing (${stats.missing})` },
-            { id: 'assigned', label: 'Assigned' },
-            { id: 'all', label: 'All' }
-          ].map(({ id, label }) => (
+      {/* Filters + search */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex gap-1 bg-stone-100 rounded-xl p-1">
+          {FILTERS.map(({ id, label, count }) => (
             <button
               key={id}
               onClick={() => setFilter(id)}
-              className={`px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${
-                filter === id ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-900'
+              className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                filter === id ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-700'
               }`}
             >
               {label}
+              {count > 0 && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                  filter === id ? 'bg-stone-100 text-stone-600' : 'bg-stone-200 text-stone-500'
+                }`}>{count}</span>
+              )}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-2 border border-stone-200 rounded-lg px-3 py-1.5 bg-white ml-auto">
+        <div className="flex items-center gap-2 border border-stone-200 rounded-xl px-3 py-2 bg-white ml-auto w-56 focus-within:ring-2 focus-within:ring-stone-300">
           <Search size={13} className="text-stone-400" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search title or designer..."
-            className="text-xs outline-none w-48"
+            placeholder="Search title or designer…"
+            className="text-xs outline-none flex-1"
           />
+          {search && <button onClick={() => setSearch('')} className="text-stone-300 hover:text-stone-500"><X size={12} /></button>}
         </div>
       </div>
 
@@ -369,7 +601,7 @@ export default function ListingsManager() {
         {loading ? (
           <div className="flex items-center justify-center py-16 gap-2 text-stone-400">
             <Loader2 className="animate-spin" size={18} />
-            <span className="text-sm">Loading listings...</span>
+            <span className="text-sm">Loading listings…</span>
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center text-stone-400">
@@ -381,26 +613,38 @@ export default function ListingsManager() {
         ) : (
           <table className="w-full">
             <thead>
-              <tr className="border-b border-stone-100 bg-stone-50">
-                <th className="text-left text-xs font-semibold text-stone-500 uppercase tracking-wider py-3 px-4">Listing</th>
-                <th className="text-left text-xs font-semibold text-stone-500 uppercase tracking-wider py-3 px-4">Price</th>
-                <th className="text-left text-xs font-semibold text-stone-500 uppercase tracking-wider py-3 px-4">Seller</th>
-                <th className="text-left text-xs font-semibold text-stone-500 uppercase tracking-wider py-3 px-4">Commission</th>
-                <th className="text-left text-xs font-semibold text-stone-500 uppercase tracking-wider py-3 px-4">Actions</th>
+              <tr className="border-b border-stone-100 bg-stone-50/80">
+                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Listing</th>
+                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Status</th>
+                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Price / Payout</th>
+                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Seller</th>
+                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(l => (
-                <ListingRow key={l.id} listing={l} onSaved={handleSaved} />
+                <ListingRow
+                  key={l.id}
+                  listing={l}
+                  onSaved={handleSaved}
+                  onRevise={setRevisionTarget}
+                />
               ))}
             </tbody>
           </table>
         )}
       </div>
 
-      <p className="text-xs text-stone-400 mt-3">
-        Showing {filtered.length} of {listings.length} listings
-      </p>
+      <p className="text-xs text-stone-400 mt-3">Showing {filtered.length} of {listings.length} listings</p>
+
+      {/* Revision modal */}
+      {revisionTarget && (
+        <RevisionModal
+          listing={revisionTarget}
+          onClose={() => setRevisionTarget(null)}
+          onSent={handleRevisionSent}
+        />
+      )}
     </div>
   );
 }
