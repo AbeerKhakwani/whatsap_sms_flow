@@ -1295,8 +1295,8 @@ export default async function handler(req, res) {
       };
       const missingOnly = req.query.missing === 'true';
 
-      // Cache the full enriched list for 10 minutes (expensive: N metafield calls)
-      const enriched = await withCache(CACHE_ALL, 600, async () => {
+      // Cache the full enriched list for 6 hours — cache is busted on approve/reject/revision
+      const enriched = await withCache(CACHE_ALL, 21600, async () => {
         const res1 = await fetch(
           `https://${storeUrl}/admin/api/2024-10/products.json?status=active&limit=250&fields=id,title,vendor,variants,images,tags,handle`,
           { headers: { 'X-Shopify-Access-Token': token } }

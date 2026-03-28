@@ -35,6 +35,14 @@ export default function Layout({ children }) {
   useEffect(() => {
     if (!verified) return;
     fetchActivity();
+    // Preload listings cache in the background so /listings is instant
+    fetch(`${API_URL}/api/admin-listings?action=all-listings`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` }
+    }).then(r => r.json()).then(d => {
+      if (d.listings) {
+        try { localStorage.setItem('admin_listings_cache', JSON.stringify({ listings: d.listings, total: d.total, missing: d.missing })); } catch {}
+      }
+    }).catch(() => {});
 
     const handler = (e) => {
       if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false);
