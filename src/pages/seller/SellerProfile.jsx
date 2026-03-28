@@ -870,7 +870,7 @@ export default function SellerProfile() {
                       </div>
                     ) : (
                       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
-                        <span className="text-gray-500">Your price: <span className="font-medium text-gray-700">${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}</span></span>
+                        <span className="text-gray-500">Listed: <span className="font-medium text-gray-700">${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}</span></span>
                         <span className="text-gray-500">You'll get: <span className="font-medium text-green-600">${listing.sellerPayout?.toFixed(2)}</span></span>
                       </div>
                     )}
