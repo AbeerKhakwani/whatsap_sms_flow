@@ -839,80 +839,72 @@ export default function SellerProfile() {
               </Link>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100">
-              {listings.map((listing) => (
-                <div key={listing.id} className="p-4 flex items-start gap-4 hover:bg-gray-50">
-                  {/* Image */}
-                  <div className="w-16 h-16 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
-                    {listing.image ? (
-                      <img src={getThumbnail(listing.image)} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-400">
-                        <Package className="w-6 h-6" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-medium text-gray-900 truncate">{listing.title}</h3>
-                      {getStatusBadge(listing)}
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500">
-                      <span>{listing.size}</span>
-                      <span>{listing.condition}</span>
-                    </div>
-                    {listing.isSold ? (
-                      <div className="mt-2 flex items-center gap-4 text-xs">
-                        <span className="text-gray-500">Sold for: <span className="font-medium text-gray-700">${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}</span></span>
-                        <span className="text-green-600 font-medium">You earned: ${listing.sellerPayout?.toFixed(2)}</span>
-                      </div>
-                    ) : (
-                      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
-                        <span className="text-gray-500">Listed: <span className="font-medium text-gray-700">${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}</span></span>
-                        <span className="text-gray-500">You'll get: <span className="font-medium text-green-600">${listing.sellerPayout?.toFixed(2)}</span></span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2">
-                    {!listing.isSold && (
-                      <button onClick={() => openEditModal(listing)} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition">
-                        <Edit2 className="w-3.5 h-3.5" />
-                        Edit
-                      </button>
-                    )}
-                    {!listing.isSold && listing.status === 'active' && !listing.tags?.includes('delisted') && (
-                      <button
-                        onClick={() => toggleListingStatus(listing)}
-                        disabled={togglingStatus === listing.id}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition text-gray-600 hover:text-red-600 hover:bg-red-50 ${togglingStatus === listing.id ? 'opacity-50' : ''}`}
-                      >
-                        {togglingStatus === listing.id ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
-                        Delist
-                      </button>
-                    )}
-                    {!listing.isSold && listing.tags?.includes('delisted') && (
-                      <button
-                        onClick={() => toggleListingStatus(listing)}
-                        disabled={togglingStatus === listing.id}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition text-gray-600 hover:text-green-600 hover:bg-green-50 ${togglingStatus === listing.id ? 'opacity-50' : ''}`}
-                      >
-                        {togglingStatus === listing.id ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
-                        Relist
-                      </button>
-                    )}
-                    {listing.status === 'active' && listing.handle && (
-                      <a href={`https://thephirstory.com/products/${listing.handle}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition">
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        View
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Item</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide hidden sm:table-cell">Size</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide hidden sm:table-cell">Condition</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Price</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Payout</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
+                    <th className="px-4 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {listings.map((listing) => (
+                    <tr key={listing.id} className="hover:bg-gray-50">
+                      {/* Image + title */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden flex-shrink-0">
+                            {listing.image
+                              ? <img src={getThumbnail(listing.image)} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
+                              : <div className="w-full h-full flex items-center justify-center text-gray-300"><Package className="w-4 h-4" /></div>
+                            }
+                          </div>
+                          <span className="font-medium text-gray-900 line-clamp-2 max-w-[160px]">{listing.title}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{listing.size || '—'}</td>
+                      <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{listing.condition || '—'}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        ${(listing.sellerAskingPrice || listing.price)?.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-green-600">
+                        ${listing.sellerPayout?.toFixed(2) ?? '—'}
+                      </td>
+                      <td className="px-4 py-3">{getStatusBadge(listing)}</td>
+                      {/* Actions */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 justify-end">
+                          {!listing.isSold && (
+                            <button onClick={() => openEditModal(listing)} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition" title="Edit">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!listing.isSold && listing.status === 'active' && !listing.tags?.includes('delisted') && (
+                            <button onClick={() => toggleListingStatus(listing)} disabled={togglingStatus === listing.id} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition disabled:opacity-50" title="Delist">
+                              {togglingStatus === listing.id ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                          {!listing.isSold && listing.tags?.includes('delisted') && (
+                            <button onClick={() => toggleListingStatus(listing)} disabled={togglingStatus === listing.id} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition disabled:opacity-50" title="Relist">
+                              {togglingStatus === listing.id ? <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
+                          {listing.status === 'active' && listing.handle && (
+                            <a href={`https://thephirstory.com/products/${listing.handle}`} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition" title="View on site">
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
