@@ -339,8 +339,8 @@ function StatusBadge({ tags }) {
   return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Live</span>;
 }
 
-// ─── Table row ──────────────────────────────────────────────────────────────
-function ListingRow({ listing, onSaved, onRevise }) {
+// ─── Listing card ───────────────────────────────────────────────────────────
+function ListingCard({ listing, onSaved, onRevise }) {
   const [editing, setEditing] = useState(false);
   const [seller, setSeller] = useState(null);
   const [rate, setRate] = useState(listing.commissionRate || 18);
@@ -370,111 +370,131 @@ function ListingRow({ listing, onSaved, onRevise }) {
     }
   }
 
+  const hasSeller = saved || listing.hasSeller;
+
   return (
-    <tr className="border-b border-stone-100 hover:bg-stone-50/60 transition-colors group">
-      {/* Image + title */}
-      <td className="py-3 px-4">
-        <div className="flex items-center gap-3">
-          {listing.image
-            ? <img src={listing.image} alt="" className="w-9 h-11 rounded-lg object-cover flex-none shadow-sm" />
-            : <div className="w-9 h-11 rounded-lg bg-stone-100 flex-none" />
-          }
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-stone-900 truncate max-w-[200px] leading-tight">{listing.title}</p>
-            <p className="text-[11px] text-amber-700 font-semibold mt-0.5">{listing.designer}</p>
-            <a
-              href={listing.shopifyAdminUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[10px] text-stone-400 hover:text-stone-600 flex items-center gap-0.5 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              Shopify <ExternalLink size={8} />
-            </a>
-          </div>
+    <div className={`bg-white rounded-2xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
+      !hasSeller ? 'border-amber-200' : 'border-stone-200'
+    }`}>
+      {/* Image */}
+      <div className="relative aspect-[3/4] bg-stone-100 overflow-hidden">
+        {listing.image
+          ? <img src={listing.image} alt={listing.title} className="w-full h-full object-cover" loading="lazy" />
+          : <div className="w-full h-full flex items-center justify-center text-stone-300 text-4xl">📷</div>
+        }
+        {/* Status badge overlay */}
+        <div className="absolute top-2 left-2">
+          <StatusBadge tags={listing.tags} />
         </div>
-      </td>
+        {/* Shopify link */}
+        <a
+          href={listing.shopifyAdminUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="absolute top-2 right-2 p-1.5 bg-black/40 hover:bg-black/60 rounded-lg transition-colors"
+          title="Open in Shopify"
+        >
+          <ExternalLink size={11} className="text-white" />
+        </a>
+      </div>
 
-      {/* Status */}
-      <td className="py-3 px-4"><StatusBadge tags={listing.tags} /></td>
+      {/* Content */}
+      <div className="p-3 flex flex-col gap-2 flex-1">
+        {/* Title + designer */}
+        <div>
+          <p className="text-sm font-semibold text-stone-900 leading-snug line-clamp-2">{listing.title}</p>
+          <p className="text-[11px] text-amber-700 font-medium mt-0.5">{listing.designer}</p>
+        </div>
 
-      {/* Price + payout */}
-      <td className="py-3 px-4">
-        <p className="text-sm font-semibold text-stone-800">${(listing.sellerAskingPrice || listing.price || 0).toFixed(0)}</p>
-        {listing.sellerPayout > 0 && (
-          <p className="text-[11px] text-green-600 font-medium">→ ${listing.sellerPayout.toFixed(0)}</p>
-        )}
-      </td>
-
-      {/* Seller */}
-      <td className="py-3 px-4">
-        {editing ? (
-          <div className="space-y-2">
-            <SellerSearch onChange={setSeller} />
-            <div className="flex items-center gap-1.5">
-              <div className="flex items-center gap-1 border border-stone-200 rounded-lg px-2 py-1 bg-white w-20">
-                <input
-                  type="number"
-                  value={rate}
-                  onChange={e => setRate(Number(e.target.value))}
-                  min={0} max={50}
-                  className="text-xs outline-none w-full"
-                />
-                <span className="text-xs text-stone-400">%</span>
-              </div>
-              <button onClick={save} disabled={!seller || saving} className="px-2.5 py-1 bg-stone-900 text-white text-xs rounded-lg disabled:opacity-40 flex items-center gap-1">
-                {saving ? <Loader2 size={10} className="animate-spin" /> : 'Save'}
-              </button>
-              <button onClick={() => setEditing(false)} className="p-1 text-stone-400 hover:text-stone-700">
-                <X size={12} />
-              </button>
-            </div>
-            {error && <p className="text-[10px] text-red-500">{error}</p>}
-          </div>
-        ) : (
+        {/* Price + payout */}
+        <div className="flex items-center justify-between">
           <div>
-            {saved || listing.hasSeller ? (
-              <>
-                <p className="text-xs font-medium text-stone-900">{listing.sellerName || '—'}</p>
-                {listing.sellerEmail && <p className="text-[10px] text-stone-400 truncate max-w-[150px]">{listing.sellerEmail}</p>}
-                {listing.commissionRate && <p className="text-[10px] text-stone-400">{listing.commissionRate}% commission</p>}
-              </>
-            ) : (
-              <span className="flex items-center gap-1 text-xs text-amber-600 font-medium">
-                <AlertTriangle size={11} /> No seller
-              </span>
+            <p className="text-sm font-bold text-stone-800">${(listing.sellerAskingPrice || listing.price || 0).toFixed(0)}</p>
+            {listing.sellerPayout > 0 && (
+              <p className="text-[10px] text-green-600 font-medium">→ ${listing.sellerPayout.toFixed(0)} payout</p>
             )}
           </div>
-        )}
-      </td>
+          {listing.commissionRate && (
+            <span className="text-[10px] text-stone-400 bg-stone-50 border border-stone-100 px-1.5 py-0.5 rounded-full">
+              {listing.commissionRate}%
+            </span>
+          )}
+        </div>
 
-      {/* Actions */}
-      <td className="py-3 px-4">
-        <div className="flex items-center gap-1.5">
-          {!editing && (
-            <>
-              <button
-                onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-stone-500 hover:text-stone-900 hover:bg-stone-100 rounded-lg transition-colors"
-                title={listing.hasSeller ? 'Edit seller' : 'Assign seller'}
-              >
-                <Edit2 size={11} />
-                {listing.hasSeller ? 'Edit' : 'Assign'}
-              </button>
-              {listing.hasSeller && (
-                <button
-                  onClick={() => onRevise(listing)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors"
-                >
-                  <AlertCircle size={11} />
-                  Revise
+        {/* Seller section */}
+        <div className="mt-auto pt-2 border-t border-stone-100">
+          {editing ? (
+            <div className="space-y-2">
+              <SellerSearch onChange={setSeller} />
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 border border-stone-200 rounded-lg px-2 py-1 bg-white flex-1">
+                  <input
+                    type="number"
+                    value={rate}
+                    onChange={e => setRate(Number(e.target.value))}
+                    min={0} max={50}
+                    className="text-xs outline-none w-full"
+                    placeholder="Rate"
+                  />
+                  <span className="text-xs text-stone-400">%</span>
+                </div>
+                <button onClick={save} disabled={!seller || saving} className="px-2.5 py-1 bg-stone-900 text-white text-xs rounded-lg disabled:opacity-40 flex items-center gap-1">
+                  {saving ? <Loader2 size={10} className="animate-spin" /> : 'Save'}
                 </button>
+                <button onClick={() => setEditing(false)} className="p-1 text-stone-400 hover:text-stone-700">
+                  <X size={12} />
+                </button>
+              </div>
+              {error && <p className="text-[10px] text-red-500">{error}</p>}
+            </div>
+          ) : (
+            <>
+              {hasSeller ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-stone-200 flex items-center justify-center text-[10px] font-bold text-stone-600 flex-shrink-0">
+                    {(listing.sellerName || listing.sellerEmail || '?')[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-stone-800 truncate">{listing.sellerName || listing.sellerEmail || '—'}</p>
+                    {listing.sellerEmail && listing.sellerName && (
+                      <p className="text-[10px] text-stone-400 truncate">{listing.sellerEmail}</p>
+                    )}
+                  </div>
+                  {saved && <CheckCircle size={13} className="text-emerald-500 ml-auto flex-shrink-0" />}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-amber-600">
+                  <AlertTriangle size={12} />
+                  <span className="text-xs font-medium">No seller assigned</span>
+                </div>
               )}
             </>
           )}
-          {saved && <CheckCircle size={14} className="text-emerald-500 ml-1" />}
         </div>
-      </td>
-    </tr>
+
+        {/* Action buttons */}
+        {!editing && (
+          <div className="flex gap-1.5 mt-1">
+            <button
+              onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
+              className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs text-stone-600 hover:text-stone-900 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-xl transition-colors"
+            >
+              <Edit2 size={11} />
+              {hasSeller ? 'Edit seller' : 'Assign seller'}
+            </button>
+            {hasSeller && (
+              <button
+                onClick={() => onRevise(listing)}
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors"
+              >
+                <AlertCircle size={11} />
+                Revise
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -609,44 +629,31 @@ export default function ListingsManager() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 gap-2 text-stone-400">
-            <Loader2 className="animate-spin" size={18} />
-            <span className="text-sm">Loading listings…</span>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-stone-400">
-            <CheckCircle size={32} className="mx-auto mb-3 text-emerald-400" />
-            <p className="text-sm font-medium text-stone-600">
-              {filter === 'missing' ? 'All listings have sellers assigned!' : 'No listings found.'}
-            </p>
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-stone-100 bg-stone-50/80">
-                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Listing</th>
-                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Status</th>
-                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Price / Payout</th>
-                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Seller</th>
-                <th className="text-left text-[10px] font-bold text-stone-400 uppercase tracking-widest py-3 px-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(l => (
-                <ListingRow
-                  key={l.id}
-                  listing={l}
-                  onSaved={handleSaved}
-                  onRevise={setRevisionTarget}
-                />
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {/* Cards grid */}
+      {loading && listings.length === 0 ? (
+        <div className="flex items-center justify-center py-20 gap-2 text-stone-400">
+          <Loader2 className="animate-spin" size={18} />
+          <span className="text-sm">Loading listings…</span>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="py-20 text-center text-stone-400">
+          <CheckCircle size={32} className="mx-auto mb-3 text-emerald-400" />
+          <p className="text-sm font-medium text-stone-600">
+            {filter === 'missing' ? 'All listings have sellers assigned!' : 'No listings found.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {filtered.map(l => (
+            <ListingCard
+              key={l.id}
+              listing={l}
+              onSaved={handleSaved}
+              onRevise={setRevisionTarget}
+            />
+          ))}
+        </div>
+      )}
 
       <p className="text-xs text-stone-400 mt-3">Showing {filtered.length} of {listings.length} listings</p>
 
