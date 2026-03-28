@@ -487,8 +487,20 @@ export default function ListingsManager() {
   const [stats, setStats] = useState({ total: 0, missing: 0 });
   const [revisionTarget, setRevisionTarget] = useState(null); // listing being revised
 
+  const CACHE_KEY = 'admin_listings_cache';
+
   const load = useCallback(async () => {
-    setLoading(true);
+    // Show cached data instantly while fetching fresh
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const { listings: cl, total, missing } = JSON.parse(cached);
+        setListings(cl || []);
+        setStats({ total: total || 0, missing: missing || 0 });
+        setLoading(false);
+      }
+    } catch {}
+
     try {
       const r = await fetch(`${API_URL}/api/admin-listings?action=all-listings`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` }
@@ -496,6 +508,7 @@ export default function ListingsManager() {
       const d = await r.json();
       setListings(d.listings || []);
       setStats({ total: d.total || 0, missing: d.missing || 0 });
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ listings: d.listings, total: d.total, missing: d.missing })); } catch {}
     } finally {
       setLoading(false);
     }
