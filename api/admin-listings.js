@@ -333,9 +333,9 @@ export default async function handler(req, res) {
       await updateProduct(shopifyProductId, { tags: newTags.join(', ') });
 
       // Store revision note + fields as metafields so seller portal can display them
-      await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_note', note);
-      await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_requested_at', new Date().toISOString());
-      if (fields?.length) await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_fields', JSON.stringify(fields));
+      await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_note', note, 'multi_line_text_field');
+      await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_requested_at', new Date().toISOString(), 'single_line_text_field');
+      if (fields?.length) await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_fields', JSON.stringify(fields), 'json');
       if (sellerEmail) await cacheBust(`listings:seller:${sellerEmail}`);
 
       const seller = await resolveSellerFromProduct(sellerEmail, sellerId, shopifyProductId, 'id, name, email, phone');
@@ -366,13 +366,6 @@ export default async function handler(req, res) {
                   { type: 'text', text: product.title },
                   { type: 'text', text: note }
                 ]
-              },
-              // URL button — links to seller dashboard (button must exist in approved template)
-              {
-                type: 'button',
-                sub_type: 'url',
-                index: '0',
-                parameters: []
               }
             ],
             context: 'revision_requested',
