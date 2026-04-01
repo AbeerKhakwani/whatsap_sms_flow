@@ -1379,16 +1379,16 @@ export default async function handler(req, res) {
       const testSeller = {
         name: 'Test Seller',
         email: 'test-seller@example.com',
-        address_line1: '123 Main St',
+        address_line1: '2700 Oak Lawn Ave',
         city: 'Dallas',
         state: 'TX',
-        zip: '75201',
+        zip: '75219',
         phone: '5551234567'
       };
 
       const testBuyer = {
         name: 'Test Buyer',
-        street1: '456 Oak Ave',
+        street1: '100 Congress Ave',
         city: 'Austin',
         state: 'TX',
         zip: '78701',
