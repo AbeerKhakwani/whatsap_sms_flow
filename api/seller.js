@@ -874,7 +874,22 @@ export default async function handler(req, res) {
               console.log('📦 Shopify order fulfilled - buyer will receive tracking notification');
             } catch (fulfillErr) {
               console.error('📦 Shopify fulfillment failed (non-blocking):', fulfillErr.message);
-              // Don't fail the request - label was created successfully
+              // Flag on transaction so admin can see it needs manual fulfillment
+              await supabase.from('transactions').update({
+                admin_note: `⚠️ Shopify fulfillment failed — label created (${labelResult.trackingNumber}) but buyer not notified. Manual fulfillment needed. Error: ${fulfillErr.message}`
+              }).eq('id', transactionId).catch(() => {});
+              // Alert admin
+              await sendEmail({
+                to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
+                subject: `⚠️ Shopify fulfillment failed: ${productTitle}`,
+                html: `<p>A shipping label was created successfully but Shopify fulfillment failed.</p>
+                       <p><strong>Item:</strong> ${productTitle}<br>
+                       <strong>Tracking:</strong> ${labelResult.trackingNumber}<br>
+                       <strong>Seller:</strong> ${seller.email}<br>
+                       <strong>Error:</strong> ${fulfillErr.message}</p>
+                       <p>Please fulfill this order manually in Shopify so the buyer receives their tracking number.</p>`,
+                context: 'fulfillment_failed'
+              }).catch(() => {});
             }
           }
         }
