@@ -773,6 +773,7 @@ export default async function handler(req, res) {
         // Format seller address for shipping API
         const sellerForShipping = {
           name: seller.shipping_address.full_name || seller.name,
+          email: seller.email || '',
           address_line1: seller.shipping_address.street_address,
           address_line2: seller.shipping_address.apartment || '',
           city: seller.shipping_address.city,
@@ -1377,6 +1378,7 @@ export default async function handler(req, res) {
       // Test addresses
       const testSeller = {
         name: 'Test Seller',
+        email: 'test-seller@example.com',
         address_line1: '123 Main St',
         city: 'Dallas',
         state: 'TX',
