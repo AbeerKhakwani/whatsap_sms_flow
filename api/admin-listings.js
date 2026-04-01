@@ -1444,7 +1444,220 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, activity, recentSales: recentSales || [] });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity' });
+    // ─── AUDIT LISTINGS ───────────────────────────────────────────────────────
+    if (action === 'audit-listings' && req.method === 'GET') {
+      const SHOP = process.env.VITE_SHOPIFY_STORE_URL;
+      const TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+
+      const SIZE_MAP = {
+        'xxs': 'XXS', 'extra extra small': 'XXS',
+        'xs': 'XS', 'extra small': 'XS', 'xsmall': 'XS',
+        's': 'S', 'small': 'S', 'sm': 'S',
+        'm': 'M', 'medium': 'M', 'med': 'M',
+        'l': 'L', 'large': 'L', 'lg': 'L',
+        'xl': 'XL', 'extra large': 'XL', 'xlarge': 'XL',
+        'xxl': 'XXL', 'extra extra large': 'XXL', '2xl': 'XXL',
+        'xxxl': 'XXXL', '3xl': 'XXXL',
+        'one size': 'One Size', 'os': 'One Size', 'onesize': 'One Size', 'free size': 'One Size',
+        'unstitched': 'Unstitched',
+        'measurements': 'Measurements',
+        '0-6 months': '0-6M', '0-6m': '0-6M',
+        '6-12 months': '6-12M', '6-12m': '6-12M',
+        '1-2 years': '1-2Y', '1-2 yrs': '1-2Y', '1-2y': '1-2Y',
+        '2-3 years': '2-3Y', '2-3 yrs': '2-3Y', '2-3y': '2-3Y',
+        '3-4 years': '3-4Y', '3-4 yrs': '3-4Y', '3-4y': '3-4Y',
+        '4-5 years': '4-5Y', '4-5 yrs': '4-5Y', '4-5y': '4-5Y', '4y': '4Y',
+        '5-6 years': '5-6Y', '5-6 yrs': '5-6Y', '5-6y': '5-6Y', '6y': '6Y',
+        '6-7 years': '6-7Y', '6-7y': '6-7Y',
+        '7-8 years': '7-8Y', '7-8 yrs': '7-8Y', '7-8y': '7-8Y',
+        '8-9 years': '8-9Y', '8-9y': '8-9Y',
+        '9-10 years': '9-10Y', '9-10y': '9-10Y',
+      };
+      const CANONICAL_SIZES = new Set(Object.values(SIZE_MAP));
+
+      function canonicalSize(raw) {
+        if (!raw) return null;
+        const lower = raw.toLowerCase().trim();
+        if (SIZE_MAP[lower]) return SIZE_MAP[lower];
+        if (CANONICAL_SIZES.has(raw)) return raw;
+        return null;
+      }
+
+      async function fetchByStatus(status) {
+        const products = [];
+        let url = `https://${SHOP}/admin/api/2024-10/products.json?limit=250&status=${status}&fields=id,title,handle,vendor,tags,variants,images`;
+        while (url) {
+          const r = await fetch(url, { headers: { 'X-Shopify-Access-Token': TOKEN } });
+          if (!r.ok) throw new Error(`Shopify ${status}: ${r.status}`);
+          const d = await r.json();
+          (d.products || []).forEach(p => { p._status = status; });
+          products.push(...(d.products || []));
+          const link = r.headers.get('link') || '';
+          const next = link.match(/<([^>]+)>;\s*rel="next"/);
+          url = next ? next[1] : null;
+        }
+        return products;
+      }
+
+      const [active, draft] = await Promise.all([fetchByStatus('active'), fetchByStatus('draft')]);
+      const products = [...active, ...draft];
+
+      const issues = {
+        price_issues: [],
+        default_title: [],
+        size_needs_fix: [],
+        size_unknown: [],
+        needs_tag_cleanup: [],  // has CH-* tags that need stripping
+        missing_brand: [],      // no CH-brand and no vendor
+      };
+      let clean = 0;
+
+      for (const p of products) {
+        const tags = p.tags ? p.tags.split(',').map(t => t.trim()).filter(Boolean) : [];
+        const chTags = tags.filter(t => t.startsWith('CH-'));
+        const nonChTags = tags.filter(t => !t.startsWith('CH-'));
+        const productIssues = [];
+
+        // Extract CH-tag values
+        const chBrand = chTags.find(t => t.startsWith('CH-brand-'))?.slice('CH-brand-'.length) || null;
+        const chSize = chTags.find(t => t.startsWith('CH-size-'))?.slice('CH-size-'.length) || null;
+        const chCondition = chTags.find(t => t.startsWith('CH-condition-'))?.slice('CH-condition-'.length) || null;
+        const chColor = chTags.find(t => t.startsWith('CH-color-'))?.slice('CH-color-'.length) || null;
+        const chCategory = chTags.find(t => t.startsWith('CH-category-'))?.slice('CH-category-'.length) || null;
+        const chGender = chTags.find(t => t.startsWith('CH-gender-'))?.slice('CH-gender-'.length) || null;
+
+        const effectiveBrand = chBrand || p.vendor || null;
+
+        for (const variant of p.variants || []) {
+          const rawSize = variant.option1;
+          const price = parseFloat(variant.price || '0');
+
+          if (rawSize === 'Default Title') {
+            issues.default_title.push({
+              id: p.id, title: p.title, handle: p.handle,
+              image: p.images?.[0]?.src || null,
+              _status: p._status
+            });
+            productIssues.push('default_title');
+            continue;
+          }
+
+          if (!variant.price || variant.price === '') {
+            issues.price_issues.push({ id: p.id, title: p.title, handle: p.handle, type: 'no_price', image: p.images?.[0]?.src || null });
+            productIssues.push('price');
+          } else if (price === 0) {
+            issues.price_issues.push({ id: p.id, title: p.title, handle: p.handle, type: 'zero_price', price: variant.price, image: p.images?.[0]?.src || null });
+            productIssues.push('price');
+          }
+
+          const canonical = canonicalSize(rawSize);
+          if (canonical === null) {
+            issues.size_unknown.push({
+              id: p.id, title: p.title, handle: p.handle,
+              rawSize, variantId: variant.id,
+              image: p.images?.[0]?.src || null
+            });
+            productIssues.push('size_unknown');
+          } else if (canonical !== rawSize) {
+            issues.size_needs_fix.push({
+              id: p.id, title: p.title, handle: p.handle,
+              variantId: variant.id, rawSize, canonical,
+              image: p.images?.[0]?.src || null
+            });
+            productIssues.push('size_needs_fix');
+          }
+        }
+
+        // Tag cleanup needed if any CH-* tags exist
+        if (chTags.length > 0) {
+          // Build what the clean tags would look like
+          const cleanTags = [...nonChTags];
+          if (chGender && !cleanTags.includes(chGender)) cleanTags.push(chGender);
+          if (chSize && CANONICAL_SIZES.has(chSize) && !cleanTags.includes(chSize)) cleanTags.push(chSize);
+          if (chCategory && !cleanTags.includes(chCategory)) cleanTags.push(chCategory);
+          if (chCondition && !cleanTags.includes(chCondition)) cleanTags.push(chCondition);
+          if (effectiveBrand && !cleanTags.includes(effectiveBrand)) cleanTags.push(effectiveBrand);
+
+          issues.needs_tag_cleanup.push({
+            id: p.id, title: p.title, handle: p.handle,
+            image: p.images?.[0]?.src || null,
+            currentTags: tags,
+            chTags, nonChTags,
+            extracted: { brand: chBrand, size: chSize, condition: chCondition, color: chColor, category: chCategory, gender: chGender },
+            proposedTags: cleanTags,
+            proposedVendor: effectiveBrand,
+            currentVendor: p.vendor,
+            _status: p._status
+          });
+          productIssues.push('tags');
+        }
+
+        if (!effectiveBrand) {
+          issues.missing_brand.push({ id: p.id, title: p.title, handle: p.handle, image: p.images?.[0]?.src || null });
+          productIssues.push('missing_brand');
+        }
+
+        if (productIssues.length === 0) clean++;
+      }
+
+      return res.status(200).json({
+        success: true,
+        summary: { total: products.length, clean, has_issues: products.length - clean },
+        issues
+      });
+    }
+
+    // ─── FIX LISTING ──────────────────────────────────────────────────────────
+    if (action === 'fix-listing' && req.method === 'POST') {
+      const { productId, variantId, fixType, newSize, newTags, newVendor } = req.body;
+      if (!productId) return res.status(400).json({ error: 'productId required' });
+
+      const SHOP = process.env.VITE_SHOPIFY_STORE_URL;
+      const TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+      const changes = [];
+
+      // Fix variant size
+      if (fixType === 'size' || fixType === 'full') {
+        if (variantId && newSize) {
+          const vRes = await fetch(`https://${SHOP}/admin/api/2024-10/variants/${variantId}.json`, {
+            method: 'PUT',
+            headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ variant: { id: variantId, option1: newSize } })
+          });
+          if (!vRes.ok) {
+            const err = await vRes.text();
+            return res.status(500).json({ error: `Variant update failed: ${err}` });
+          }
+          changes.push(`size: → ${newSize}`);
+        }
+      }
+
+      // Fix tags + vendor
+      if (fixType === 'tags' || fixType === 'full') {
+        const updates = {};
+        if (newTags) updates.tags = Array.isArray(newTags) ? newTags.join(', ') : newTags;
+        if (newVendor) updates.vendor = newVendor;
+
+        if (Object.keys(updates).length) {
+          const pRes = await fetch(`https://${SHOP}/admin/api/2024-10/products/${productId}.json`, {
+            method: 'PUT',
+            headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product: { id: productId, ...updates } })
+          });
+          if (!pRes.ok) {
+            const err = await pRes.text();
+            return res.status(500).json({ error: `Product update failed: ${err}` });
+          }
+          if (updates.tags) changes.push(`tags updated`);
+          if (updates.vendor) changes.push(`vendor: → ${updates.vendor}`);
+        }
+      }
+
+      await cacheBust(CACHE_ALL);
+      return res.status(200).json({ success: true, productId, changes });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing' });
 
   } catch (error) {
     console.error('Admin listings error:', error);

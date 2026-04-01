@@ -546,7 +546,20 @@ export default function ListingsManager() {
   useEffect(() => { load(); }, [load]);
 
   function handleSaved(updated) {
-    setListings(prev => prev.map(l => l.id === updated.id ? updated : l));
+    setListings(prev => {
+      const next = prev.map(l => l.id === updated.id ? updated : l);
+      // Persist to localStorage so refresh doesn't revert
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          parsed.listings = next;
+          parsed.missing = next.filter(l => !l.hasSeller).length;
+          localStorage.setItem(CACHE_KEY, JSON.stringify(parsed));
+        }
+      } catch {}
+      return next;
+    });
     setStats(prev => ({ ...prev, missing: Math.max(0, prev.missing - 1) }));
   }
 

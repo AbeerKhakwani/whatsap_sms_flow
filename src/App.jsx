@@ -18,6 +18,7 @@ const Transactions = lazy(() => import('./pages/Transactions'));
 const Scripts = lazy(() => import('./pages/Scripts'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ListingsManager = lazy(() => import('./pages/ListingsManager'));
+const ListingCleanup = lazy(() => import('./pages/ListingCleanup'));
 const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
 
 // Store — unified buyer/seller prototype
@@ -83,6 +84,7 @@ export default function App() {
                 <Route path="/listings" element={<ListingsManager />} />
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/activity" element={<ActivityFeed />} />
+                <Route path="/cleanup" element={<ListingCleanup />} />
                 <Route path="/scripts" element={<Scripts />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>

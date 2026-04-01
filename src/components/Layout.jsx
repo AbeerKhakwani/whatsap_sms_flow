@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2 } from 'lucide-react';
 import { activityConfig, timeAgo } from '../pages/ActivityFeed';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -103,6 +103,7 @@ export default function Layout({ children }) {
     { name: 'Listings', path: '/admin/listings', icon: Tag },
     { name: 'Transactions', path: '/admin/transactions', icon: DollarSign },
     { name: 'Activity', path: '/admin/activity', icon: Activity },
+    { name: 'Cleanup', path: '/admin/cleanup', icon: Wand2 },
     { name: 'Scripts', path: '/admin/scripts', icon: Terminal },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
