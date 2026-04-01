@@ -363,14 +363,18 @@ export default async function handler(req, res) {
 
   try {
     // Handle WhatsApp calls
+    // Webhook structure: entry[0].changes[].field === 'calls', value.calls[] array
     const callChange = req.body?.entry?.[0]?.changes?.find(c => c.field === 'calls');
-    if (callChange?.value) {
-      const call = callChange.value;
-      const callId = call.call_id;
-      const from = call.from;
-      const status = call.status; // initiated, ringing, answered, missed, ended
+    if (callChange?.value?.calls?.length > 0) {
+      const call = callChange.value.calls[0];
+      const callId = call.id;
+      const from = call.from; // seller's phone number
+      const event = call.event; // 'connect' or 'terminate'
+      const isMissed = event === 'terminate' && call.status?.includes('Failed');
+      const isCompleted = event === 'terminate' && call.status?.includes('Completed');
+      const duration = call.duration || 0;
 
-      console.log(`📞 Call ${status} from ${from} (${callId})`);
+      console.log(`📞 Call event=${event} from=${from} status=${call.status} duration=${duration}s`);
 
       // Look up seller by phone
       const { data: seller } = await supabase
@@ -379,37 +383,39 @@ export default async function handler(req, res) {
         .eq('phone', from)
         .maybeSingle();
 
-      // Log to messages table
-      await supabase.from('messages').insert({
-        seller_id: seller?.id || null,
-        type: 'call',
-        recipient: from,
-        content: `Call ${status}`,
-        context: 'call',
-        metadata: { call_id: callId, status, from },
-        status: 'received'
-      }).catch(() => {});
-
-      // Missed call — auto-reply to seller + alert admin
-      if (status === 'missed') {
-        await sendMessage(from,
-          `Hi${seller?.name ? ` ${seller.name}` : ''}! Sorry we missed your call 😊 We'll get back to you shortly. Feel free to message us here anytime!`
-        );
-
-        const { Resend } = await import('resend');
-        const resend = new Resend(process.env.RESEND_API_KEY);
-        await resend.emails.send({
-          from: process.env.FROM_EMAIL || 'The Phir Story <updates@sellphirstory.com>',
-          to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
-          subject: `📞 Missed WhatsApp call from ${seller?.name || from}`,
-          html: `<p>You missed a WhatsApp call.</p>
-                 <p><strong>From:</strong> ${seller?.name || 'Unknown seller'} (${from})<br>
-                 <strong>Call ID:</strong> ${callId}</p>
-                 <p>An auto-reply was sent. Call them back on WhatsApp when available.</p>`
+      // Log to messages table on terminate (final state)
+      if (event === 'terminate') {
+        await supabase.from('messages').insert({
+          seller_id: seller?.id || null,
+          type: 'call',
+          recipient: from,
+          content: isMissed ? 'Missed call' : `Call completed (${duration}s)`,
+          context: 'call',
+          metadata: { call_id: callId, event, status: call.status, from, duration },
+          status: 'received'
         }).catch(() => {});
+
+        // Missed call — auto-reply to seller + alert admin
+        if (isMissed) {
+          await sendMessage(from,
+            `Hi${seller?.name ? ` ${seller.name}` : ''}! Sorry we missed your call 😊 We'll get back to you shortly. Feel free to message us here anytime!`
+          );
+
+          const { Resend } = await import('resend');
+          const resend = new Resend(process.env.RESEND_API_KEY);
+          await resend.emails.send({
+            from: process.env.FROM_EMAIL || 'The Phir Story <updates@sellphirstory.com>',
+            to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
+            subject: `📞 Missed WhatsApp call from ${seller?.name || from}`,
+            html: `<p>You missed a WhatsApp call.</p>
+                   <p><strong>From:</strong> ${seller?.name || 'Unknown seller'} (${from})<br>
+                   <strong>Call ID:</strong> ${callId}</p>
+                   <p>An auto-reply was sent. Call them back on WhatsApp when available.</p>`
+          }).catch(() => {});
+        }
       }
 
-      return res.status(200).json({ status: 'call_handled' });
+      return res.status(200).json({ status: 'call_handled', event });
     }
 
     // Handle WhatsApp delivery/read receipts
