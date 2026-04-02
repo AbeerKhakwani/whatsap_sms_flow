@@ -1383,12 +1383,62 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       }, { onConflict: 'shopify_product_id' });
 
-      await cacheBust(CACHE_ALL);
+      // Surgically update the Redis cache for this one listing instead of busting the whole
+      // cache. Cache bust + re-populate creates a race condition where the Layout.jsx background
+      // prefetch can re-write stale data back to localStorage before the fresh fetch arrives.
+      const numericId = parseInt(productId);
+      const { cacheGet: cGet, cacheSet: cSet } = await import('../lib/cache.js');
+      const cached = await cGet(CACHE_ALL);
+      if (cached && Array.isArray(cached)) {
+        const updatedCache = cached.map(item =>
+          item.id === numericId
+            ? {
+                ...item,
+                sellerName: seller.name,
+                sellerEmail: seller.email,
+                sellerId: seller.id,
+                sellerPhone: seller.phone || item.sellerPhone,
+                hasSeller: true,
+                commissionRate: rate,
+                sellerAskingPrice: askingPrice,
+                sellerPayout
+              }
+            : item
+        );
+        await cSet(CACHE_ALL, updatedCache, 21600);
+      } else {
+        // No cache yet — just bust so the next call builds fresh
+        await cacheBust(CACHE_ALL);
+      }
+
+      // Build the enriched listing to return to the frontend so it can update local
+      // state + localStorage without needing another round-trip.
+      const updatedListing = {
+        id: numericId,
+        title: product.title,
+        designer: product.vendor || '',
+        handle: product.handle,
+        tags: product.tags,
+        price: listingPrice,
+        image: product.images?.[0]?.src || null,
+        isSold: (product.variants?.[0]?.inventory_quantity ?? 1) === 0,
+        sellerEmail: seller.email,
+        sellerName: seller.name,
+        sellerId: seller.id,
+        sellerPhone: seller.phone || null,
+        commissionRate: rate,
+        sellerAskingPrice: askingPrice,
+        sellerPayout,
+        hasSeller: true,
+        shopifyAdminUrl: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${productId}`
+      };
+
       return res.status(200).json({
         success: true,
         seller: { id: seller.id, name: seller.name, email: seller.email },
         commissionRate: rate,
-        sellerPayout: sellerPayout.toFixed(2)
+        sellerPayout: sellerPayout.toFixed(2),
+        listing: updatedListing   // full enriched listing for frontend cache update
       });
     }
 

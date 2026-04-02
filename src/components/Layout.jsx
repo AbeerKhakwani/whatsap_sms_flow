@@ -35,12 +35,31 @@ export default function Layout({ children }) {
   useEffect(() => {
     if (!verified) return;
     fetchActivity();
-    // Preload listings cache in the background so /listings is instant
+    // Preload listings cache in the background so /listings is instant.
+    // Merge carefully: don't overwrite listings that were recently saved (hasSeller: true)
+    // with stale API data that might still be in-flight from before the cache was updated.
     fetch(`${API_URL}/api/admin-listings?action=all-listings`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` }
     }).then(r => r.json()).then(d => {
       if (d.listings) {
-        try { localStorage.setItem('admin_listings_cache', JSON.stringify({ listings: d.listings, total: d.total, missing: d.missing })); } catch {}
+        try {
+          const existing = localStorage.getItem('admin_listings_cache');
+          if (existing) {
+            const prev = JSON.parse(existing);
+            // Preserve any listings that the user already assigned a seller to
+            // (hasSeller: true in localStorage but not yet in API response)
+            const prevMap = Object.fromEntries((prev.listings || []).map(l => [l.id, l]));
+            const merged = d.listings.map(l => {
+              const p = prevMap[l.id];
+              // Keep the locally-updated version if it has a seller and the API doesn't yet
+              if (p && p.hasSeller && !l.hasSeller) return p;
+              return l;
+            });
+            localStorage.setItem('admin_listings_cache', JSON.stringify({ listings: merged, total: d.total, missing: merged.filter(l => !l.hasSeller).length }));
+          } else {
+            localStorage.setItem('admin_listings_cache', JSON.stringify({ listings: d.listings, total: d.total, missing: d.missing }));
+          }
+        } catch {}
       }
     }).catch(() => {});
 

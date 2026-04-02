@@ -362,7 +362,10 @@ function ListingCard({ listing, onSaved, onRevise }) {
       if (!d.success) throw new Error(d.error);
       setSaved(true);
       setEditing(false);
-      onSaved({ ...listing, sellerName: d.seller.name, sellerEmail: d.seller.email, sellerId: d.seller.id, commissionRate: rate, sellerPayout: parseFloat(d.sellerPayout), hasSeller: true });
+      // Use the full enriched listing returned by the API — avoids building it
+      // from partial data and ensures localStorage stays in sync with the server.
+      const updated = d.listing || { ...listing, sellerName: d.seller.name, sellerEmail: d.seller.email, sellerId: d.seller.id, commissionRate: rate, sellerPayout: parseFloat(d.sellerPayout), hasSeller: true };
+      onSaved(updated);
     } catch (e) {
       setError(e.message);
     } finally {
