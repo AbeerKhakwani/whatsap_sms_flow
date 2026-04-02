@@ -1570,13 +1570,51 @@ export default async function handler(req, res) {
 
         // Tag cleanup needed if any CH-* tags exist
         if (chTags.length > 0) {
-          // Build what the clean tags would look like
-          const cleanTags = [...nonChTags];
-          if (chGender && !cleanTags.includes(chGender)) cleanTags.push(chGender);
-          if (chSize && CANONICAL_SIZES.has(chSize) && !cleanTags.includes(chSize)) cleanTags.push(chSize);
-          if (chCategory && !cleanTags.includes(chCategory)) cleanTags.push(chCategory);
-          if (chCondition && !cleanTags.includes(chCondition)) cleanTags.push(chCondition);
-          if (effectiveBrand && !cleanTags.includes(effectiveBrand)) cleanTags.push(effectiveBrand);
+          // ── Canonical maps ────────────────────────────────────────────────
+          // Gender: always lowercase
+          const GENDER_CANON = { women: 'women', woman: 'women', ladies: 'women', girls: 'women', men: 'men', man: 'men', boys: 'men', kids: 'kids', children: 'kids', baby: 'kids', unisex: 'unisex' };
+
+          // Conditions: exact canonical strings matching sms-webhook.js
+          const CONDITION_CANON = {
+            'new with tags': 'New with tags', 'nwt': 'New with tags', 'brand new': 'New with tags',
+            'like new': 'Like new', 'like-new': 'Like new',
+            'excellent': 'Excellent', 'very good': 'Excellent', 'very-good': 'Excellent',
+            'good': 'Good',
+            'fair': 'Fair', 'used': 'Fair',
+          };
+
+          function canonCondition(raw) {
+            if (!raw) return null;
+            return CONDITION_CANON[raw.toLowerCase().trim()] ?? raw;
+          }
+
+          // Start from nonChTags: normalize gender + conditions, remove legacy preloved
+          const normalised = nonChTags
+            .filter(t => t.toLowerCase() !== 'preloved')
+            .map(t => {
+              const lo = t.toLowerCase();
+              if (GENDER_CANON[lo]) return GENDER_CANON[lo];
+              if (CONDITION_CANON[lo]) return CONDITION_CANON[lo];
+              return t;
+            });
+
+          // Case-insensitive dedup helper
+          const lowerSeen = new Set(normalised.map(t => t.toLowerCase()));
+          function addTag(t) {
+            if (!t) return;
+            const lo = t.toLowerCase();
+            if (!lowerSeen.has(lo)) { normalised.push(t); lowerSeen.add(lo); }
+          }
+
+          // Add CH-derived tags (canonical form)
+          const canonGender = chGender ? (GENDER_CANON[chGender.toLowerCase()] ?? chGender.toLowerCase()) : null;
+          addTag(canonGender);
+          if (chSize && CANONICAL_SIZES.has(chSize)) addTag(chSize);
+          if (chCategory) addTag(chCategory);
+          addTag(canonCondition(chCondition));
+          if (effectiveBrand) addTag(effectiveBrand);
+
+          const cleanTags = normalised;
 
           issues.needs_tag_cleanup.push({
             id: p.id, title: p.title, handle: p.handle,
