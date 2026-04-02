@@ -236,6 +236,7 @@ export default function Transactions() {
       delivered: { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle },
       failed: { label: 'Failed', color: 'bg-red-100 text-red-700', icon: X },
       returned: { label: 'Returned', color: 'bg-red-100 text-red-700', icon: Package },
+      cancelled: { label: 'Cancelled', color: 'bg-stone-100 text-stone-500', icon: X },
       needs_attention: { label: '⚠️ Needs Attention', color: 'bg-red-100 text-red-700', icon: AlertTriangle }
     };
     return badges[status] || badges.pending_label;
@@ -248,7 +249,8 @@ export default function Transactions() {
     { key: 'in_transit', label: 'In Transit', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
     { key: 'delivered', label: 'Delivered', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50' },
     { key: 'available', label: 'Available', color: 'bg-green-500', textColor: 'text-green-700', bgLight: 'bg-green-50' },
-    { key: 'paid', label: 'Paid', color: 'bg-stone-400', textColor: 'text-stone-600', bgLight: 'bg-stone-50' }
+    { key: 'paid', label: 'Paid', color: 'bg-stone-400', textColor: 'text-stone-600', bgLight: 'bg-stone-50' },
+    { key: 'cancelled', label: 'Cancelled', color: 'bg-stone-300', textColor: 'text-stone-400', bgLight: 'bg-stone-50' }
   ];
 
   const pipeline = stats?.pipeline || {};
@@ -514,8 +516,9 @@ export default function Transactions() {
                 const overdue = isShippingOverdue(tx);
                 const daysLeft = getDaysUntilShipBy(tx);
 
+                const isCancelled = payoutStatus === 'cancelled';
                 return (
-                  <tr key={tx.id} className={`hover:bg-stone-50/50 transition-colors ${payoutStatus === 'needs_attention' ? 'bg-red-50/50' : overdue ? 'bg-amber-50/50' : ''}`}>
+                  <tr key={tx.id} className={`hover:bg-stone-50/50 transition-colors ${isCancelled ? 'opacity-40 line-through' : payoutStatus === 'needs_attention' ? 'bg-red-50/50' : overdue ? 'bg-amber-50/50' : ''}`}>
                     {/* Checkbox */}
                     <td className="w-10 px-3 py-3">
                       {isAvailable && (
@@ -642,6 +645,7 @@ export default function Transactions() {
                           delivered: { label: 'Delivered', color: 'bg-purple-100 text-purple-700', icon: Package },
                           available: { label: 'Available', color: 'bg-green-100 text-green-700', icon: DollarSign },
                           paid: { label: 'Paid Out', color: 'bg-stone-100 text-stone-700', icon: CheckCircle },
+                          cancelled: { label: 'Cancelled', color: 'bg-stone-100 text-stone-400', icon: X },
                           contested: { label: 'Contested', color: 'bg-red-100 text-red-700', icon: X },
                           needs_attention: { label: 'Seller Not Found', color: 'bg-red-100 text-red-700', icon: AlertTriangle }
                         };

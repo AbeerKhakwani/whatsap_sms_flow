@@ -532,8 +532,32 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {listings.map((listing) => (
-              <div key={listing.id} className="hover:bg-gray-50 transition-colors">
+            {/* Section header: Revised */}
+            {listings.some(l => l.tags?.includes('seller-revised')) && (
+              <div className="px-5 py-2.5 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
+                <span className="text-sm">✓</span>
+                <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Seller Revised — Re-Review</span>
+                <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full font-medium">
+                  {listings.filter(l => l.tags?.includes('seller-revised')).length}
+                </span>
+              </div>
+            )}
+            {[
+              ...listings.filter(l => l.tags?.includes('seller-revised')),
+              ...listings.filter(l => !l.tags?.includes('seller-revised'))
+            ].map((listing, index) => {
+              const revisedCount = listings.filter(l => l.tags?.includes('seller-revised')).length;
+              const showNewHeader = index === revisedCount && revisedCount > 0 && revisedCount < listings.length;
+              return (
+              <div key={listing.id}>
+                {showNewHeader && (
+                  <div className="px-5 py-2 bg-gray-50 border-b border-gray-100">
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                      New Submissions ({listings.length - revisedCount})
+                    </span>
+                  </div>
+                )}
+              <div className="hover:bg-gray-50 transition-colors">
                 {/* Collapsed Header */}
                 <div
                   className="p-4 cursor-pointer flex items-center gap-4"
@@ -767,7 +791,9 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
-            ))}
+              </div>
+              );
+            })}
           </div>
         )}
       </div>

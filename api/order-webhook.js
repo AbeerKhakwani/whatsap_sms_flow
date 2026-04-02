@@ -1,18 +1,20 @@
 // api/order-webhook.js
-// Dedicated Shopify "orders/paid" webhook handler.
+// Shopify order webhook handler — handles orders/paid AND orders/cancelled.
 //
 // WHY a separate file: Vercel parses req.body to an object by default.
 // Shopify HMAC must be verified against the ORIGINAL raw bytes — not a
 // re-serialised JSON string. Setting bodyParser: false here lets us read
 // the raw buffer, verify the signature correctly, then parse JSON ourselves.
 //
-// Shopify webhook URL: https://<your-domain>/api/order-webhook
+// Register BOTH topics to the same URL in Shopify:
+//   orders/paid      → https://<your-domain>/api/order-webhook
+//   orders/cancelled → https://<your-domain>/api/order-webhook
 
 import crypto from 'crypto';
 import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue } from '../lib/shopify-metafields.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
-import { itemSoldInlineEmail } from '../lib/email.js';
+import { itemSoldInlineEmail, orderCancelledSellerEmail } from '../lib/email.js';
 import { supabase } from '../lib/supabase-admin.js';
 
 // Disable Vercel's body parser so we receive the raw buffer for HMAC verification
@@ -73,10 +75,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid JSON' });
   }
 
-  console.log(`💰 Order webhook received: ${order.name} (id: ${order.id})`);
+  const topic = req.headers['x-shopify-topic'] || 'orders/paid';
+  console.log(`📦 Order webhook received: ${order.name} (id: ${order.id}) topic: ${topic}`);
 
+  // ── Route by topic ──────────────────────────────────────────────────────────
+  if (topic === 'orders/cancelled') {
+    await handleOrderCancelled(order);
+    return res.status(200).json({ success: true, order: order.name, topic });
+  }
+
+  // Default: orders/paid
   // Shopify expects a fast 200 — process in-line but respond quickly.
-  // If processing is slow, consider offloading to a queue / background job.
   const results = [];
 
   for (const item of order.line_items || []) {
@@ -223,6 +232,183 @@ export default async function handler(req, res) {
 
   console.log(`✅ Order webhook done: ${order.name} — ${results.length} item(s) processed`);
   return res.status(200).json({ success: true, order: order.name, processed: results.length, results });
+}
+
+// ── Order cancelled ───────────────────────────────────────────────────────────
+
+async function handleOrderCancelled(order) {
+  const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'thephirstory@gmail.com';
+
+  for (const item of order.line_items || []) {
+    const productId = item.product_id;
+    const variantId = item.variant_id;
+
+    try {
+      // ── Find the transaction ────────────────────────────────────────────────
+      const { data: tx } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('order_id', order.id.toString())
+        .eq('product_id', productId.toString())
+        .maybeSingle();
+
+      if (!tx) {
+        console.warn(`⚠️  No transaction found for cancelled order ${order.name} / product ${productId}`);
+        await sendEmail({
+          to: ADMIN_EMAIL,
+          subject: `⚠️ Cancelled order has no transaction: ${order.name}`,
+          html: `<p>Shopify order <strong>${order.name}</strong> was cancelled but no matching transaction was found in the database.</p>
+                 <p>Product ID: ${productId} | Variant ID: ${variantId}</p>
+                 <p>Reason: ${order.cancel_reason || 'not specified'}</p>
+                 <p>You may need to manually relist this item if it shows as sold out.</p>`,
+          context: 'cancel_orphan'
+        }).catch(() => {});
+        continue;
+      }
+
+      // ── Check what we can auto-handle ───────────────────────────────────────
+      const alreadyPaidOut   = tx.payout_status === 'paid';
+      const inTransit        = ['shipped', 'delivered'].includes(tx.shipping_status);
+      const hadLabel         = tx.shipping_status === 'label_created';
+
+      if (alreadyPaidOut || inTransit) {
+        const reason = alreadyPaidOut ? 'payout already sent to seller' : 'item already in transit';
+        console.warn(`⚠️  Cannot auto-cancel ${order.name}: ${reason}`);
+        await sendEmail({
+          to: ADMIN_EMAIL,
+          subject: `⚠️ Manual action needed — cancelled order: ${tx.product_title}`,
+          html: `<p>Order <strong>${order.name}</strong> for <strong>${tx.product_title}</strong> was cancelled in Shopify but <strong>cannot be auto-resolved</strong>.</p>
+                 <p><strong>Reason:</strong> ${reason}</p>
+                 <p><strong>Current status:</strong> payout_status=${tx.payout_status}, shipping_status=${tx.shipping_status}</p>
+                 <p>Please handle this manually — review the seller's payout and shipping situation.</p>`,
+          context: 'cancel_manual_required'
+        }).catch(() => {});
+        continue;
+      }
+
+      // ── Auto-cancel ─────────────────────────────────────────────────────────
+      await supabase.from('transactions').update({
+        status:          'cancelled',
+        payout_status:   'cancelled',
+        shipping_status: 'cancelled',
+        admin_note:      `Cancelled by Shopify on ${new Date(order.cancelled_at).toLocaleDateString()}. Reason: ${order.cancel_reason || 'not specified'}.${hadLabel ? ' ⚠️ Label was generated — void manually in Shippo.' : ''}`,
+        updated_at:      new Date().toISOString()
+      }).eq('id', tx.id);
+
+      console.log(`✅ Transaction ${tx.id} marked cancelled for order ${order.name}`);
+
+      // ── Relist item in Shopify (inventory +1) ───────────────────────────────
+      if (variantId) {
+        await relistItem(productId, variantId).catch(e => {
+          console.warn(`⚠️  Could not relist item ${productId}:`, e.message);
+        });
+      }
+
+      // ── Notify seller ───────────────────────────────────────────────────────
+      if (tx.seller_id) {
+        const { data: seller } = await supabase
+          .from('sellers')
+          .select('id, name, email, phone')
+          .eq('id', tx.seller_id)
+          .single();
+
+        if (seller?.phone) {
+          await sendWhatsApp({
+            sellerId: seller.id,
+            to: seller.phone,
+            template: null,
+            textPreview: `Hi${seller.name ? ` ${seller.name}` : ''}! The order for your item *${tx.product_title}* was cancelled by the buyer. Your item is back on sale on The Phir Story 🛍️ We'll let you know as soon as it sells again!`,
+            context: 'order_cancelled',
+            metadata: { productId, orderId: order.id.toString() }
+          }).catch(e => console.error('Seller WhatsApp cancel failed:', e.message));
+        }
+
+        if (seller?.email) {
+          const { subject, html } = orderCancelledSellerEmail(seller.name, tx.product_title);
+          await sendEmail({
+            sellerId: seller.id,
+            to: seller.email,
+            subject,
+            html,
+            context: 'order_cancelled',
+            metadata: { productId, orderId: order.id.toString() }
+          }).catch(e => console.error('Seller cancel email failed:', e.message));
+        }
+      }
+
+      // ── Alert admin ─────────────────────────────────────────────────────────
+      const labelNote = hadLabel
+        ? `<p style="color:#dc2626;"><strong>⚠️ A shipping label was already generated for this item.</strong> Please void it manually in Shippo to avoid charges.</p>`
+        : '';
+
+      await sendEmail({
+        to: ADMIN_EMAIL,
+        subject: `🚫 Order Cancelled — ${tx.product_title}`,
+        html: `
+          <p>Order <strong>${order.name}</strong> was cancelled in Shopify.</p>
+          <table style="border-collapse:collapse;font-size:14px;margin:12px 0;">
+            <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Item</td><td><strong>${tx.product_title}</strong></td></tr>
+            <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Sale price</td><td>$${tx.sale_price?.toFixed(2) || '0.00'}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Cancel reason</td><td>${order.cancel_reason || 'not specified'}</td></tr>
+            <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Seller</td><td>${tx.seller_id ? `ID: ${tx.seller_id}` : 'unknown'}</td></tr>
+          </table>
+          ${labelNote}
+          <p style="color:#16a34a;">✅ Item has been relisted in Shopify. Seller has been notified.</p>
+        `,
+        context: 'order_cancelled_admin'
+      }).catch(() => {});
+
+    } catch (err) {
+      console.error(`❌ Error handling cancelled order for product ${productId}:`, err.message);
+    }
+  }
+}
+
+// ── Re-increment Shopify inventory so item shows as available again ────────────
+async function relistItem(productId, variantId) {
+  const SHOP  = process.env.VITE_SHOPIFY_STORE_URL;
+  const TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+
+  // Get inventory_item_id from variant
+  const vRes = await fetch(`https://${SHOP}/admin/api/2024-10/variants/${variantId}.json`, {
+    headers: { 'X-Shopify-Access-Token': TOKEN }
+  });
+  if (!vRes.ok) throw new Error(`Variant fetch failed: ${vRes.status}`);
+  const { variant } = await vRes.json();
+  const inventoryItemId = variant.inventory_item_id;
+  if (!inventoryItemId) throw new Error('No inventory_item_id on variant');
+
+  // Get inventory levels to find location
+  const levelsRes = await fetch(
+    `https://${SHOP}/admin/api/2024-10/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
+    { headers: { 'X-Shopify-Access-Token': TOKEN } }
+  );
+  if (!levelsRes.ok) throw new Error(`Inventory levels fetch failed: ${levelsRes.status}`);
+  const { inventory_levels } = await levelsRes.json();
+  const level = inventory_levels?.[0];
+  if (!level) throw new Error('No inventory level found');
+
+  // Skip if already in stock (Shopify already re-incremented on its own)
+  if ((level.available || 0) > 0) {
+    console.log(`   Item already in stock (qty: ${level.available}) — skipping re-increment for product ${productId}`);
+    return;
+  }
+
+  // Adjust +1
+  const adjustRes = await fetch(`https://${SHOP}/admin/api/2024-10/inventory_levels/adjust.json`, {
+    method: 'POST',
+    headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location_id:          level.location_id,
+      inventory_item_id:    inventoryItemId,
+      available_adjustment: 1
+    })
+  });
+  if (!adjustRes.ok) {
+    const err = await adjustRes.text();
+    throw new Error(`Inventory adjust failed: ${err}`);
+  }
+  console.log(`   ✅ Relisted product ${productId} — inventory +1`);
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
