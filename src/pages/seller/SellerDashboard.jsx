@@ -322,7 +322,7 @@ export default function SellerDashboard() {
     try {
       const res = await fetch(`${API_URL}/api/auth`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update-address', email, shipping_address: shippingAddress }) });
       const data = await res.json();
-      if (data.success) { setSeller(s => ({ ...s, has_address: true })); setShowAddressModal(false); }
+      if (data.success) { setSeller(s => ({ ...s, has_address: true, shipping_address: shippingAddress })); setShowAddressModal(false); }
     } catch {}
     setSavingAddress(false);
   }

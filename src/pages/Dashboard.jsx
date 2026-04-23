@@ -176,6 +176,37 @@ export default function Dashboard() {
     setApproveModal({ open: false, listing: null });
   }
 
+  const [togglingConcierge, setTogglingConcierge] = useState(null);
+  async function toggleConcierge(listing, event) {
+    event.stopPropagation();
+    if (togglingConcierge) return;
+    setTogglingConcierge(listing.id);
+    const wasConcierge = listing.tags?.includes('concierge');
+    // Optimistic UI
+    setListings(prev => prev.map(l => l.id === listing.id
+      ? { ...l, tags: wasConcierge
+          ? (l.tags || []).filter(t => t !== 'concierge')
+          : [...(l.tags || []), 'concierge'] }
+      : l));
+    try {
+      const res = await fetch('/api/admin-listings?action=toggle-concierge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopifyProductId: listing.shopify_product_id })
+      });
+      const data = await res.json();
+      if (!data.success) {
+        // Revert on failure
+        setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: listing.tags || [] } : l));
+        alert(`Failed: ${data.error || 'unknown error'}`);
+      }
+    } catch (err) {
+      setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: listing.tags || [] } : l));
+      alert(`Failed: ${err.message}`);
+    }
+    setTogglingConcierge(null);
+  }
+
   async function confirmApproval() {
     const { listing } = approveModal;
 
@@ -263,14 +294,48 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        // Upload photos to Shopify if any
+        // Upload photos to Shopify in background — don't block UI
+        const photoPreviews = imageUpload.photos.map(p => p.preview || p.url).filter(Boolean);
         if (imageUpload.photos.length > 0 && data.productId) {
-          try {
-            await imageUpload.uploadAllToShopify(data.productId);
-          } catch (err) {
+          imageUpload.uploadAllToShopify(data.productId).catch(err => {
             console.error('Photo upload error (non-fatal):', err);
-          }
+          });
         }
+
+        // Optimistically insert the new listing into state — no full refetch
+        const optimisticListing = {
+          id: data.productId,
+          shopify_product_id: data.productId,
+          product_name: createForm.item_type || 'Designer Item',
+          designer: createForm.designer,
+          size: createForm.size || 'One Size',
+          condition: createForm.condition || 'Good',
+          list_price: (parseFloat(createForm.asking_price) || 0) + 10,
+          asking_price_usd: parseFloat(createForm.asking_price) || 0,
+          seller_payout: null,
+          commission_rate: null,
+          description: createForm.description || '',
+          images: photoPreviews,
+          created_at: new Date().toISOString(),
+          shopify_admin_url: data.shopifyAdminUrl,
+          tags: [
+            createForm.designer,
+            createForm.size,
+            createForm.condition,
+            'pending-approval',
+            'source:admin',
+            createForm.concierge ? 'concierge' : null
+          ].filter(Boolean),
+          seller: selectedSeller ? {
+            id: selectedSeller.id,
+            name: selectedSeller.name,
+            email: selectedSeller.email,
+            phone: selectedSeller.phone
+          } : null
+        };
+        setListings(prev => [optimisticListing, ...prev]);
+        setStats(prev => ({ ...prev, pending: (prev.pending || 0) + 1 }));
+
         setCreateModal(false);
         setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '', concierge: false });
         setSelectedSeller(null);
@@ -278,7 +343,6 @@ export default function Dashboard() {
         setAdminScrapeUrl('');
         imageUpload.reset();
         voice.reset();
-        fetchData(); // Refresh listings
       } else {
         setCreateError(data.error || 'Failed to create listing');
       }
@@ -593,6 +657,20 @@ export default function Dashboard() {
                       {listing.tags?.includes('seller-revised') && (
                         <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium flex-shrink-0">✓ Seller Revised</span>
                       )}
+                      <button
+                        onClick={(e) => toggleConcierge(listing, e)}
+                        disabled={togglingConcierge === listing.id}
+                        title={listing.tags?.includes('concierge')
+                          ? 'Concierge: Phirstory ships. Click to unset.'
+                          : 'Not concierge. Click to mark as held & shipped by Phirstory.'}
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 transition-colors disabled:opacity-50 ${
+                          listing.tags?.includes('concierge')
+                            ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}
+                      >
+                        {listing.tags?.includes('concierge') ? '★ Concierge' : '☆ Concierge'}
+                      </button>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
                       <span className="flex items-center gap-1">

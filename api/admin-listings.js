@@ -211,6 +211,52 @@ export default async function handler(req, res) {
       });
     }
 
+    // TOGGLE CONCIERGE TAG
+    if (action === 'toggle-concierge' && req.method === 'POST') {
+      const { shopifyProductId } = req.body;
+      if (!shopifyProductId) {
+        return res.status(400).json({ error: 'shopifyProductId required' });
+      }
+
+      const product = await getProduct(shopifyProductId, false);
+      const tags = (product.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      const wasConcierge = tags.includes('concierge');
+      const nextTags = wasConcierge
+        ? tags.filter(t => t !== 'concierge')
+        : [...tags, 'concierge'];
+
+      await updateProduct(shopifyProductId, { tags: nextTags.join(', ') });
+
+      // Sync open transactions so the seller dashboard reflects the change immediately.
+      // pending_label <-> concierge only; don't touch label_created/shipped/delivered.
+      if (wasConcierge) {
+        await supabase
+          .from('transactions')
+          .update({ shipping_status: 'pending_label' })
+          .eq('product_id', shopifyProductId.toString())
+          .eq('shipping_status', 'concierge');
+      } else {
+        await supabase
+          .from('transactions')
+          .update({ shipping_status: 'concierge' })
+          .eq('product_id', shopifyProductId.toString())
+          .eq('shipping_status', 'pending_label');
+      }
+
+      // Bust seller listing caches so their dashboard shows the right badge
+      const sellerEmail = getSellerEmail(product.metafields) || (await resolveSellerFromProduct(null, getSellerId(product.metafields), shopifyProductId))?.email;
+      if (sellerEmail) {
+        await cacheBust(`listings:seller:${sellerEmail.toLowerCase()}`);
+      }
+      await cacheBust(CACHE_PENDING, CACHE_ALL);
+
+      return res.status(200).json({
+        success: true,
+        concierge: !wasConcierge,
+        tags: nextTags
+      });
+    }
+
     // REJECT LISTING
     if (action === 'reject' && req.method === 'POST') {
       const { shopifyProductId, reason, note, skipNotification } = req.body;
