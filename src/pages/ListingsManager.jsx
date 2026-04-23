@@ -340,7 +340,9 @@ function StatusBadge({ tags }) {
 }
 
 // ─── Listing card ───────────────────────────────────────────────────────────
-function ListingCard({ listing, onSaved, onRevise }) {
+function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
+  const tagList = (listing.tags || '').split(', ').map(t => t.trim());
+  const isConcierge = tagList.includes('concierge');
   const [editing, setEditing] = useState(false);
   const [seller, setSeller] = useState(null);
   const [rate, setRate] = useState(listing.commissionRate || 18);
@@ -486,24 +488,39 @@ function ListingCard({ listing, onSaved, onRevise }) {
 
         {/* Action buttons */}
         {!editing && (
-          <div className="flex gap-1.5 mt-1">
-            <button
-              onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs text-stone-600 hover:text-stone-900 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-xl transition-colors"
-            >
-              <Edit2 size={11} />
-              {hasSeller ? 'Edit seller' : 'Assign seller'}
-            </button>
-            {hasSeller && (
+          <>
+            <div className="flex gap-1.5 mt-1">
               <button
-                onClick={() => onRevise(listing)}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors"
+                onClick={() => { setEditing(true); setSaved(false); setSeller(null); setRate(listing.commissionRate || 18); }}
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs text-stone-600 hover:text-stone-900 bg-stone-50 hover:bg-stone-100 border border-stone-200 rounded-xl transition-colors"
               >
-                <AlertCircle size={11} />
-                Revise
+                <Edit2 size={11} />
+                {hasSeller ? 'Edit seller' : 'Assign seller'}
               </button>
-            )}
-          </div>
+              {hasSeller && (
+                <button
+                  onClick={() => onRevise(listing)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors"
+                >
+                  <AlertCircle size={11} />
+                  Revise
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => onToggleConcierge(listing)}
+              title={isConcierge
+                ? 'Concierge: Phirstory ships this. Click to unset.'
+                : 'Mark as concierge — Phirstory holds & ships this item.'}
+              className={`w-full flex items-center justify-center gap-1 py-1.5 text-xs mt-1.5 rounded-xl border transition-colors ${
+                isConcierge
+                  ? 'text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-indigo-200'
+                  : 'text-stone-500 bg-white hover:bg-stone-50 border-stone-200'
+              }`}
+            >
+              {isConcierge ? '★ Concierge' : '☆ Mark Concierge'}
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -572,6 +589,29 @@ export default function ListingsManager() {
       const tagList = (l.tags || '').split(', ').filter(t => t && t !== 'pending-approval' && t !== 'seller-revised');
       return { ...l, tags: [...tagList, 'needs-revision'].join(', ') };
     }));
+  }
+
+  async function handleToggleConcierge(listing) {
+    const tagList = (listing.tags || '').split(', ').map(t => t.trim()).filter(Boolean);
+    const wasConcierge = tagList.includes('concierge');
+    const nextTags = wasConcierge
+      ? tagList.filter(t => t !== 'concierge')
+      : [...tagList, 'concierge'];
+    // Optimistic
+    setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: nextTags.join(', ') } : l));
+    try {
+      const r = await fetch(`${API_URL}/api/admin-listings?action=toggle-concierge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
+        body: JSON.stringify({ shopifyProductId: listing.id })
+      });
+      const d = await r.json();
+      if (!d.success) throw new Error(d.error || 'Toggle failed');
+    } catch (e) {
+      // Revert
+      setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: listing.tags } : l));
+      alert(`Failed: ${e.message}`);
+    }
   }
 
   const FILTERS = [
@@ -675,6 +715,7 @@ export default function ListingsManager() {
               listing={l}
               onSaved={handleSaved}
               onRevise={setRevisionTarget}
+              onToggleConcierge={handleToggleConcierge}
             />
           ))}
         </div>
