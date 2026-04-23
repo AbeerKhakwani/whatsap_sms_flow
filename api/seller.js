@@ -769,6 +769,22 @@ export default async function handler(req, res) {
         });
       }
 
+      // Block concierge items — Phirstory ships these directly
+      if (productId) {
+        try {
+          const product = await getProduct(productId, false);
+          const tags = (product?.tags || '').split(',').map(t => t.trim());
+          if (tags.includes('concierge')) {
+            return res.status(400).json({
+              error: 'This item is held by Phirstory and will be shipped directly. No label needed from you.',
+              concierge: true
+            });
+          }
+        } catch (e) {
+          console.warn(`Could not verify concierge tag for ${productId}:`, e.message);
+        }
+      }
+
       try {
         // Format seller address for shipping API
         const sellerForShipping = {
@@ -875,9 +891,11 @@ export default async function handler(req, res) {
             } catch (fulfillErr) {
               console.error('📦 Shopify fulfillment failed (non-blocking):', fulfillErr.message);
               // Flag on transaction so admin can see it needs manual fulfillment
-              await supabase.from('transactions').update({
-                admin_note: `⚠️ Shopify fulfillment failed — label created (${labelResult.trackingNumber}) but buyer not notified. Manual fulfillment needed. Error: ${fulfillErr.message}`
-              }).eq('id', transactionId).catch(() => {});
+              try {
+                await supabase.from('transactions').update({
+                  admin_note: `⚠️ Shopify fulfillment failed — label created (${labelResult.trackingNumber}) but buyer not notified. Manual fulfillment needed. Error: ${fulfillErr.message}`
+                }).eq('id', transactionId);
+              } catch (_) {}
               // Alert admin
               await sendEmail({
                 to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',

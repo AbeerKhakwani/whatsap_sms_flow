@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue, extractPricing, upsertMetafield } from '../lib/shopify-metafields.js';
 import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
+import { addProductToSeller } from '../lib/sellers.js';
 import { scrapePage } from '../lib/scraper.js';
 import { withCache, cacheBust } from '../lib/cache.js';
 
@@ -992,7 +993,7 @@ export default async function handler(req, res) {
 
     // CREATE LISTING (admin creates on behalf of seller)
     if (action === 'create' && req.method === 'POST') {
-      const { sellerId, designer, item_type, size, color, material, condition, original_price, asking_price, description, chest, hip, notes } = req.body;
+      const { sellerId, designer, item_type, size, color, material, condition, original_price, asking_price, description, chest, hip, notes, concierge } = req.body;
 
       if (!sellerId) {
         return res.status(400).json({ error: 'Seller ID required' });
@@ -1030,7 +1031,8 @@ export default async function handler(req, res) {
         hip,
         notes,
         originalPrice: parseFloat(original_price) || 0,
-        source: 'admin'
+        source: 'admin',
+        concierge: !!concierge
       });
 
       // Link to seller in Supabase
@@ -1042,6 +1044,12 @@ export default async function handler(req, res) {
           status: 'pending',
           created_at: new Date().toISOString()
         });
+
+      // Add product to seller's shopify_product_ids so it appears in their dashboard
+      await addProductToSeller(seller.id, product.id);
+
+      // Bust the seller's listings cache so the new product shows up immediately
+      await cacheBust(`listings:seller:${seller.email.toLowerCase()}`);
 
       const shopifyAdminUrl = `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`;
 

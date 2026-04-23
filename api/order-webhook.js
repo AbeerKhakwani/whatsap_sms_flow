@@ -12,6 +12,7 @@
 
 import crypto from 'crypto';
 import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue } from '../lib/shopify-metafields.js';
+import { getProduct } from '../lib/shopify.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { itemSoldInlineEmail, orderCancelledSellerEmail } from '../lib/email.js';
@@ -101,6 +102,7 @@ export default async function handler(req, res) {
       let listingType   = 'regular';
       const productTitle = item.title;
 
+      let isConcierge = false;
       try {
         const metafields = await fetchMetafields(productId);
         sellerEmail    = getSellerEmail(metafields);
@@ -111,6 +113,13 @@ export default async function handler(req, res) {
         if (listingTypeVal) listingType = listingTypeVal;
       } catch (e) {
         console.warn(`Could not fetch metafields for product ${productId}:`, e.message);
+      }
+
+      try {
+        const product = await getProduct(productId, false);
+        isConcierge = (product?.tags || '').split(',').map(t => t.trim()).includes('concierge');
+      } catch (e) {
+        console.warn(`Could not fetch product tags for ${productId}:`, e.message);
       }
 
       // ── Resolve seller ─────────────────────────────────────────────────────
@@ -181,7 +190,7 @@ export default async function handler(req, res) {
           commission_rate: commissionRate,
           status:          'pending_payout',
           payout_status:   sellerMissing ? 'needs_attention' : 'pending_shipping',
-          shipping_status: sellerMissing ? 'needs_attention' : 'pending_label',
+          shipping_status: sellerMissing ? 'needs_attention' : (isConcierge ? 'concierge' : 'pending_label'),
           listing_type:    listingType,
           customer_email:  order.email,
           buyer_address:   buyerAddress,

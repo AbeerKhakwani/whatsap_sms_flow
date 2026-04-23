@@ -36,7 +36,8 @@ export default function Dashboard() {
   const [createModal, setCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
     designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good',
-    original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: ''
+    original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '',
+    concierge: false
   });
   const [sellerSearch, setSellerSearch] = useState('');
   const [sellerResults, setSellerResults] = useState([]);
@@ -271,7 +272,7 @@ export default function Dashboard() {
           }
         }
         setCreateModal(false);
-        setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '' });
+        setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '', concierge: false });
         setSelectedSeller(null);
         setSellerSearch('');
         setAdminScrapeUrl('');
@@ -1058,6 +1059,21 @@ export default function Dashboard() {
                 <input type="text" value={createForm.notes} onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
                   placeholder="Admin notes..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
               </div>
+
+              <label className="flex items-start gap-2 p-3 border border-gray-300 rounded-lg bg-amber-50 cursor-pointer hover:bg-amber-100 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={createForm.concierge}
+                  onChange={e => setCreateForm(f => ({ ...f, concierge: e.target.checked }))}
+                  className="mt-0.5"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-gray-900">Concierge item</span>
+                  <span className="block text-xs text-gray-600 mt-0.5">
+                    Phirstory is holding this item and will ship it when sold. Seller will get a sale notification but no shipping label.
+                  </span>
+                </span>
+              </label>
 
               {/* Photo Upload */}
               <div>

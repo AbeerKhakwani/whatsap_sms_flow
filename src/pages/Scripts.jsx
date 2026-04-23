@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, CheckCircle, XCircle, Clock, AlertCircle, Terminal } from 'lucide-react';
+import { Play, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 
 export default function Scripts() {
   const [running, setRunning] = useState(null);
@@ -7,23 +7,13 @@ export default function Scripts() {
 
   const scripts = [
     {
-      id: 'create-definitions',
-      name: 'Create Metafield Definitions',
-      description: 'Creates structured metafield definitions in Shopify (seller email, phone, payout, etc.). Safe to run multiple times.',
-      endpoint: '/api/scripts?action=create-definitions',
-      icon: '📝',
-      category: 'metafields',
-      duration: '~30 seconds'
-    },
-    {
-      id: 'backfill-metafields',
-      name: 'Backfill Metafields',
-      description: 'Migrates existing products from unstructured to structured metafields. Only updates empty fields.',
-      endpoint: '/api/scripts?action=backfill-metafields',
-      icon: '🔄',
-      category: 'metafields',
-      duration: '~2-5 minutes',
-      warning: 'This will process all products in Shopify. Run after creating definitions.'
+      id: 'backfill-admin-listings',
+      name: 'Backfill Admin-Created Listings',
+      description: 'Links admin-created listings to sellers so they appear in the seller dashboard. Idempotent — safe to re-run.',
+      endpoint: '/api/scripts?action=backfill-admin-listings',
+      icon: '🔗',
+      category: 'sellers',
+      duration: '~10 seconds'
     }
   ];
 
@@ -112,15 +102,15 @@ export default function Scripts() {
         </div>
       </div>
 
-      {/* Metafields Scripts Section */}
+      {/* Scripts Section */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-900">Metafield Migration</h2>
-          <p className="text-sm text-gray-500 mt-1">Convert unstructured metafields to structured, pinned definitions</p>
+          <h2 className="font-semibold text-gray-900">Maintenance Scripts</h2>
+          <p className="text-sm text-gray-500 mt-1">One-off tasks for migrations, backfills, and data repair</p>
         </div>
 
         <div className="divide-y divide-gray-100">
-          {scripts.filter(s => s.category === 'metafields').map((script) => {
+          {scripts.map((script) => {
             const result = results[script.id];
 
             return (
@@ -232,23 +222,6 @@ export default function Scripts() {
         </div>
       </div>
 
-      {/* Instructions */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-        <div className="flex gap-3">
-          <Terminal className="w-5 h-5 text-gray-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-gray-700">
-            <p className="font-medium text-gray-900 mb-2">Running Order:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>First run "Create Metafield Definitions" (one-time setup)</li>
-              <li>Then run "Backfill Metafields" to migrate existing products</li>
-              <li>All future products will automatically use structured metafields</li>
-            </ol>
-            <p className="mt-3 text-gray-600">
-              Check the results in Shopify Admin → Settings → Custom data → Products
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

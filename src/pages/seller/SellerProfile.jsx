@@ -501,7 +501,8 @@ export default function SellerProfile() {
       pending_label: { label: 'Ship Now', color: 'bg-amber-100 text-amber-800' },
       label_created: { label: 'Label Ready', color: 'bg-blue-100 text-blue-800' },
       shipped: { label: 'Shipped', color: 'bg-purple-100 text-purple-800' },
-      delivered: { label: 'Delivered', color: 'bg-green-100 text-green-800' }
+      delivered: { label: 'Delivered', color: 'bg-green-100 text-green-800' },
+      concierge: { label: 'Shipped by Phirstory', color: 'bg-indigo-100 text-indigo-800' }
     };
     return badges[status] || badges.pending_label;
   }
@@ -1097,7 +1098,7 @@ export default function SellerProfile() {
                       )}
 
                       {/* Shipping Actions — inline buttons when label exists, dropdown for get label */}
-                      {!isFulfilledWithoutLabel && item.status !== 'SOLD_WITH_PAYOUT' && (
+                      {!isFulfilledWithoutLabel && item.status !== 'SOLD_WITH_PAYOUT' && item.shippingStatus !== 'concierge' && (
                         hasLabel ? (
                           <div className="flex flex-col items-end gap-1.5">
                             <a
