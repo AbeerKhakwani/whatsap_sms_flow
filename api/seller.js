@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
 import { withCache, cacheBust } from '../lib/cache.js';
+import { logImpersonationEvent } from '../lib/audit-log.js';
 
 const CACHE_TTL_LISTINGS = 90; // seconds
 function cacheKeyListings(email) { return `listings:seller:${email}`; }
@@ -287,6 +288,12 @@ export default async function handler(req, res) {
       if (!email || !productId) {
         return res.status(400).json({ error: 'Email and product ID required' });
       }
+
+      logImpersonationEvent(req, {
+        action: 'listing.update',
+        targetId: productId,
+        payload: { title, askingPrice, condition, designer, measurements }
+      });
 
       // AI Security Validation
       const validation = await validateUpdate({
@@ -750,6 +757,12 @@ export default async function handler(req, res) {
       if (!email) {
         return res.status(400).json({ error: 'Email required' });
       }
+
+      logImpersonationEvent(req, {
+        action: 'shipping-label.request',
+        targetId: productId,
+        payload: { productTitle, transactionId }
+      });
 
       const { data: seller } = await supabase
         .from('sellers')
@@ -1262,6 +1275,8 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Email and product ID required' });
       }
 
+      logImpersonationEvent(req, { action: 'listing.delist', targetId: productId });
+
       // Verify seller owns this product
       const { data: seller } = await supabase
         .from('sellers')
@@ -1344,6 +1359,8 @@ export default async function handler(req, res) {
       if (!email || !productId) {
         return res.status(400).json({ error: 'Email and product ID required' });
       }
+
+      logImpersonationEvent(req, { action: 'listing.relist', targetId: productId });
 
       // Verify seller owns this product
       const { data: seller } = await supabase

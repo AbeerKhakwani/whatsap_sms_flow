@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
-import { Users, Mail, Phone, Package, ChevronRight, Search, Plus, X } from 'lucide-react';
+import { Users, Mail, Phone, Package, ChevronRight, Search, Plus, X, Eye } from 'lucide-react';
+import { viewAsSeller } from '../lib/impersonation';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -186,6 +187,14 @@ export default function Sellers() {
 
                   {/* Product Count Badge */}
                   <div className="flex-shrink-0 flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); viewAsSeller(seller.id); }}
+                      title="Open this seller's portal in a new tab (read-only)"
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded transition-colors"
+                    >
+                      <Eye className="w-3 h-3" />
+                      View as
+                    </button>
                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                       productCount > 0
                         ? 'bg-gray-900 text-white'

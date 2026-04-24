@@ -3,6 +3,7 @@
 
 import { addProductImage, addProductImageFromUrl, deleteProductImage } from '../lib/shopify.js';
 import { cors } from '../lib/cors.js';
+import { logImpersonationEvent } from '../lib/audit-log.js';
 
 export default async function handler(req, res) {
   if (cors(req, res, 'POST, DELETE, OPTIONS')) return;
@@ -21,6 +22,8 @@ export default async function handler(req, res) {
       if (!productId || (!base64 && !imageUrl)) {
         return res.status(400).json({ error: 'Missing productId or image data (base64 or imageUrl)' });
       }
+
+      logImpersonationEvent(req, { action: 'photo.add', targetId: productId, payload: { filename } });
 
       let image;
       if (imageUrl) {
@@ -44,6 +47,8 @@ export default async function handler(req, res) {
       if (!productId || !imageId) {
         return res.status(400).json({ error: 'Missing productId or imageId' });
       }
+
+      logImpersonationEvent(req, { action: 'photo.delete', targetId: productId, payload: { imageId } });
 
       await deleteProductImage(productId, imageId);
 

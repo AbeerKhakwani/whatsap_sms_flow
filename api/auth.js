@@ -13,6 +13,7 @@ import {
 } from '../lib/auth-utils.js';
 import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
+import { logImpersonationEvent } from '../lib/audit-log.js';
 
 export default async function handler(req, res) {
   if (cors(req, res, 'POST, OPTIONS')) return;
@@ -321,6 +322,12 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Email required' });
       }
 
+      logImpersonationEvent(req, {
+        action: 'profile.update-address',
+        targetId: email,
+        payload: { shipping_address }
+      });
+
       if (!shipping_address || !shipping_address.street_address || !shipping_address.city ||
           !shipping_address.state || !shipping_address.postal_code) {
         return res.status(400).json({ error: 'Complete shipping address required' });
@@ -577,6 +584,47 @@ export default async function handler(req, res) {
         success: true,
         message: 'Phone updated successfully',
         newPhone
+      });
+    }
+
+    // REDEEM-IMPERSONATION - Validate an admin-issued impersonation token and return seller data
+    if (action === 'redeem-impersonation') {
+      const { token } = req.body;
+      if (!token) {
+        return res.status(400).json({ error: 'token required' });
+      }
+
+      const decoded = verifyToken(token);
+      if (!decoded || decoded.type !== 'seller_impersonation') {
+        return res.status(401).json({ error: 'Invalid or expired impersonation token' });
+      }
+
+      const { data: seller, error: sellerErr } = await supabase
+        .from('sellers')
+        .select('*')
+        .eq('id', decoded.sellerId)
+        .single();
+
+      if (sellerErr || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      console.log(`🔍 IMPERSONATION REDEEMED: admin=${decoded.adminEmail} → seller=${seller.email}`);
+
+      return res.status(200).json({
+        success: true,
+        seller: {
+          id: seller.id,
+          email: seller.email,
+          name: seller.name,
+          phone: seller.phone,
+          has_address: !!seller.shipping_address,
+          shipping_address: seller.shipping_address || null
+        },
+        impersonation: {
+          adminEmail: decoded.adminEmail,
+          expiresAt: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : null
+        }
       });
     }
 

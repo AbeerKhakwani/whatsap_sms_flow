@@ -7,6 +7,7 @@ import { validateAndSanitize } from '../lib/security.js';
 import { cors } from '../lib/cors.js';
 import { sendEmail } from '../lib/send-email.js';
 import { supabase } from '../lib/supabase-admin.js';
+import { logImpersonationEvent } from '../lib/audit-log.js';
 
 export default async function handler(req, res) {
   if (cors(req, res, 'POST, OPTIONS')) return;
@@ -23,6 +24,12 @@ export default async function handler(req, res) {
     }
 
     const fields = extracted || {};
+
+    logImpersonationEvent(req, {
+      action: 'listing.create',
+      targetId: email,
+      payload: { designer: fields.designer, item_type: fields.item_type, asking_price: fields.asking_price }
+    });
 
     // AI Security Validation
     const validation = await validateAndSanitize({

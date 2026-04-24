@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, CheckCircle, Search, Loader2, ExternalLink, Edit2, X, AlertCircle, Send, Eye, MessageSquare, Mail, ChevronRight, ChevronLeft, Tag } from 'lucide-react';
+import { viewAsSeller } from '../lib/impersonation';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const PORTAL_URL = 'https://sell.thephirstory.com';
@@ -468,12 +469,21 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
                   <div className="w-6 h-6 rounded-full bg-stone-200 flex items-center justify-center text-[10px] font-bold text-stone-600 flex-shrink-0">
                     {(listing.sellerName || listing.sellerEmail || '?')[0].toUpperCase()}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-stone-800 truncate">{listing.sellerName || listing.sellerEmail || '—'}</p>
                     {listing.sellerEmail && listing.sellerName && (
                       <p className="text-[10px] text-stone-400 truncate">{listing.sellerEmail}</p>
                     )}
                   </div>
+                  {listing.sellerId && (
+                    <button
+                      onClick={() => viewAsSeller(listing.sellerId)}
+                      title="View this seller's portal in a new tab (read-only)"
+                      className="p-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                    >
+                      <Eye size={12} />
+                    </button>
+                  )}
                   {saved && <CheckCircle size={13} className="text-emerald-500 ml-auto flex-shrink-0" />}
                 </div>
               ) : (

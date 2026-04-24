@@ -1,6 +1,7 @@
 // api/admin-auth.js
 // Admin authentication with email verification code
 
+import jwt from 'jsonwebtoken';
 import {
   generateCode,
   storeVerificationCode,
@@ -11,6 +12,9 @@ import {
 } from '../lib/auth-utils.js';
 import { sendVerificationCode } from '../lib/email.js';
 import { cors } from '../lib/cors.js';
+import { supabase } from '../lib/supabase-admin.js';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'phirstory-jwt-secret-change-in-production';
 
 export default async function handler(req, res) {
   if (cors(req, res, 'POST, OPTIONS')) return;
@@ -104,6 +108,52 @@ export default async function handler(req, res) {
         admin: {
           email: decoded.email
         }
+      });
+    }
+
+    // IMPERSONATE-SELLER - Issue a short-lived token for an admin to view a seller's portal
+    if (action === 'impersonate-seller') {
+      const authHeader = req.headers.authorization;
+      const adminToken = authHeader?.replace('Bearer ', '');
+      const decoded = adminToken ? verifyToken(adminToken) : null;
+      if (!decoded || decoded.type !== 'admin') {
+        return res.status(401).json({ error: 'Admin auth required' });
+      }
+
+      const { sellerId } = req.body;
+      if (!sellerId) {
+        return res.status(400).json({ error: 'sellerId required' });
+      }
+
+      const { data: seller, error: sellerErr } = await supabase
+        .from('sellers')
+        .select('id, email, name')
+        .eq('id', sellerId)
+        .single();
+
+      if (sellerErr || !seller) {
+        return res.status(404).json({ error: 'Seller not found' });
+      }
+
+      // Audit log (non-blocking)
+      console.log(`🔍 IMPERSONATION: admin=${decoded.email} viewing seller=${seller.email} (${seller.id})`);
+
+      const impersonationToken = jwt.sign(
+        {
+          type: 'seller_impersonation',
+          sellerId: seller.id,
+          sellerEmail: seller.email,
+          adminEmail: decoded.email
+        },
+        JWT_SECRET,
+        { expiresIn: '10m' }
+      );
+
+      return res.status(200).json({
+        success: true,
+        token: impersonationToken,
+        sellerEmail: seller.email,
+        sellerName: seller.name
       });
     }
 

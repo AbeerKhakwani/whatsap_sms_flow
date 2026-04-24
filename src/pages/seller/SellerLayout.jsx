@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Home, Package, DollarSign, Tag, User, Plus, LogOut, ShoppingBag, AlertCircle } from 'lucide-react';
+import ImpersonationBanner from '../../components/ImpersonationBanner';
+import { installImpersonationFetch, uninstallImpersonationFetch } from '../../lib/impersonation';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Home', icon: Home, path: '/' },
@@ -12,6 +15,11 @@ const NAV_ITEMS = [
 export default function SellerLayout({ children, seller, email, onLogout, revisionCount = 0 }) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    installImpersonationFetch();
+    return () => uninstallImpersonationFetch();
+  }, []);
 
   function getActiveNav() {
     const path = location.pathname;
@@ -26,6 +34,8 @@ export default function SellerLayout({ children, seller, email, onLogout, revisi
 
   return (
     <div className="min-h-screen bg-[#FAF9F7] pb-20 md:pb-0" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <ImpersonationBanner />
+
       {/* Desktop Header */}
       <header className="bg-white/95 backdrop-blur-md border-b border-gray-100 hidden md:block sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">

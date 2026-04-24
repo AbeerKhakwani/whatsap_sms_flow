@@ -1,11 +1,49 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Phone, ArrowRight, Loader2, ArrowLeft, Check, X, MessageCircle, MapPin } from 'lucide-react';
+import { setImpersonationState } from '../../lib/impersonation';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function SellerLogin() {
   const navigate = useNavigate();
+
+  // Detect ?impersonate=<token> from admin "View as seller" flow.
+  // Redeems token, sets seller localStorage + impersonation flag, then navigates to /.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('impersonate');
+    if (!token) return;
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'redeem-impersonation', token })
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert(`Impersonation failed: ${data.error || 'unknown error'}`);
+          return;
+        }
+        const { seller, impersonation } = data;
+        localStorage.setItem('seller_email', seller.email);
+        localStorage.setItem('seller_id', seller.id);
+        if (seller.name) localStorage.setItem('seller_name', seller.name);
+        if (seller.phone) localStorage.setItem('seller_phone', seller.phone);
+        setImpersonationState({
+          adminEmail: impersonation.adminEmail,
+          sellerEmail: seller.email,
+          sellerId: seller.id,
+          editMode: false
+        });
+        navigate('/', { replace: true });
+      } catch (err) {
+        alert(`Impersonation failed: ${err.message}`);
+      }
+    })();
+  }, [navigate]);
 
   // Flow state: email -> channel -> (addPhone if needed) -> code -> (promptPhone after login)
   const [step, setStep] = useState('email');
