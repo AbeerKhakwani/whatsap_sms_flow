@@ -1876,7 +1876,47 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, productId, changes });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing' });
+    // ── SYNC-SELLER-LISTINGS ─ rebuild shopify_product_ids from transactions + listings table ──
+    if (action === 'sync-seller-listings' && req.method === 'POST') {
+      const { sellerId, sellerEmail } = req.body;
+      if (!sellerId) return res.status(400).json({ error: 'sellerId required' });
+
+      // Pull product_ids from transactions (sold items)
+      const { data: txRows } = await supabase
+        .from('transactions')
+        .select('product_id')
+        .eq('seller_id', sellerId)
+        .not('product_id', 'is', null);
+
+      // Pull product_ids from listings table (active items)
+      const { data: listingRows } = await supabase
+        .from('listings')
+        .select('shopify_product_id')
+        .eq('seller_id', sellerId)
+        .not('shopify_product_id', 'is', null);
+
+      const idsFromTx = (txRows || []).map(r => r.product_id.toString());
+      const idsFromListings = (listingRows || []).map(r => r.shopify_product_id.toString());
+      const merged = [...new Set([...idsFromTx, ...idsFromListings])];
+
+      if (merged.length === 0) {
+        return res.status(200).json({ success: true, productIds: [], message: 'No products found in transactions or listings table for this seller' });
+      }
+
+      await supabase
+        .from('sellers')
+        .update({ shopify_product_ids: merged })
+        .eq('id', sellerId);
+
+      if (sellerEmail) {
+        await cacheBust(`listings:seller:${sellerEmail.toLowerCase()}`);
+      }
+      await cacheBust(CACHE_ALL);
+
+      return res.status(200).json({ success: true, productIds: merged });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
 
   } catch (error) {
     console.error('Admin listings error:', error);

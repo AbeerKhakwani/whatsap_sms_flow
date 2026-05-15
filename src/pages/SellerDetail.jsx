@@ -24,6 +24,8 @@ export default function SellerDetail() {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [rejectedListings, setRejectedListings] = useState([]);
+  const [txStats, setTxStats] = useState({ earned: 0, pending: 0 });
+  const [syncing, setSyncing] = useState(false);
 
   // Edit state
   const [editing, setEditing] = useState(null); // 'name', 'email', 'phone', 'paypal'
@@ -98,8 +100,55 @@ export default function SellerDetail() {
       }
       fetchMessages(data.id);
       fetchRejectedListings(data.id);
+      fetchTxStats(data.id);
     }
     setLoading(false);
+  }
+
+  async function fetchTxStats(sellerId) {
+    if (!sellerId) return;
+    const { data } = await supabase
+      .from('transactions')
+      .select('seller_payout, payout_status')
+      .eq('seller_id', sellerId)
+      .not('seller_payout', 'is', null);
+
+    if (!data) return;
+    const earned = data
+      .filter(t => t.payout_status === 'paid')
+      .reduce((s, t) => s + (t.seller_payout || 0), 0);
+    const pending = data
+      .filter(t => ['available', 'in_transit', 'delivered', 'pending_shipping'].includes(t.payout_status))
+      .reduce((s, t) => s + (t.seller_payout || 0), 0);
+    setTxStats({ earned, pending });
+  }
+
+  async function syncListings() {
+    if (!seller) return;
+    setSyncing(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin-listings?action=sync-seller-listings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('admin_token')}`
+        },
+        body: JSON.stringify({ sellerId: seller.id, sellerEmail: seller.email })
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Reload with fresh product IDs
+        if (data.productIds?.length) {
+          fetchListings(data.productIds);
+        }
+        alert(`Synced ${data.productIds?.length || 0} listings for ${seller.name}`);
+      } else {
+        alert('Sync failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Sync error: ' + err.message);
+    }
+    setSyncing(false);
   }
 
   async function fetchMessages(sellerId) {
@@ -502,12 +551,12 @@ export default function SellerDetail() {
         </div>
         {/* Earnings */}
         <div className="py-5 px-5 text-center" style={{ borderRight: `1px solid ${BORDER}` }}>
-          <p className="text-3xl font-bold" style={{ color: '#16A34A' }}>${(seller.total_earnings || 0).toFixed(0)}</p>
+          <p className="text-3xl font-bold" style={{ color: '#16A34A' }}>${txStats.earned.toFixed(0)}</p>
           <p className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: STONE }}>Earnings</p>
         </div>
         {/* Pending */}
         <div className="py-5 px-5 text-center" style={{ borderRight: `1px solid ${BORDER}` }}>
-          <p className="text-3xl font-bold" style={{ color: GOLD }}>${(seller.pending_payout || 0).toFixed(0)}</p>
+          <p className="text-3xl font-bold" style={{ color: GOLD }}>${txStats.pending.toFixed(0)}</p>
           <p className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: STONE }}>Pending</p>
         </div>
         {/* PayPal — editable */}
@@ -568,6 +617,15 @@ export default function SellerDetail() {
                 {soldListings.length} Sold
               </span>
             )}
+            <button
+              onClick={syncListings}
+              disabled={syncing}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full font-bold border transition-colors disabled:opacity-50"
+              style={{ background: '#F0F9FF', color: '#0284C7', border: '1px solid #BAE6FD' }}
+              title="Rebuild listings from Shopify metafields"
+            >
+              {syncing ? '⟳ Syncing…' : '⟳ Sync'}
+            </button>
           </div>
         </div>
 
