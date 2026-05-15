@@ -1503,6 +1503,17 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       }, { onConflict: 'shopify_product_id' });
 
+      // Add product to seller's shopify_product_ids array so the seller dashboard finds it,
+      // then bust their cache so it shows up immediately.
+      const { data: freshSeller } = await supabase
+        .from('sellers')
+        .select('shopify_product_ids')
+        .eq('id', seller.id)
+        .single();
+      const updatedIds = [...new Set([...(freshSeller?.shopify_product_ids || []), productId.toString()])];
+      await supabase.from('sellers').update({ shopify_product_ids: updatedIds }).eq('id', seller.id);
+      await cacheBust(`listings:seller:${seller.email.toLowerCase()}`);
+
       // Surgically update the Redis cache for this one listing instead of busting the whole
       // cache. Cache bust + re-populate creates a race condition where the Layout.jsx background
       // prefetch can re-write stale data back to localStorage before the fresh fetch arrives.
