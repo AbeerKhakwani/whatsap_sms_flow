@@ -1876,31 +1876,110 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, productId, changes });
     }
 
-    // ── SYNC-SELLER-LISTINGS ─ rebuild shopify_product_ids from transactions + listings table ──
+    // ── SYNC-SELLER-LISTINGS ─ rebuild shopify_product_ids from Shopify + Supabase ──
     if (action === 'sync-seller-listings' && req.method === 'POST') {
       const { sellerId, sellerEmail } = req.body;
       if (!sellerId) return res.status(400).json({ error: 'sellerId required' });
 
-      // Pull product_ids from transactions (sold items)
+      const sources = { shopify_email: 0, shopify_id: 0, transactions: 0, listings_table: 0 };
+
+      // ── 1. Shopify GraphQL: products where seller.email metafield = sellerEmail ──
+      const shopifyIds = new Set();
+      if (sellerEmail) {
+        const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
+        const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+        const GQL = `https://${SHOPIFY_URL}/admin/api/2024-01/graphql.json`;
+
+        // Search by seller.email metafield (catches all statuses: active, draft, archived)
+        let cursor = null;
+        let hasMore = true;
+        while (hasMore) {
+          const query = `{
+            products(first: 50, ${cursor ? `after: "${cursor}",` : ''}
+              query: "metafield_namespace:seller AND metafield_key:email AND metafield_value:${sellerEmail.replace(/"/g, '')}"
+            ) {
+              pageInfo { hasNextPage endCursor }
+              edges { node { legacyResourceId } }
+            }
+          }`;
+          try {
+            const r = await fetch(GQL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+              body: JSON.stringify({ query })
+            });
+            const { data: gqlData } = await r.json();
+            const page = gqlData?.products;
+            if (page) {
+              for (const edge of page.edges) {
+                shopifyIds.add(edge.node.legacyResourceId);
+                sources.shopify_email++;
+              }
+              hasMore = page.pageInfo.hasNextPage;
+              cursor = page.pageInfo.endCursor;
+            } else {
+              hasMore = false;
+            }
+          } catch { hasMore = false; }
+        }
+
+        // Also search by seller.id metafield using the seller's UUID
+        const { data: sellerRow } = await supabase
+          .from('sellers')
+          .select('id')
+          .eq('id', sellerId)
+          .single();
+
+        if (sellerRow?.id) {
+          const query2 = `{
+            products(first: 50,
+              query: "metafield_namespace:seller AND metafield_key:id AND metafield_value:${sellerRow.id}"
+            ) {
+              edges { node { legacyResourceId } }
+            }
+          }`;
+          try {
+            const r2 = await fetch(GQL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+              body: JSON.stringify({ query: query2 })
+            });
+            const { data: gqlData2 } = await r2.json();
+            for (const edge of (gqlData2?.products?.edges || [])) {
+              if (!shopifyIds.has(edge.node.legacyResourceId)) {
+                shopifyIds.add(edge.node.legacyResourceId);
+                sources.shopify_id++;
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // ── 2. Supabase transactions (sold items — may be archived on Shopify) ──
       const { data: txRows } = await supabase
         .from('transactions')
         .select('product_id')
         .eq('seller_id', sellerId)
         .not('product_id', 'is', null);
 
-      // Pull product_ids from listings table (active items)
+      const idsFromTx = (txRows || []).map(r => r.product_id.toString());
+      sources.transactions = idsFromTx.length;
+
+      // ── 3. Supabase listings table (if populated) ──
       const { data: listingRows } = await supabase
         .from('listings')
         .select('shopify_product_id')
         .eq('seller_id', sellerId)
         .not('shopify_product_id', 'is', null);
 
-      const idsFromTx = (txRows || []).map(r => r.product_id.toString());
       const idsFromListings = (listingRows || []).map(r => r.shopify_product_id.toString());
-      const merged = [...new Set([...idsFromTx, ...idsFromListings])];
+      sources.listings_table = idsFromListings.length;
+
+      // ── Merge all sources ──
+      const merged = [...new Set([...shopifyIds, ...idsFromTx, ...idsFromListings])];
 
       if (merged.length === 0) {
-        return res.status(200).json({ success: true, productIds: [], message: 'No products found in transactions or listings table for this seller' });
+        return res.status(200).json({ success: true, productIds: [], sources, message: 'No products found across Shopify or Supabase for this seller' });
       }
 
       await supabase
@@ -1913,7 +1992,7 @@ export default async function handler(req, res) {
       }
       await cacheBust(CACHE_ALL);
 
-      return res.status(200).json({ success: true, productIds: merged });
+      return res.status(200).json({ success: true, productIds: merged, sources });
     }
 
     return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
