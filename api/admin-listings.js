@@ -2,7 +2,7 @@
 // Consolidated admin listing actions: get-pending, approve, reject
 
 import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct, createDraft } from '../lib/shopify.js';
-import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail, listingRevisionEmail } from '../lib/email.js';
+import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail, listingRevisionEmail, salePriceConfirmedEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { supabase } from '../lib/supabase-admin.js';
@@ -628,6 +628,72 @@ export default async function handler(req, res) {
         transaction: data,
         notificationSent
       });
+    }
+
+    // UPDATE TRANSACTION COMMISSION & PAYOUT
+    if (action === 'update-transaction' && req.method === 'POST') {
+      const { transactionId, commissionRate, notify } = req.body;
+
+      if (!transactionId || commissionRate == null) {
+        return res.status(400).json({ error: 'transactionId and commissionRate required' });
+      }
+      const rate = parseFloat(commissionRate);
+      if (isNaN(rate) || rate < 0 || rate > 100) {
+        return res.status(400).json({ error: 'commissionRate must be between 0 and 100' });
+      }
+
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions')
+        .select('*, seller:sellers(id, name, email, phone)')
+        .eq('id', transactionId)
+        .single();
+
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
+
+      const platformFee = tx.platform_fee ?? 10;
+      const commissionBase = Math.max(0, (tx.sale_price || 0) - platformFee);
+      const sellerPayout = commissionBase * ((100 - rate) / 100);
+
+      const { data: updated, error: updateErr } = await supabase
+        .from('transactions')
+        .update({
+          commission_rate: rate,
+          seller_payout:   sellerPayout,
+          payout_status:   tx.payout_status === 'needs_commission' ? 'pending_shipping' : tx.payout_status
+        })
+        .eq('id', transactionId)
+        .select()
+        .single();
+
+      if (updateErr) return res.status(400).json({ error: updateErr.message });
+
+      let notificationSent = false;
+      if (notify && tx.seller) {
+        const seller = tx.seller;
+        try {
+          const { subject, html } = salePriceConfirmedEmail(
+            seller.name, tx.product_title, tx.sale_price, platformFee, rate, sellerPayout
+          );
+          await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'sale_confirmed' });
+          notificationSent = true;
+
+          if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
+            const { sendWhatsApp } = await import('../lib/send-whatsapp.js');
+            await sendWhatsApp({
+              sellerId: seller.id,
+              to: seller.phone,
+              template: 'item_sold',
+              params: [tx.product_title, tx.sale_price.toFixed(0)],
+              context: 'sale_confirmed',
+              textPreview: `Your item "${tx.product_title}" sold for $${tx.sale_price.toFixed(0)}. Your payout is $${sellerPayout.toFixed(0)}.`
+            });
+          }
+        } catch (e) {
+          console.error('Sale confirmed notification failed:', e.message);
+        }
+      }
+
+      return res.status(200).json({ success: true, transaction: updated, sellerPayout, notificationSent });
     }
 
     // BULK MARK TRANSACTIONS AS PAID

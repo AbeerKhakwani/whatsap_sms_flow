@@ -23,6 +23,12 @@ export default function Transactions() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [skipNotification, setSkipNotification] = useState(false);
 
+  // Set commission modal
+  const [commissionTx, setCommissionTx] = useState(null);
+  const [commissionRate, setCommissionRate] = useState('');
+  const [commissionNotify, setCommissionNotify] = useState(true);
+  const [commissionSaving, setCommissionSaving] = useState(false);
+
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -70,6 +76,36 @@ export default function Transactions() {
     } catch (error) {
       console.error('Error fetching alerts:', error);
     }
+  }
+
+  // Set commission
+  function openCommissionModal(tx) {
+    setCommissionTx(tx);
+    setCommissionRate(tx.commission_rate != null ? String(tx.commission_rate) : '');
+    setCommissionNotify(true);
+    setCommissionSaving(false);
+  }
+
+  async function saveCommission() {
+    if (!commissionTx) return;
+    setCommissionSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin-listings?action=update-transaction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: commissionTx.id, commissionRate: parseFloat(commissionRate), notify: commissionNotify })
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchTransactions();
+        setCommissionTx(null);
+      } else {
+        alert('Failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Failed: ' + e.message);
+    }
+    setCommissionSaving(false);
   }
 
   // Single mark paid
@@ -245,6 +281,7 @@ export default function Transactions() {
   // Pipeline config
   const pipelineStages = [
     { key: 'needs_attention', label: '⚠️ Attention', color: 'bg-red-500', textColor: 'text-red-700', bgLight: 'bg-red-50' },
+    { key: 'needs_commission', label: '% Commission', color: 'bg-orange-500', textColor: 'text-orange-700', bgLight: 'bg-orange-50' },
     { key: 'pending_shipping', label: 'Pending Ship', color: 'bg-amber-500', textColor: 'text-amber-700', bgLight: 'bg-amber-50' },
     { key: 'in_transit', label: 'In Transit', color: 'bg-blue-500', textColor: 'text-blue-700', bgLight: 'bg-blue-50' },
     { key: 'delivered', label: 'Delivered', color: 'bg-purple-500', textColor: 'text-purple-700', bgLight: 'bg-purple-50' },
@@ -428,6 +465,7 @@ export default function Transactions() {
             {[
               { value: 'all', label: 'All' },
               { value: 'needs_attention', label: '⚠️ Attention' },
+              { value: 'needs_commission', label: '% Set Commission' },
               { value: 'pending_shipping', label: 'Pending Ship' },
               { value: 'in_transit', label: 'In Transit' },
               { value: 'delivered', label: 'Delivered' },
@@ -591,12 +629,24 @@ export default function Transactions() {
 
                     {/* Sale */}
                     <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(2)}</span>
+                      {tx.discount_amount > 0 ? (
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="text-xs text-stone-400 line-through">${(tx.sale_price + tx.discount_amount).toFixed(2)}</span>
+                          <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(2)}</span>
+                          <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">-${tx.discount_amount.toFixed(2)} off</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm font-medium text-stone-900">${(tx.sale_price || 0).toFixed(2)}</span>
+                      )}
                     </td>
 
                     {/* Payout */}
                     <td className="px-4 py-3 text-right">
-                      <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(2)}</span>
+                      {tx.commission_rate == null ? (
+                        <span className="text-xs text-orange-500 font-medium">Not set</span>
+                      ) : (
+                        <span className="text-sm font-bold text-green-600">${(tx.seller_payout || 0).toFixed(2)}</span>
+                      )}
                     </td>
 
                     {/* Shipping */}
@@ -682,6 +732,23 @@ export default function Transactions() {
                     {/* Actions */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
+                        {tx.commission_rate == null && (
+                          <button
+                            onClick={() => openCommissionModal(tx)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
+                          >
+                            % Set
+                          </button>
+                        )}
+                        {tx.commission_rate != null && (
+                          <button
+                            onClick={() => openCommissionModal(tx)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 text-xs border border-stone-200 text-stone-400 rounded-lg hover:bg-stone-50 transition-colors"
+                            title="Edit commission rate"
+                          >
+                            %
+                          </button>
+                        )}
                         {isAvailable && (
                           <button
                             onClick={() => openMarkPaidModal(tx)}
@@ -718,17 +785,18 @@ export default function Transactions() {
             <DollarSign className="w-4 h-4" />
             Ready for Payout
           </h3>
-          <div className="space-y-1">
+          <div className="space-y-2">
             {Object.entries(
               transactions
                 .filter(t => t.payout_status === 'available' && t.seller)
                 .reduce((acc, t) => {
                   const key = t.seller?.paypal_email || t.seller?.email || 'no-email';
                   if (!acc[key]) {
-                    acc[key] = { email: t.seller?.paypal_email || t.seller?.email, name: t.seller?.name, total: 0, count: 0 };
+                    acc[key] = { email: t.seller?.paypal_email || t.seller?.email, name: t.seller?.name, total: 0, count: 0, ids: [] };
                   }
                   acc[key].total += t.seller_payout || 0;
                   acc[key].count++;
+                  acc[key].ids.push(t.id);
                   return acc;
                 }, {})
             ).map(([key, data]) => (
@@ -736,9 +804,24 @@ export default function Transactions() {
                 <span className="text-green-900">
                   {data.name || 'Unknown'} — <span className="text-green-700 font-mono text-xs">{data.email}</span>
                 </span>
-                <span className="font-medium text-green-900">
-                  ${data.total.toFixed(2)} <span className="text-green-600 text-xs">({data.count} item{data.count !== 1 ? 's' : ''})</span>
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="font-medium text-green-900">
+                    ${data.total.toFixed(2)} <span className="text-green-600 text-xs">({data.count} item{data.count !== 1 ? 's' : ''})</span>
+                  </span>
+                  <button
+                    onClick={() => {
+                      setSelectedIds(new Set(data.ids));
+                      setBulkNote('');
+                      setBulkAdminNote('');
+                      setBulkSkipNotification(false);
+                      setShowBulkModal(true);
+                    }}
+                    className="flex items-center gap-1 px-3 py-1 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                  >
+                    <DollarSign className="w-3 h-3" />
+                    Pay All
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -755,9 +838,33 @@ export default function Transactions() {
             </div>
             <div className="p-5 space-y-4">
               <div className="bg-stone-50 rounded-lg p-4">
-                <div className="text-sm text-stone-600">{markingPaid.product_title}</div>
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-stone-500">Payout Amount</span>
+                <div className="text-sm text-stone-600 mb-2">{markingPaid.product_title}</div>
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center justify-between text-stone-500">
+                    <span>Listed price</span>
+                    <span>${(markingPaid.sale_price + (markingPaid.discount_amount || 0)).toFixed(2)}</span>
+                  </div>
+                  {(markingPaid.discount_amount || 0) > 0 && (
+                    <div className="flex items-center justify-between text-red-500">
+                      <span>Discount</span>
+                      <span>-${markingPaid.discount_amount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-stone-500">
+                    <span>Platform fee</span>
+                    <span>-${(markingPaid.platform_fee ?? 10).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-stone-700 font-medium border-t border-stone-200 pt-1 mt-1">
+                    <span>Commission base</span>
+                    <span>${Math.max(0, markingPaid.sale_price - (markingPaid.platform_fee ?? 10)).toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-stone-500">
+                    <span>Commission ({markingPaid.commission_rate ?? 18}%)</span>
+                    <span>-${(Math.max(0, markingPaid.sale_price - (markingPaid.platform_fee ?? 10)) * ((markingPaid.commission_rate ?? 18) / 100)).toFixed(2)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-2 border-t border-stone-300">
+                  <span className="text-stone-700 font-medium">Seller Payout</span>
                   <span className="text-xl font-bold text-green-600">${markingPaid.seller_payout?.toFixed(2)}</span>
                 </div>
                 {markingPaid.seller && (
@@ -937,6 +1044,94 @@ export default function Transactions() {
                     {bulkSkipNotification ? `Mark Paid Silent (${selectedIds.size})` : `Confirm & Notify (${selectedIds.size})`}
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Set Commission Modal */}
+      {commissionTx && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="px-5 py-4 border-b border-stone-200">
+              <h3 className="text-lg font-semibold text-stone-900">Set Commission Rate</h3>
+              <p className="text-sm text-stone-500 mt-1 truncate">{commissionTx.product_title}</p>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-stone-50 rounded-lg p-4 text-sm space-y-1.5">
+                <div className="flex justify-between text-stone-500">
+                  <span>Sale price</span><span>${(commissionTx.sale_price || 0).toFixed(2)}</span>
+                </div>
+                {(commissionTx.discount_amount || 0) > 0 && (
+                  <div className="flex justify-between text-red-500">
+                    <span>Discount</span><span>-${commissionTx.discount_amount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-stone-500">
+                  <span>Platform fee</span><span>-${(commissionTx.platform_fee ?? 10).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-medium text-stone-700 border-t border-stone-200 pt-1.5">
+                  <span>Commission base</span>
+                  <span>${Math.max(0, (commissionTx.sale_price || 0) - (commissionTx.platform_fee ?? 10)).toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1.5">Commission Rate (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={commissionRate}
+                  onChange={e => setCommissionRate(e.target.value)}
+                  placeholder="e.g. 18"
+                  className="w-full px-4 py-3 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  autoFocus
+                />
+              </div>
+
+              {commissionRate !== '' && !isNaN(parseFloat(commissionRate)) && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+                  <div className="flex justify-between text-green-700">
+                    <span>Commission ({commissionRate}%)</span>
+                    <span>-${(Math.max(0, (commissionTx.sale_price || 0) - (commissionTx.platform_fee ?? 10)) * (parseFloat(commissionRate) / 100)).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-green-800 mt-1">
+                    <span>Seller payout</span>
+                    <span>${(Math.max(0, (commissionTx.sale_price || 0) - (commissionTx.platform_fee ?? 10)) * ((100 - parseFloat(commissionRate)) / 100)).toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={commissionNotify}
+                  onChange={e => setCommissionNotify(e.target.checked)}
+                  className="w-4 h-4 rounded border-stone-300 text-orange-500 focus:ring-orange-400"
+                />
+                <span className="text-sm text-stone-600">Send seller WhatsApp + email with payout details</span>
+              </label>
+            </div>
+            <div className="px-5 py-4 border-t border-stone-200 flex gap-3">
+              <button
+                onClick={() => setCommissionTx(null)}
+                disabled={commissionSaving}
+                className="flex-1 px-4 py-2.5 border border-stone-300 text-stone-700 rounded-lg hover:bg-stone-50 text-sm font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveCommission}
+                disabled={commissionSaving || commissionRate === '' || isNaN(parseFloat(commissionRate))}
+                className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {commissionSaving ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <CheckCircle className="w-4 h-4" />
+                )}
+                {commissionNotify ? 'Save & Notify Seller' : 'Save'}
               </button>
             </div>
           </div>

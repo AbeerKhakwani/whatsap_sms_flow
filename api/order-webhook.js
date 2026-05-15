@@ -21,6 +21,10 @@ import { supabase } from '../lib/supabase-admin.js';
 // Disable Vercel's body parser so we receive the raw buffer for HMAC verification
 export const config = { api: { bodyParser: false } };
 
+// Flat platform/shipping fee deducted from sale price before commission is applied.
+// Commission is earned on (sale_price - discount - PLATFORM_FEE).
+const PLATFORM_FEE = 10;
+
 // Read the full request body as a Buffer
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
@@ -97,9 +101,9 @@ export default async function handler(req, res) {
       // ── Fetch seller info from Shopify metafields ──────────────────────────
       let sellerEmail   = null;
       let sellerId      = null;
-      let sellerPayout  = null;
-      let commissionRate = 18;
-      let listingType   = 'regular';
+      let sellerPayout   = null;
+      let commissionRate = null; // null = not set in metafields, needs admin review
+      let listingType    = 'regular';
       const productTitle = item.title;
 
       let isConcierge = false;
@@ -108,7 +112,8 @@ export default async function handler(req, res) {
         sellerEmail    = getSellerEmail(metafields);
         sellerId       = getSellerId(metafields);
         sellerPayout   = parseFloat(getMetafieldValue(metafields, 'pricing', 'seller_payout')) || null;
-        commissionRate = parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18;
+        const rateVal  = getMetafieldValue(metafields, 'pricing', 'commission_rate');
+        commissionRate = rateVal ? parseFloat(rateVal) : null;
         const listingTypeVal = getMetafieldValue(metafields, 'seller', 'listing_type');
         if (listingTypeVal) listingType = listingTypeVal;
       } catch (e) {
@@ -152,9 +157,19 @@ export default async function handler(req, res) {
       }
 
       // ── Calculate payout ───────────────────────────────────────────────────
-      const salePrice = parseFloat(item.price);
-      if (!sellerPayout) {
-        sellerPayout = salePrice * ((100 - commissionRate) / 100);
+      // Subtract any order-level discount allocations (coupons, promo codes) from
+      // the line item price to get what the buyer actually paid.
+      const discountTotal = (item.discount_allocations || [])
+        .reduce((sum, d) => sum + parseFloat(d.amount || 0), 0);
+      const salePrice = parseFloat(item.price) - discountTotal;
+      const commissionBase = Math.max(0, salePrice - PLATFORM_FEE);
+      // Only calculate payout if commission rate is known. If not, leave both null
+      // so admin can set them manually before notifying the seller.
+      const commissionKnown = commissionRate !== null;
+      if (commissionKnown && (!sellerPayout || discountTotal > 0)) {
+        sellerPayout = commissionBase * ((100 - commissionRate) / 100);
+      } else if (!commissionKnown) {
+        sellerPayout = null;
       }
 
       // ── Buyer address ──────────────────────────────────────────────────────
@@ -186,10 +201,12 @@ export default async function handler(req, res) {
           product_title:   productTitle,
           product_image:   productImage,
           sale_price:      salePrice,
+          discount_amount: discountTotal,
+          platform_fee:    PLATFORM_FEE,
           seller_payout:   sellerPayout,
           commission_rate: commissionRate,
           status:          'pending_payout',
-          payout_status:   sellerMissing ? 'needs_attention' : 'pending_shipping',
+          payout_status:   sellerMissing ? 'needs_attention' : (!commissionKnown ? 'needs_commission' : 'pending_shipping'),
           shipping_status: sellerMissing ? 'needs_attention' : (isConcierge ? 'concierge' : 'pending_label'),
           listing_type:    listingType,
           customer_email:  order.email,
@@ -222,6 +239,10 @@ export default async function handler(req, res) {
         }).catch(e => console.error('Admin alert email failed:', e.message));
 
         results.push({ productId, payout: sellerPayout, sellerMissing: true });
+
+      } else if (!commissionKnown) {
+        console.log(`   ⚠️  Transaction created (needs commission) for "${productTitle}" | Seller: ${seller.email} | Commission rate not set`);
+        results.push({ sellerId: seller.id, productId, payout: null, needsCommission: true });
 
       } else {
         console.log(`   ✅ Transaction created for "${productTitle}" | Seller: ${seller.email} | Payout: $${sellerPayout.toFixed(2)}`);
