@@ -2,7 +2,7 @@
 // Consolidated admin listing actions: get-pending, approve, reject
 
 import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct, createDraft } from '../lib/shopify.js';
-import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail, listingRevisionEmail } from '../lib/email.js';
+import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail, listingRevisionEmail, salePriceConfirmedEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { supabase } from '../lib/supabase-admin.js';
@@ -628,6 +628,72 @@ export default async function handler(req, res) {
         transaction: data,
         notificationSent
       });
+    }
+
+    // UPDATE TRANSACTION COMMISSION & PAYOUT
+    if (action === 'update-transaction' && req.method === 'POST') {
+      const { transactionId, commissionRate, notify } = req.body;
+
+      if (!transactionId || commissionRate == null) {
+        return res.status(400).json({ error: 'transactionId and commissionRate required' });
+      }
+      const rate = parseFloat(commissionRate);
+      if (isNaN(rate) || rate < 0 || rate > 100) {
+        return res.status(400).json({ error: 'commissionRate must be between 0 and 100' });
+      }
+
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions')
+        .select('*, seller:sellers(id, name, email, phone)')
+        .eq('id', transactionId)
+        .single();
+
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
+
+      const platformFee = tx.platform_fee ?? 10;
+      const commissionBase = Math.max(0, (tx.sale_price || 0) - platformFee);
+      const sellerPayout = commissionBase * ((100 - rate) / 100);
+
+      const { data: updated, error: updateErr } = await supabase
+        .from('transactions')
+        .update({
+          commission_rate: rate,
+          seller_payout:   sellerPayout,
+          payout_status:   tx.payout_status === 'needs_commission' ? 'pending_shipping' : tx.payout_status
+        })
+        .eq('id', transactionId)
+        .select()
+        .single();
+
+      if (updateErr) return res.status(400).json({ error: updateErr.message });
+
+      let notificationSent = false;
+      if (notify && tx.seller) {
+        const seller = tx.seller;
+        try {
+          const { subject, html } = salePriceConfirmedEmail(
+            seller.name, tx.product_title, tx.sale_price, platformFee, rate, sellerPayout
+          );
+          await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'sale_confirmed' });
+          notificationSent = true;
+
+          if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
+            const { sendWhatsApp } = await import('../lib/send-whatsapp.js');
+            await sendWhatsApp({
+              sellerId: seller.id,
+              to: seller.phone,
+              template: 'item_sold',
+              params: [tx.product_title, tx.sale_price.toFixed(0)],
+              context: 'sale_confirmed',
+              textPreview: `Your item "${tx.product_title}" sold for $${tx.sale_price.toFixed(0)}. Your payout is $${sellerPayout.toFixed(0)}.`
+            });
+          }
+        } catch (e) {
+          console.error('Sale confirmed notification failed:', e.message);
+        }
+      }
+
+      return res.status(200).json({ success: true, transaction: updated, sellerPayout, notificationSent });
     }
 
     // BULK MARK TRANSACTIONS AS PAID
@@ -1437,6 +1503,17 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       }, { onConflict: 'shopify_product_id' });
 
+      // Add product to seller's shopify_product_ids array so the seller dashboard finds it,
+      // then bust their cache so it shows up immediately.
+      const { data: freshSeller } = await supabase
+        .from('sellers')
+        .select('shopify_product_ids')
+        .eq('id', seller.id)
+        .single();
+      const updatedIds = [...new Set([...(freshSeller?.shopify_product_ids || []), productId.toString()])];
+      await supabase.from('sellers').update({ shopify_product_ids: updatedIds }).eq('id', seller.id);
+      await cacheBust(`listings:seller:${seller.email.toLowerCase()}`);
+
       // Surgically update the Redis cache for this one listing instead of busting the whole
       // cache. Cache bust + re-populate creates a race condition where the Layout.jsx background
       // prefetch can re-write stale data back to localStorage before the fresh fetch arrives.
@@ -1799,7 +1876,126 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, productId, changes });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing' });
+    // ── SYNC-SELLER-LISTINGS ─ rebuild shopify_product_ids from Shopify + Supabase ──
+    if (action === 'sync-seller-listings' && req.method === 'POST') {
+      const { sellerId, sellerEmail } = req.body;
+      if (!sellerId) return res.status(400).json({ error: 'sellerId required' });
+
+      const sources = { shopify_email: 0, shopify_id: 0, transactions: 0, listings_table: 0 };
+
+      // ── 1. Shopify GraphQL: products where seller.email metafield = sellerEmail ──
+      const shopifyIds = new Set();
+      if (sellerEmail) {
+        const SHOPIFY_URL = process.env.VITE_SHOPIFY_STORE_URL;
+        const SHOPIFY_TOKEN = process.env.VITE_SHOPIFY_ACCESS_TOKEN;
+        const GQL = `https://${SHOPIFY_URL}/admin/api/2024-01/graphql.json`;
+
+        // Search by seller.email metafield (catches all statuses: active, draft, archived)
+        let cursor = null;
+        let hasMore = true;
+        while (hasMore) {
+          const query = `{
+            products(first: 50, ${cursor ? `after: "${cursor}",` : ''}
+              query: "metafield_namespace:seller AND metafield_key:email AND metafield_value:${sellerEmail.replace(/"/g, '')}"
+            ) {
+              pageInfo { hasNextPage endCursor }
+              edges { node { legacyResourceId } }
+            }
+          }`;
+          try {
+            const r = await fetch(GQL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+              body: JSON.stringify({ query })
+            });
+            const { data: gqlData } = await r.json();
+            const page = gqlData?.products;
+            if (page) {
+              for (const edge of page.edges) {
+                shopifyIds.add(edge.node.legacyResourceId);
+                sources.shopify_email++;
+              }
+              hasMore = page.pageInfo.hasNextPage;
+              cursor = page.pageInfo.endCursor;
+            } else {
+              hasMore = false;
+            }
+          } catch { hasMore = false; }
+        }
+
+        // Also search by seller.id metafield using the seller's UUID
+        const { data: sellerRow } = await supabase
+          .from('sellers')
+          .select('id')
+          .eq('id', sellerId)
+          .single();
+
+        if (sellerRow?.id) {
+          const query2 = `{
+            products(first: 50,
+              query: "metafield_namespace:seller AND metafield_key:id AND metafield_value:${sellerRow.id}"
+            ) {
+              edges { node { legacyResourceId } }
+            }
+          }`;
+          try {
+            const r2 = await fetch(GQL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': SHOPIFY_TOKEN },
+              body: JSON.stringify({ query: query2 })
+            });
+            const { data: gqlData2 } = await r2.json();
+            for (const edge of (gqlData2?.products?.edges || [])) {
+              if (!shopifyIds.has(edge.node.legacyResourceId)) {
+                shopifyIds.add(edge.node.legacyResourceId);
+                sources.shopify_id++;
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // ── 2. Supabase transactions (sold items — may be archived on Shopify) ──
+      const { data: txRows } = await supabase
+        .from('transactions')
+        .select('product_id')
+        .eq('seller_id', sellerId)
+        .not('product_id', 'is', null);
+
+      const idsFromTx = (txRows || []).map(r => r.product_id.toString());
+      sources.transactions = idsFromTx.length;
+
+      // ── 3. Supabase listings table (if populated) ──
+      const { data: listingRows } = await supabase
+        .from('listings')
+        .select('shopify_product_id')
+        .eq('seller_id', sellerId)
+        .not('shopify_product_id', 'is', null);
+
+      const idsFromListings = (listingRows || []).map(r => r.shopify_product_id.toString());
+      sources.listings_table = idsFromListings.length;
+
+      // ── Merge all sources ──
+      const merged = [...new Set([...shopifyIds, ...idsFromTx, ...idsFromListings])];
+
+      if (merged.length === 0) {
+        return res.status(200).json({ success: true, productIds: [], sources, message: 'No products found across Shopify or Supabase for this seller' });
+      }
+
+      await supabase
+        .from('sellers')
+        .update({ shopify_product_ids: merged })
+        .eq('id', sellerId);
+
+      if (sellerEmail) {
+        await cacheBust(`listings:seller:${sellerEmail.toLowerCase()}`);
+      }
+      await cacheBust(CACHE_ALL);
+
+      return res.status(200).json({ success: true, productIds: merged, sources });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
 
   } catch (error) {
     console.error('Admin listings error:', error);

@@ -24,6 +24,7 @@
     "deploy": "npm run pre-deploy && vercel --prod"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
     "@supabase/supabase-js": "^2.86.2",
     "@vercel/kv": "^3.0.0",
     "axios": "^1.13.2",

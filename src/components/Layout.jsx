@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2 } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Search } from 'lucide-react';
 import { activityConfig, timeAgo } from '../pages/ActivityFeed';
+import SearchPalette from './SearchPalette';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -12,7 +13,11 @@ export default function Layout({ children }) {
   const [activity, setActivity] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [bellOpen, setBellOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const bellRef = useRef(null);
+
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
 
   // Auth check with token verification
   useEffect(() => {
@@ -63,11 +68,21 @@ export default function Layout({ children }) {
       }
     }).catch(() => {});
 
-    const handler = (e) => {
+    const clickHandler = (e) => {
       if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const keyHandler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(s => !s);
+      }
+    };
+    document.addEventListener('mousedown', clickHandler);
+    document.addEventListener('keydown', keyHandler);
+    return () => {
+      document.removeEventListener('mousedown', clickHandler);
+      document.removeEventListener('keydown', keyHandler);
+    };
   }, [verified]);
 
   async function fetchActivity() {
@@ -185,9 +200,19 @@ export default function Layout({ children }) {
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto flex flex-col">
-        {/* Top bar with bell */}
-        <div className="flex items-center justify-end px-6 py-3 border-b border-stone-200 bg-white flex-shrink-0">
-          <div ref={bellRef} className="relative">
+        {/* Top bar with search + bell */}
+        <div className="flex items-center gap-3 px-6 py-3 border-b border-stone-200 bg-white flex-shrink-0">
+          {/* Search trigger */}
+          <button
+            onClick={openSearch}
+            className="flex items-center gap-2 flex-1 max-w-xs px-3 py-1.5 text-sm text-stone-400 bg-stone-50 border border-stone-200 rounded-lg hover:border-stone-300 hover:text-stone-600 transition text-left"
+          >
+            <Search className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1">Search anything…</span>
+            <kbd className="hidden sm:block text-[10px] text-stone-300 font-mono">⌘K</kbd>
+          </button>
+
+          <div ref={bellRef} className="relative ml-auto">
             <button
               onClick={openBell}
               className="relative p-2 rounded-lg text-stone-500 hover:text-stone-800 hover:bg-stone-100 transition"
@@ -255,6 +280,8 @@ export default function Layout({ children }) {
           {children}
         </div>
       </div>
+
+      <SearchPalette open={searchOpen} onClose={closeSearch} />
     </div>
   );
 }

@@ -1239,6 +1239,14 @@ export default async function handler(req, res) {
         console.error('Transfer email error (non-fatal):', emailErr);
       }
 
+      // Bust seller caches so both dashboards reflect the change immediately
+      await cacheBust(cacheKeyListings(toSeller.email.toLowerCase()));
+      if (fromSeller?.email) {
+        await cacheBust(cacheKeyListings(fromSeller.email.toLowerCase()));
+      }
+      // Also bust the admin all-listings cache
+      await cacheBust('listings:all');
+
       return res.status(200).json({
         success: true,
         message: `Listing transferred to ${toSeller.name || toSeller.email}`,
