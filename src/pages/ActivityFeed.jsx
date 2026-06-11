@@ -11,6 +11,7 @@ const FILTERS = [
   { key: 'item_sold',         label: 'Sales' },
   { key: 'new_offer',         label: 'Offers' },
   { key: 'payout_sent',       label: 'Payouts' },
+  { key: 'inbound_message',   label: 'Messages' },
 ];
 
 export function activityConfig(item) {
@@ -26,6 +27,7 @@ export function activityConfig(item) {
     new_offer:            { icon: '💬', color: 'bg-indigo-50 text-indigo-700',  label: `New offer $${meta.amount || '?'} on listing — ${sellerName}` },
     offer_accepted:       { icon: '🤝', color: 'bg-teal-50 text-teal-700',     label: `Offer accepted on "${meta.productTitle || 'listing'}"` },
     payout_sent:          { icon: '💸', color: 'bg-gray-50 text-gray-700',     label: `Payout sent to ${sellerName}` },
+    inbound_message:      { icon: '📩', color: 'bg-rose-50 text-rose-700',     label: `${sellerName} messaged: "${item.content || ''}"` },
   };
   return map[item.context] || { icon: '📋', color: 'bg-gray-50 text-gray-700', label: item.subject || item.content || item.context };
 }

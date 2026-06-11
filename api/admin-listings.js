@@ -1581,7 +1581,7 @@ export default async function handler(req, res) {
       const { data: messages } = await supabase
         .from('messages')
         .select('id, seller_id, type, context, content, subject, metadata, created_at')
-        .in('context', ['price_updated', 'seller_revised', 'listing_approved', 'listing_rejected', 'revision_requested', 'item_sold', 'new_offer', 'offer_accepted', 'payout_sent'])
+        .in('context', ['price_updated', 'seller_revised', 'listing_approved', 'listing_rejected', 'revision_requested', 'item_sold', 'new_offer', 'offer_accepted', 'payout_sent', 'inbound_message'])
         .order('created_at', { ascending: false })
         .limit(limit);
 
