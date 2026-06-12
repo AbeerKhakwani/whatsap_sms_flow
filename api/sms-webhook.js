@@ -340,45 +340,6 @@ async function extractListingData(description) {
 
 // ============ MAIN HANDLER ============
 
-// ─── INBOUND MESSAGE VISIBILITY ───────────────────────────────────────────
-// Meta's Business inbox doesn't surface messages once the Cloud API webhook
-// handles them, so anything the bot doesn't recognize used to vanish. Every
-// inbound message is logged to the messages table, and free-text messages
-// outside the listing flow are forwarded to admin email.
-
-async function logInboundMessage(seller, phone, text, message) {
-  await supabase.from('messages').insert({
-    seller_id: seller?.id || null,
-    type: 'whatsapp',
-    recipient: phone,
-    content: text || `[${message.type}]`,
-    context: 'inbound_message',
-    metadata: { from: phone, message_type: message.type, wa_message_id: message.id },
-    status: 'received',
-    external_id: message.id
-  }).catch(() => {});
-}
-
-async function forwardMessageToAdmin(seller, phone, text) {
-  try {
-    const { Resend } = await import('resend');
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    const who = seller ? `${seller.name} (${seller.email})` : 'Unknown number';
-    await resend.emails.send({
-      from: process.env.FROM_EMAIL || 'The Phir Story <updates@sellphirstory.com>',
-      to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
-      subject: `💬 WhatsApp from ${seller?.name || phone}`,
-      html: `<p><strong>From:</strong> ${who}<br>
-             <strong>Phone:</strong> ${phone}</p>
-             <blockquote style="border-left:3px solid #6366f1;margin:8px 0;padding:6px 12px;background:#f5f5ff">${text}</blockquote>
-             <p>An auto-reply was sent letting them know the team will follow up.
-             Reply from the WhatsApp Business app or call them back.</p>`
-    });
-  } catch (e) {
-    console.error('❌ Admin forward failed:', e.message);
-  }
-}
-
 export default async function handler(req, res) {
   // Webhook verification (GET)
   if (req.method === 'GET') {
@@ -528,14 +489,6 @@ export default async function handler(req, res) {
     const cmd = text.toLowerCase();
     console.log(`📱 ${phone} [${conv.state}]: "${text}"`);
 
-    // Log every inbound message so it shows in seller history + activity feed
-    const { data: senderSeller } = await supabase
-      .from('sellers')
-      .select('id, name, email')
-      .eq('phone', phone)
-      .maybeSingle();
-    await logInboundMessage(senderSeller, phone, text, message);
-
     // Global commands
     if (cmd === 'cancel') {
       // Clean up Redis photos
@@ -552,7 +505,12 @@ export default async function handler(req, res) {
     // ─── OFFER RESPONSES ──────────────────────────────────────────────────────
     // Sellers can reply ACCEPT, REJECT, or COUNTER [amount] to manage bids
     if (cmd === 'accept' || cmd === 'reject' || cmd.startsWith('counter ')) {
-      const seller = senderSeller;
+      // Find seller by phone
+      const { data: seller } = await smsDb.supabase
+        .from('sellers')
+        .select('id, name, email')
+        .eq('phone', phone)
+        .maybeSingle();
 
       if (!seller) {
         await sendMessage(phone, "We couldn't find your seller account. Please contact us at thephirstory@gmail.com");
@@ -621,15 +579,6 @@ export default async function handler(req, res) {
     switch (conv.state) {
       case 'new':
       case 'welcome':
-        // Free text outside the listing flow is a human reaching out, not a
-        // bot command — forward it to admin instead of dropping it.
-        if (text && message.type !== 'interactive') {
-          await forwardMessageToAdmin(senderSeller, phone, text);
-          await sendMessage(phone,
-            `Thanks for your message${senderSeller?.name ? `, ${senderSeller.name}` : ''}! Our team will get back to you shortly. 💬\n\nIf you'd like to list an item in the meantime, reply SELL.`
-          );
-          return res.status(200).json({ status: 'forwarded_to_admin' });
-        }
         await sendWelcome(phone);
         return res.status(200).json({ status: 'welcome' });
 
@@ -649,13 +598,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ status: 'awaiting flow' });
 
       default:
-        if (text && message.type !== 'interactive') {
-          await forwardMessageToAdmin(senderSeller, phone, text);
-          await sendMessage(phone,
-            `Thanks for your message${senderSeller?.name ? `, ${senderSeller.name}` : ''}! Our team will get back to you shortly. 💬\n\nIf you'd like to list an item in the meantime, reply SELL.`
-          );
-          return res.status(200).json({ status: 'forwarded_to_admin' });
-        }
         await sendWelcome(phone);
         return res.status(200).json({ status: 'welcome' });
     }
