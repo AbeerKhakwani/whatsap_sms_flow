@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
 import { withCache, cacheBust } from '../lib/cache.js';
+import { calculateSellerPayout } from '../lib/payout-calculation.js';
 import { logImpersonationEvent } from '../lib/audit-log.js';
 
 const CACHE_TTL_LISTINGS = 90; // seconds
@@ -620,7 +621,7 @@ export default async function handler(req, res) {
           let sellerEmail = null;
           let sellerId = null;
           let sellerPayout = null;
-          let commissionRate = 18;
+          let commissionRate = null;
           let listingType = 'regular';
           let productTitle = item.title; // Use line_item title (always available from webhook)
 
@@ -629,7 +630,8 @@ export default async function handler(req, res) {
             sellerEmail = getSellerEmail(metafields);
             sellerId = getSellerId(metafields);
             sellerPayout = parseFloat(getMetafieldValue(metafields, 'pricing', 'seller_payout')) || null;
-            commissionRate = parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18;
+            const rateVal = getMetafieldValue(metafields, 'pricing', 'commission_rate');
+            commissionRate = rateVal ? parseFloat(rateVal) : null;
             const listingTypeVal = getMetafieldValue(metafields, 'seller', 'listing_type');
             if (listingTypeVal) listingType = listingTypeVal;
           } catch (e) {
@@ -666,10 +668,15 @@ export default async function handler(req, res) {
             continue;
           }
 
-          // Calculate payout if not in metafields
+          // Calculate payout through the shared formula. Keep the precomputed
+          // metafield payout if present; otherwise compute from the per-item rate.
           const salePrice = parseFloat(item.price);
+          const { commissionKnown, sellerPayout: computedPayout } = calculateSellerPayout({
+            grossPrice: salePrice,
+            commissionRate,
+          });
           if (!sellerPayout) {
-            sellerPayout = salePrice * ((100 - commissionRate) / 100);
+            sellerPayout = computedPayout; // null when commission rate is unknown
           }
 
           // Extract buyer shipping address from order
@@ -698,7 +705,7 @@ export default async function handler(req, res) {
             seller_payout: sellerPayout,
             commission_rate: commissionRate,
             status: 'pending_payout',
-            payout_status: sellerMissing ? 'needs_attention' : 'pending_shipping',
+            payout_status: sellerMissing ? 'needs_attention' : (!commissionKnown ? 'needs_commission' : 'pending_shipping'),
             shipping_status: sellerMissing ? 'needs_attention' : 'pending_label',
             listing_type: listingType,
             customer_email: order.email,
@@ -724,6 +731,9 @@ export default async function handler(req, res) {
           if (sellerMissing) {
             console.log(`   ⚠️ Created transaction for ${item.title} | SELLER MISSING | Payout: $${sellerPayout}`);
             results.push({ sellerId: null, productId, payout: sellerPayout, sellerMissing: true });
+          } else if (!commissionKnown) {
+            console.log(`   ⚠️ Created transaction for ${item.title} | Seller: ${seller.email} | Commission rate not set — needs admin review`);
+            results.push({ sellerId: seller.id, productId, payout: null, needsCommission: true });
           } else {
             console.log(`   ✅ Created transaction for ${item.title} | Seller: ${seller.email} | Payout: $${sellerPayout}`);
 
@@ -731,7 +741,8 @@ export default async function handler(req, res) {
             await notifySellerOfSale(seller, {
               productTitle,
               salePrice,
-              sellerPayout
+              sellerPayout,
+              commissionRate
             });
 
             results.push({ sellerId: seller.id, productId, payout: sellerPayout });
@@ -1934,7 +1945,7 @@ export default async function handler(req, res) {
 
 // Send sale notification to seller via WhatsApp and email
 async function notifySellerOfSale(seller, saleInfo) {
-  const { productTitle, salePrice, sellerPayout } = saleInfo;
+  const { productTitle, salePrice, sellerPayout, commissionRate, discount = 0, platformFee = 10 } = saleInfo;
   const metadata = { productTitle, salePrice, payout: sellerPayout };
 
   // Send WhatsApp
@@ -1952,7 +1963,7 @@ async function notifySellerOfSale(seller, saleInfo) {
 
   // Send email
   if (seller.email) {
-    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, salePrice, sellerPayout);
+    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, { salePrice, discount, commissionRate, platformFee, sellerPayout });
     await sendEmail({
       sellerId: seller.id,
       to: seller.email,

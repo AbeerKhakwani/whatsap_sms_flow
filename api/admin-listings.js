@@ -12,6 +12,8 @@ import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
 import { addProductToSeller } from '../lib/sellers.js';
 import { scrapePage } from '../lib/scraper.js';
 import { withCache, cacheBust } from '../lib/cache.js';
+import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
+import { payViaProvider, releasePayout } from '../lib/payout-service.js';
 
 const CACHE_PENDING = 'listings:pending';
 const CACHE_ALL = 'listings:all';
@@ -560,74 +562,73 @@ export default async function handler(req, res) {
       });
     }
 
+    // SINGLE TRANSACTION (detail page) — includes seller payout defaults for auto-fill
+    if (action === 'transaction' && req.method === 'GET') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'id required' });
+
+      const { data: tx, error } = await supabase.from('transactions').select('*').eq('id', id).single();
+      if (error || !tx) return res.status(404).json({ error: 'Transaction not found' });
+
+      let seller = null;
+      if (tx.seller_id) {
+        const { data } = await supabase
+          .from('sellers')
+          .select('id, name, email, phone, paypal_email, payout_method, payment_provider, payment_handle')
+          .eq('id', tx.seller_id)
+          .single();
+        seller = data;
+      }
+
+      return res.status(200).json({ success: true, transaction: { ...tx, seller } });
+    }
+
     // MARK TRANSACTION AS PAID (with optional notes)
     if (action === 'mark-paid' && req.method === 'POST') {
-      const { transactionId, sellerNote, adminNote, skipNotification } = req.body;
+      // payoutMethod/payoutHandle/payoutProvider are the new structured fields;
+      // sellerNote is accepted for back-compat (old UI sent the method there).
+      const { transactionId, payoutProvider, payoutMethod, payoutHandle, sellerNote, adminNote, skipNotification } = req.body;
 
       if (!transactionId) {
         return res.status(400).json({ error: 'Transaction ID required' });
       }
 
-      const updateData = {
-        status: 'paid',
-        payout_status: 'paid',
-        paid_at: new Date().toISOString()
-      };
-      if (sellerNote) updateData.seller_note = sellerNote;
-      if (adminNote) updateData.admin_note = adminNote;
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions').select('*').eq('id', transactionId).single();
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
 
-      const { data, error } = await supabase
-        .from('transactions')
-        .update(updateData)
-        .eq('id', transactionId)
-        .select()
-        .single();
-
-      if (error) {
-        return res.status(400).json({ error: error.message });
+      try {
+        const { transaction, notificationSent } = await payViaProvider(tx, {
+          provider: payoutProvider || 'zelle_manual',
+          method:   payoutMethod || sellerNote,
+          handle:   payoutHandle,
+          adminNote,
+          notify:   !skipNotification,
+        });
+        return res.status(200).json({ success: true, transaction, notificationSent });
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
       }
+    }
 
-      // Send notification to seller
-      let notificationSent = false;
-      if (!skipNotification && data.seller_id) {
-        const { data: seller } = await supabase
-          .from('sellers')
-          .select('email, name, phone')
-          .eq('id', data.seller_id)
-          .single();
+    // MANUAL RELEASE — force a delivered item to 'available' without waiting for the timer.
+    if (action === 'release-payout' && req.method === 'POST') {
+      const { transactionId } = req.body;
+      if (!transactionId) return res.status(400).json({ error: 'Transaction ID required' });
 
-        if (seller?.email) {
-          try {
-            const metadata = { transactionId: data.id, productTitle: data.product_title, payout: data.seller_payout, paymentMethod: sellerNote };
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions').select('*').eq('id', transactionId).single();
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
 
-            // Send email
-            const { subject, html } = payoutNotificationEmail(seller.name, data.product_title, data.seller_payout, sellerNote);
-            const emailResult = await sendEmail({ sellerId: data.seller_id, to: seller.email, subject, html, context: 'payout_sent', metadata });
-            if (emailResult.success) notificationSent = true;
-
-            // Send WhatsApp
-            if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
-              await sendWhatsApp({
-                sellerId: data.seller_id,
-                to: seller.phone,
-                template: 'payout_sent',
-                params: [seller.name || 'there', `$${data.seller_payout?.toFixed(2)}`, data.product_title, sellerNote ? ` via ${sellerNote}` : ''],
-                context: 'payout_sent',
-                metadata,
-                textPreview: `Your payout of $${data.seller_payout?.toFixed(2)} for "${data.product_title}" has been sent.`
-              });
-            }
-          } catch (e) {
-            console.error('Payout notification error:', e);
-          }
+      try {
+        const { released, transaction } = await releasePayout(tx);
+        if (!released) {
+          return res.status(400).json({ error: `Cannot release from status "${tx.payout_status}" (only delivered items can be released).` });
         }
+        return res.status(200).json({ success: true, transaction });
+      } catch (e) {
+        return res.status(400).json({ error: e.message });
       }
-
-      return res.status(200).json({
-        success: true,
-        transaction: data,
-        notificationSent
-      });
     }
 
     // UPDATE TRANSACTION COMMISSION & PAYOUT
@@ -650,9 +651,12 @@ export default async function handler(req, res) {
 
       if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
 
-      const platformFee = tx.platform_fee ?? 10;
-      const commissionBase = Math.max(0, (tx.sale_price || 0) - platformFee);
-      const sellerPayout = commissionBase * ((100 - rate) / 100);
+      const platformFee = tx.platform_fee ?? PLATFORM_FEE;
+      const { sellerPayout } = calculateSellerPayout({
+        grossPrice: tx.sale_price || 0,
+        commissionRate: rate,
+        platformFee,
+      });
 
       const { data: updated, error: updateErr } = await supabase
         .from('transactions')
@@ -730,21 +734,11 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'No transactions in "available" status to mark as paid' });
       }
 
-      const updateData = {
-        status: 'paid',
-        payout_status: 'paid',
-        paid_at: new Date().toISOString()
-      };
-      if (sellerNote) updateData.payout_method = sellerNote;
-      if (adminNote) updateData.admin_note = adminNote;
-
-      const { error: updateErr } = await supabase
-        .from('transactions')
-        .update(updateData)
-        .in('id', validTxs.map(t => t.id));
-
-      if (updateErr) {
-        return res.status(400).json({ error: updateErr.message });
+      // Record each payout through the shared service (writes structured fields:
+      // payout_provider/method, paid_at). Notifications are sent in aggregate below.
+      for (const t of validTxs) {
+        await payViaProvider(t, { provider: 'zelle_manual', method: sellerNote, adminNote, notify: false })
+          .catch(e => console.error(`Bulk mark-paid write failed for ${t.id}:`, e.message));
       }
 
       // Send notifications (unless silent)
@@ -790,7 +784,7 @@ export default async function handler(req, res) {
                       { type: 'text', text: seller.name || 'there' },
                       { type: 'text', text: `$${totalPayout.toFixed(2)}` },
                       { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
-                      { type: 'text', text: sellerNote ? ` via ${sellerNote}` : '' }
+                      { type: 'text', text: sellerNote ? ` via ${sellerNote}` : ' to your account on file' }
                     ]
                   }
                 ],
@@ -1217,7 +1211,7 @@ export default async function handler(req, res) {
 
       const price = parseFloat(salePrice) || 100;
       const commissionRate = 18;
-      const sellerPayout = Math.round(price * (1 - commissionRate / 100) * 100) / 100;
+      const sellerPayout = Math.round(calculateSellerPayout({ grossPrice: price, commissionRate }).sellerPayout * 100) / 100;
 
       const shipBy = new Date();
       shipBy.setDate(shipBy.getDate() + 7);
@@ -1327,13 +1321,14 @@ export default async function handler(req, res) {
 
           try {
             // Fetch seller from metafields
-            let sellerEmail = null, sellerId = null, sellerPayout = null, commissionRate = 18;
+            let sellerEmail = null, sellerId = null, sellerPayout = null, commissionRate = null;
             try {
               const metafields = await fetchMetafields(productId);
               sellerEmail    = getSellerEmail(metafields);
               sellerId       = getSellerId(metafields);
               sellerPayout   = parseFloat(getMetafieldValue(metafields, 'pricing', 'seller_payout')) || null;
-              commissionRate = parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18;
+              const rateVal  = getMetafieldValue(metafields, 'pricing', 'commission_rate');
+              commissionRate = rateVal ? parseFloat(rateVal) : null;
             } catch {}
 
             let seller = null;
@@ -1346,8 +1341,15 @@ export default async function handler(req, res) {
               seller = data;
             }
 
-            const salePrice = parseFloat(item.price);
-            if (!sellerPayout) sellerPayout = salePrice * ((100 - commissionRate) / 100);
+            const discountTotal = (item.discount_allocations || [])
+              .reduce((sum, d) => sum + parseFloat(d.amount || 0), 0);
+            const salePrice = parseFloat(item.price) - discountTotal;
+            const { commissionKnown, sellerPayout: computedPayout } = calculateSellerPayout({
+              grossPrice: parseFloat(item.price),
+              discount: discountTotal,
+              commissionRate,
+            });
+            if (!sellerPayout) sellerPayout = computedPayout; // null when rate unknown
 
             const buyerAddress = order.shipping_address ? {
               name: order.shipping_address.name, street1: order.shipping_address.address1,
@@ -1366,10 +1368,12 @@ export default async function handler(req, res) {
               product_title:   item.title,
               product_image:   item.image?.src || null,
               sale_price:      salePrice,
+              discount_amount: discountTotal,
+              platform_fee:    PLATFORM_FEE,
               seller_payout:   sellerPayout,
               commission_rate: commissionRate,
               status:          'pending_payout',
-              payout_status:   seller ? 'pending_shipping' : 'needs_attention',
+              payout_status:   !seller ? 'needs_attention' : (!commissionKnown ? 'needs_commission' : 'pending_shipping'),
               shipping_status: seller ? 'pending_label'    : 'needs_attention',
               customer_email:  order.email,
               buyer_address:   buyerAddress,
@@ -1483,8 +1487,8 @@ export default async function handler(req, res) {
       // Fetch product to get current price
       const product = await getProduct(productId);
       const listingPrice = parseFloat(product.variants?.[0]?.price) || 0;
-      const askingPrice = Math.max(0, listingPrice - 10);
-      const sellerPayout = askingPrice * ((100 - rate) / 100);
+      const askingPrice = Math.max(0, listingPrice - PLATFORM_FEE);
+      const { sellerPayout } = calculateSellerPayout({ grossPrice: listingPrice, commissionRate: rate });
 
       // Upsert all seller + pricing metafields
       await Promise.all([
