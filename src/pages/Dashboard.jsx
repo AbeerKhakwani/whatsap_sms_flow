@@ -477,62 +477,52 @@ export default function Dashboard() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 text-sm">Overview of listings and payouts</p>
+        <h1 className="text-xl font-semibold text-stone-900">Dashboard</h1>
+        <p className="text-stone-500 text-sm">Overview of listings and payouts</p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wide">Pending</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.pending}</p>
-            </div>
-            <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-              <Clock className="w-5 h-5 text-amber-600" />
-            </div>
+      {/* Needs you — action items lead, with functional color drawing the eye */}
+      {(stats.pending > 0 || payouts.length > 0) && (
+        <div>
+          <p className="text-xs text-stone-400 uppercase tracking-wider mb-2">Needs you</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {stats.pending > 0 && (
+              <a href="#pending-approval" className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100 active:scale-[0.99] transition">
+                <Clock className="w-6 h-6 text-amber-600 flex-shrink-0" />
+                <span className="flex-1 text-sm text-amber-800">Listings to approve</span>
+                <span className="text-lg font-semibold text-amber-800">{stats.pending}</span>
+              </a>
+            )}
+            {payouts.length > 0 && (
+              <a href="#pending-payouts" className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-100 active:scale-[0.99] transition">
+                <Banknote className="w-6 h-6 text-green-600 flex-shrink-0" />
+                <span className="flex-1 text-sm text-green-800">Payouts ready · ${totalPending.toFixed(0)}</span>
+                <span className="text-lg font-semibold text-green-800">{payouts.length}</span>
+              </a>
+            )}
           </div>
         </div>
+      )}
 
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wide">Live</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.approved}</p>
-            </div>
-            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-              <Check className="w-5 h-5 text-green-600" />
-            </div>
-          </div>
+      {/* At a glance — informational metrics */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-stone-100 rounded-xl p-4">
+          <p className="text-stone-500 text-xs">Live</p>
+          <p className="text-2xl font-semibold text-stone-900 mt-1">{stats.approved}</p>
         </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-500 text-xs uppercase tracking-wide">Sold</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{stats.sold}</p>
-            </div>
-            <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-              <DollarSign className="w-5 h-5 text-gray-600" />
-            </div>
-          </div>
+        <div className="bg-stone-100 rounded-xl p-4">
+          <p className="text-stone-500 text-xs">Sold</p>
+          <p className="text-2xl font-semibold text-stone-900 mt-1">{stats.sold}</p>
         </div>
-
-        <div className="bg-black rounded-xl p-5 text-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-xs uppercase tracking-wide">Payouts Due</p>
-              <p className="text-2xl font-bold mt-1">${totalPending.toFixed(0)}</p>
-            </div>
-            <Banknote className="w-8 h-8 text-gray-500" />
-          </div>
+        <div className="bg-stone-100 rounded-xl p-4">
+          <p className="text-stone-500 text-xs">Payouts due</p>
+          <p className="text-2xl font-semibold text-stone-900 mt-1">${totalPending.toFixed(0)}</p>
         </div>
       </div>
 
       {/* Pending Payouts Section */}
       {payouts.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div id="pending-payouts" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 flex items-center gap-2">
               <Banknote className="w-4 h-4" />
@@ -574,7 +564,7 @@ export default function Dashboard() {
       )}
 
       {/* Pending Listings */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div id="pending-approval" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-semibold text-gray-900 flex items-center gap-2">
             <Clock className="w-4 h-4" />

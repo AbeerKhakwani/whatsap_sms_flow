@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   DollarSign, Clock, CheckCircle, User, ExternalLink,
   Check, X, MessageSquare, Filter, RefreshCw, FileText,
   Package, Truck, Printer, Download, AlertTriangle
 } from 'lucide-react';
+import { calculateSellerPayout } from '../../lib/payout-calculation';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Transactions() {
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -556,7 +558,9 @@ export default function Transactions() {
 
                 const isCancelled = payoutStatus === 'cancelled';
                 return (
-                  <tr key={tx.id} className={`hover:bg-stone-50/50 transition-colors ${isCancelled ? 'opacity-40 line-through' : payoutStatus === 'needs_attention' ? 'bg-red-50/50' : overdue ? 'bg-amber-50/50' : ''}`}>
+                  <tr key={tx.id}
+                    onClick={(e) => { if (!e.target.closest('button, input, a, label, select')) navigate(`/admin/transactions/${tx.id}`); }}
+                    className={`cursor-pointer hover:bg-stone-50/50 transition-colors ${isCancelled ? 'opacity-40 line-through' : payoutStatus === 'needs_attention' ? 'bg-red-50/50' : overdue ? 'bg-amber-50/50' : ''}`}>
                     {/* Checkbox */}
                     <td className="w-10 px-3 py-3">
                       {isAvailable && (
@@ -581,7 +585,7 @@ export default function Transactions() {
 
                     {/* Product */}
                     <td className="px-4 py-3">
-                      <div className="text-sm text-stone-900 truncate max-w-[180px]" title={tx.product_title}>
+                      <div className="text-sm text-stone-900 font-medium truncate max-w-[180px]" title={tx.product_title}>
                         {tx.product_title}
                       </div>
                       {tx.listing_type === 'concierge' && (
@@ -851,17 +855,24 @@ export default function Transactions() {
                     </div>
                   )}
                   <div className="flex items-center justify-between text-stone-500">
-                    <span>Platform fee</span>
+                    <span>Shipping fee</span>
                     <span>-${(markingPaid.platform_fee ?? 10).toFixed(2)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-stone-700 font-medium border-t border-stone-200 pt-1 mt-1">
-                    <span>Commission base</span>
-                    <span>${Math.max(0, markingPaid.sale_price - (markingPaid.platform_fee ?? 10)).toFixed(2)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-stone-500">
-                    <span>Commission ({markingPaid.commission_rate ?? 18}%)</span>
-                    <span>-${(Math.max(0, markingPaid.sale_price - (markingPaid.platform_fee ?? 10)) * ((markingPaid.commission_rate ?? 18) / 100)).toFixed(2)}</span>
-                  </div>
+                  {(() => {
+                    const bd = calculateSellerPayout({ grossPrice: markingPaid.sale_price, commissionRate: markingPaid.commission_rate ?? 18, platformFee: markingPaid.platform_fee ?? 10 });
+                    return (
+                      <>
+                        <div className="flex items-center justify-between text-stone-700 font-medium border-t border-stone-200 pt-1 mt-1">
+                          <span>Commission base</span>
+                          <span>${bd.commissionBase.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-stone-500">
+                          <span>Commission ({markingPaid.commission_rate ?? 18}%)</span>
+                          <span>-${bd.commissionAmount.toFixed(2)}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-stone-300">
                   <span className="text-stone-700 font-medium">Seller Payout</span>
@@ -1068,11 +1079,11 @@ export default function Transactions() {
                   </div>
                 )}
                 <div className="flex justify-between text-stone-500">
-                  <span>Platform fee</span><span>-${(commissionTx.platform_fee ?? 10).toFixed(2)}</span>
+                  <span>Shipping fee</span><span>-${(commissionTx.platform_fee ?? 10).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between font-medium text-stone-700 border-t border-stone-200 pt-1.5">
                   <span>Commission base</span>
-                  <span>${Math.max(0, (commissionTx.sale_price || 0) - (commissionTx.platform_fee ?? 10)).toFixed(2)}</span>
+                  <span>${calculateSellerPayout({ grossPrice: commissionTx.sale_price || 0, platformFee: commissionTx.platform_fee ?? 10 }).commissionBase.toFixed(2)}</span>
                 </div>
               </div>
 
@@ -1090,18 +1101,21 @@ export default function Transactions() {
                 />
               </div>
 
-              {commissionRate !== '' && !isNaN(parseFloat(commissionRate)) && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
-                  <div className="flex justify-between text-green-700">
-                    <span>Commission ({commissionRate}%)</span>
-                    <span>-${(Math.max(0, (commissionTx.sale_price || 0) - (commissionTx.platform_fee ?? 10)) * (parseFloat(commissionRate) / 100)).toFixed(2)}</span>
+              {commissionRate !== '' && !isNaN(parseFloat(commissionRate)) && (() => {
+                const bd = calculateSellerPayout({ grossPrice: commissionTx.sale_price || 0, commissionRate: parseFloat(commissionRate), platformFee: commissionTx.platform_fee ?? 10 });
+                return (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+                    <div className="flex justify-between text-green-700">
+                      <span>Commission ({commissionRate}%)</span>
+                      <span>-${bd.commissionAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-green-800 mt-1">
+                      <span>Seller payout</span>
+                      <span>${bd.sellerPayout.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between font-bold text-green-800 mt-1">
-                    <span>Seller payout</span>
-                    <span>${(Math.max(0, (commissionTx.sale_price || 0) - (commissionTx.platform_fee ?? 10)) * ((100 - parseFloat(commissionRate)) / 100)).toFixed(2)}</span>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               <label className="flex items-center gap-2 cursor-pointer">
                 <input

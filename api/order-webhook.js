@@ -17,13 +17,10 @@ import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
 import { itemSoldInlineEmail, orderCancelledSellerEmail } from '../lib/email.js';
 import { supabase } from '../lib/supabase-admin.js';
+import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
 
 // Disable Vercel's body parser so we receive the raw buffer for HMAC verification
 export const config = { api: { bodyParser: false } };
-
-// Flat platform/shipping fee deducted from sale price before commission is applied.
-// Commission is earned on (sale_price - discount - PLATFORM_FEE).
-const PLATFORM_FEE = 10;
 
 // Read the full request body as a Buffer
 function getRawBody(req) {
@@ -162,12 +159,17 @@ export default async function handler(req, res) {
       const discountTotal = (item.discount_allocations || [])
         .reduce((sum, d) => sum + parseFloat(d.amount || 0), 0);
       const salePrice = parseFloat(item.price) - discountTotal;
-      const commissionBase = Math.max(0, salePrice - PLATFORM_FEE);
-      // Only calculate payout if commission rate is known. If not, leave both null
-      // so admin can set them manually before notifying the seller.
-      const commissionKnown = commissionRate !== null;
+      // Only calculate payout if commission rate is known. If not, leave it null
+      // so admin can set it manually before notifying the seller.
+      const { commissionKnown, sellerPayout: computedPayout } = calculateSellerPayout({
+        grossPrice: parseFloat(item.price),
+        discount: discountTotal,
+        commissionRate,
+      });
+      // Keep the precomputed metafield payout when there's no discount; otherwise
+      // recompute through the shared formula.
       if (commissionKnown && (!sellerPayout || discountTotal > 0)) {
-        sellerPayout = commissionBase * ((100 - commissionRate) / 100);
+        sellerPayout = computedPayout;
       } else if (!commissionKnown) {
         sellerPayout = null;
       }
@@ -248,7 +250,7 @@ export default async function handler(req, res) {
         console.log(`   ✅ Transaction created for "${productTitle}" | Seller: ${seller.email} | Payout: $${sellerPayout.toFixed(2)}`);
 
         // Notify seller
-        await notifySellerOfSale(seller, { productTitle, salePrice, sellerPayout }).catch(e => {
+        await notifySellerOfSale(seller, { productTitle, salePrice, sellerPayout, commissionRate, discount: discountTotal }).catch(e => {
           console.error('Seller notification failed:', e.message);
         });
 
@@ -321,8 +323,7 @@ async function handleOrderCancelled(order) {
         status:          'cancelled',
         payout_status:   'cancelled',
         shipping_status: 'cancelled',
-        admin_note:      `Cancelled by Shopify on ${new Date(order.cancelled_at).toLocaleDateString()}. Reason: ${order.cancel_reason || 'not specified'}.${hadLabel ? ' ⚠️ Label was generated — void manually in Shippo.' : ''}`,
-        updated_at:      new Date().toISOString()
+        admin_note:      `Cancelled by Shopify on ${new Date(order.cancelled_at).toLocaleDateString()}. Reason: ${order.cancel_reason || 'not specified'}.${hadLabel ? ' ⚠️ Label was generated — void manually in Shippo.' : ''}`
       }).eq('id', tx.id);
 
       console.log(`✅ Transaction ${tx.id} marked cancelled for order ${order.name}`);
@@ -443,7 +444,7 @@ async function relistItem(productId, variantId) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function notifySellerOfSale(seller, { productTitle, salePrice, sellerPayout }) {
+async function notifySellerOfSale(seller, { productTitle, salePrice, sellerPayout, commissionRate, discount = 0, platformFee = PLATFORM_FEE }) {
   const metadata = { productTitle, salePrice, payout: sellerPayout };
 
   if (seller.phone) {
@@ -459,7 +460,7 @@ async function notifySellerOfSale(seller, { productTitle, salePrice, sellerPayou
   }
 
   if (seller.email) {
-    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, salePrice, sellerPayout);
+    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, { salePrice, discount, commissionRate, platformFee, sellerPayout });
     await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'item_sold', metadata });
   }
 }

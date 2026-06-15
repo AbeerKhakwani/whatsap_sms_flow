@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Search } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Search, Menu, X } from 'lucide-react';
 import { activityConfig, timeAgo } from '../pages/ActivityFeed';
 import SearchPalette from './SearchPalette';
 
@@ -14,7 +14,11 @@ export default function Layout({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [bellOpen, setBellOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const bellRef = useRef(null);
+
+  // Close the mobile nav drawer whenever the route changes.
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
@@ -156,37 +160,40 @@ export default function Layout({ children }) {
     );
   }
 
+  const NavLinks = ({ onItem }) => (
+    <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+      {navigation.map((item) => {
+        const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            onClick={onItem}
+            className={`
+              flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-sm
+              ${isActive
+                ? 'bg-stone-800 text-white font-medium'
+                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
+              }
+            `}
+          >
+            <item.icon className="w-5 h-5 flex-shrink-0" />
+            <span>{item.name}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+
   return (
     <div className="flex h-screen bg-stone-50">
-      {/* Sidebar */}
-      <div className="w-64 bg-stone-100 border-r border-stone-200 flex flex-col">
+      {/* Desktop sidebar */}
+      <aside className="hidden lg:flex w-64 bg-stone-100 border-r border-stone-200 flex-col">
         <div className="p-5 border-b border-stone-200">
           <img src="/logo.svg" alt="The Phir Story" className="h-12" />
           <p className="text-[10px] text-stone-400 mt-2 uppercase tracking-widest font-medium">Admin Dashboard</p>
         </div>
-
-        <nav className="flex-1 p-3 space-y-1">
-          {navigation.map((item) => {
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`
-                  flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all text-sm
-                  ${isActive
-                    ? 'bg-stone-800 text-white font-medium'
-                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
-                  }
-                `}
-              >
-                <item.icon className="w-4 h-4" />
-                <span>{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
+        <NavLinks />
         <div className="p-3 border-t border-stone-200">
           <button
             onClick={handleLogout}
@@ -196,12 +203,45 @@ export default function Layout({ children }) {
             <span>Sign Out</span>
           </button>
         </div>
-      </div>
+      </aside>
+
+      {/* Mobile drawer */}
+      {drawerOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex">
+          <div className="w-72 max-w-[82%] bg-stone-100 flex flex-col h-full">
+            <div className="p-5 border-b border-stone-200 flex items-center justify-between">
+              <img src="/logo.svg" alt="The Phir Story" className="h-10" />
+              <button onClick={() => setDrawerOpen(false)} aria-label="Close menu" className="p-2 text-stone-500 hover:text-stone-800">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <NavLinks onItem={() => setDrawerOpen(false)} />
+            <div className="p-3 border-t border-stone-200">
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-3 px-4 py-3 w-full text-left text-stone-500 hover:text-stone-800 transition text-sm"
+              >
+                <LogOut className="w-5 h-5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 bg-black/30" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+        </div>
+      )}
 
       {/* Main Content */}
-      <div className="flex-1 overflow-auto flex flex-col">
-        {/* Top bar with search + bell */}
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-stone-200 bg-white flex-shrink-0">
+      <div className="flex-1 overflow-auto flex flex-col min-w-0">
+        {/* Top bar with burger (mobile) + search + bell */}
+        <div className="flex items-center gap-3 px-4 lg:px-6 py-3 border-b border-stone-200 bg-white flex-shrink-0">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open menu"
+            className="lg:hidden p-2 -ml-1 text-stone-600 hover:text-stone-900"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+          <img src="/logo.svg" alt="The Phir Story" className="h-7 lg:hidden" />
           {/* Search trigger */}
           <button
             onClick={openSearch}
@@ -276,7 +316,7 @@ export default function Layout({ children }) {
           </div>
         </div>
 
-        <div className="p-6 flex-1 overflow-auto">
+        <div className="p-4 lg:p-6 flex-1 overflow-auto">
           {children}
         </div>
       </div>
