@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Link as LinkIcon, Mic, MicOff, Camera, Trash2, RotateCcw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Mic, MicOff, Camera, Trash2, RotateCcw, ArrowRight } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { useImageUpload } from '../hooks/useImageUpload';
@@ -22,7 +23,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
   const [approving, setApproving] = useState(null);
-  const [markingPaid, setMarkingPaid] = useState(null);
   const [stats, setStats] = useState({ pending: 0, approved: 0, sold: 0 });
   const [rejectModal, setRejectModal] = useState({ open: false, listing: null });
   const [rejectReason, setRejectReason] = useState('');
@@ -74,14 +74,6 @@ export default function Dashboard() {
   // Image upload hook for admin create
   const imageUpload = useImageUpload({ maxPhotos: 10 });
 
-  // Mark Paid modal state
-  const [showPayModal, setShowPayModal] = useState(false);
-  const [payingPayout, setPayingPayout] = useState(null);
-  const [paySellerNote, setPaySellerNote] = useState('');
-  const [payAdminNote, setPayAdminNote] = useState('');
-  const [paySkipNotification, setPaySkipNotification] = useState(false);
-  const sellerNoteRef = useRef(null);
-
   useEffect(() => {
     fetchData();
   }, []);
@@ -111,61 +103,6 @@ export default function Dashboard() {
       console.error('Error fetching data:', error);
     }
     setLoading(false);
-  }
-
-  function openPayModal(payout) {
-    setPayingPayout(payout);
-    setPaySellerNote('');
-    setPayAdminNote('');
-    setPaySkipNotification(false);
-    setShowPayModal(true);
-    setTimeout(() => sellerNoteRef.current?.focus(), 100);
-  }
-
-  function closePayModal() {
-    setShowPayModal(false);
-    setPayingPayout(null);
-    setPaySellerNote('');
-    setPayAdminNote('');
-    setPaySkipNotification(false);
-  }
-
-  async function confirmMarkAsPaid() {
-    if (!payingPayout) return;
-    setMarkingPaid(payingPayout.id);
-    try {
-      const response = await fetch('/api/admin-listings?action=mark-paid', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transactionId: payingPayout.id,
-          sellerNote: paySellerNote || undefined,
-          adminNote: payAdminNote || undefined,
-          skipNotification: paySkipNotification || undefined
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setPayouts(prev => prev.filter(p => p.id !== payingPayout.id));
-        setTotalPending(prev => prev - (payingPayout.seller_payout || 0));
-        setStats(prev => ({ ...prev, sold: prev.sold }));
-        closePayModal();
-      } else {
-        alert(`Error: ${data.error || 'Failed to mark as paid'}`);
-      }
-    } catch (error) {
-      alert(`Error: ${error.message}`);
-    }
-    setMarkingPaid(null);
-  }
-
-  function handlePayKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      confirmMarkAsPaid();
-    }
   }
 
   function openApproveModal(listing) {
@@ -494,11 +431,12 @@ export default function Dashboard() {
               </a>
             )}
             {payouts.length > 0 && (
-              <a href="#pending-payouts" className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-100 active:scale-[0.99] transition">
+              <Link to="/admin/transactions" className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-100 hover:bg-green-100 active:scale-[0.99] transition">
                 <Banknote className="w-6 h-6 text-green-600 flex-shrink-0" />
-                <span className="flex-1 text-sm text-green-800">Payouts ready · ${totalPending.toFixed(0)}</span>
+                <span className="flex-1 text-sm text-green-800">Payouts to send · ${totalPending.toFixed(0)}</span>
                 <span className="text-lg font-semibold text-green-800">{payouts.length}</span>
-              </a>
+                <ArrowRight className="w-4 h-4 text-green-600 flex-shrink-0" />
+              </Link>
             )}
           </div>
         </div>
@@ -519,49 +457,6 @@ export default function Dashboard() {
           <p className="text-2xl font-semibold text-stone-900 mt-1">${totalPending.toFixed(0)}</p>
         </div>
       </div>
-
-      {/* Pending Payouts Section */}
-      {payouts.length > 0 && (
-        <div id="pending-payouts" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-              <Banknote className="w-4 h-4" />
-              Pending Payouts
-            </h2>
-            <span className="text-sm text-gray-500">{payouts.length} items · ${totalPending.toFixed(0)}</span>
-          </div>
-
-          <div className="divide-y divide-gray-100">
-            {payouts.map((payout) => (
-              <div key={payout.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">{payout.product_title}</span>
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                      ${payout.sale_price?.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
-                    <span>{payout.seller?.name || payout.seller?.email || 'Unknown'}</span>
-                    <span>·</span>
-                    <span className="font-medium text-gray-900">${payout.seller_payout?.toFixed(2)} payout</span>
-                    <span>·</span>
-                    <span>{payout.order_name}</span>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => openPayModal(payout)}
-                  className="ml-4 bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                >
-                  <Check className="w-3 h-3" />
-                  Mark Paid
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Pending Listings */}
       <div id="pending-approval" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -1375,95 +1270,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Mark Paid Confirmation Modal */}
-      {showPayModal && payingPayout && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="px-5 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Confirm Payout</h3>
-              <p className="text-sm text-gray-500 mt-1">Mark this transaction as paid</p>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="text-sm text-gray-600">{payingPayout.product_title}</div>
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-gray-500">Payout Amount</span>
-                  <span className="text-xl font-bold text-green-600">${payingPayout.seller_payout?.toFixed(2)}</span>
-                </div>
-                <div className="text-xs text-gray-400 mt-2">
-                  To: {payingPayout.seller?.name || payingPayout.seller?.email || 'Unknown'}
-                  {payingPayout.seller?.paypal_email && ` (${payingPayout.seller.paypal_email})`}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Payment Method <span className="text-gray-400 font-normal">(shown to seller)</span>
-                </label>
-                <input
-                  ref={sellerNoteRef}
-                  type="text"
-                  value={paySellerNote}
-                  onChange={(e) => setPaySellerNote(e.target.value)}
-                  onKeyDown={handlePayKeyDown}
-                  placeholder="e.g., via PayPal, via Zelle, via Venmo..."
-                  className="w-full px-4 py-3 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Admin Note <span className="text-gray-400 font-normal">(internal only)</span>
-                </label>
-                <textarea
-                  value={payAdminNote}
-                  onChange={(e) => setPayAdminNote(e.target.value)}
-                  onKeyDown={handlePayKeyDown}
-                  placeholder="e.g., PayPal transaction ID..."
-                  rows={2}
-                  className="w-full px-4 py-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-400 bg-gray-50"
-                />
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={paySkipNotification}
-                  onChange={(e) => setPaySkipNotification(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-gray-600 focus:ring-gray-500"
-                />
-                <span className="text-sm text-gray-600">Skip seller notification</span>
-                <span className="text-xs text-gray-400">(no WhatsApp/email)</span>
-              </label>
-            </div>
-            <div className="px-5 py-4 border-t border-gray-200 flex gap-3">
-              <button
-                onClick={closePayModal}
-                disabled={markingPaid}
-                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmMarkAsPaid}
-                disabled={markingPaid}
-                className={`flex-1 px-4 py-2.5 text-white rounded-lg transition-colors text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${
-                  paySkipNotification ? 'bg-gray-600 hover:bg-gray-700' : 'bg-green-600 hover:bg-green-700'
-                }`}
-              >
-                {markingPaid ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-4 h-4" />
-                    {paySkipNotification ? 'Mark Paid (Silent)' : 'Confirm & Notify'}
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

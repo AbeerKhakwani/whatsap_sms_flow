@@ -517,7 +517,7 @@ export default async function handler(req, res) {
       const sellerIds = [...new Set((transactions || []).map(t => t.seller_id).filter(Boolean))];
       const { data: sellers } = await supabase
         .from('sellers')
-        .select('id, name, email, phone, paypal_email')
+        .select('id, name, email, phone, paypal_email, payout_method, payment_provider, payment_handle')
         .in('id', sellerIds.length ? sellerIds : ['none']);
 
       const sellersById = {};
@@ -587,7 +587,9 @@ export default async function handler(req, res) {
     if (action === 'mark-paid' && req.method === 'POST') {
       // payoutMethod/payoutHandle/payoutProvider are the new structured fields;
       // sellerNote is accepted for back-compat (old UI sent the method there).
-      const { transactionId, payoutProvider, payoutMethod, payoutHandle, sellerNote, adminNote, skipNotification } = req.body;
+      // payoutNotes is the freeform internal note (also accepts `notes`).
+      // payoutReference is the external confirmation # (Zelle/Interac), optional.
+      const { transactionId, payoutProvider, payoutMethod, payoutHandle, payoutReference, sellerNote, adminNote, payoutNotes, notes, skipNotification } = req.body;
 
       if (!transactionId) {
         return res.status(400).json({ error: 'Transaction ID required' });
@@ -602,13 +604,32 @@ export default async function handler(req, res) {
           provider: payoutProvider || 'zelle_manual',
           method:   payoutMethod || sellerNote,
           handle:   payoutHandle,
+          reference: payoutReference,
           adminNote,
+          payoutNotes: payoutNotes ?? notes,
           notify:   !skipNotification,
         });
         return res.status(200).json({ success: true, transaction, notificationSent });
       } catch (e) {
         return res.status(400).json({ error: e.message });
       }
+    }
+
+    // UPDATE FREEFORM NOTES on a transaction — editable any time from the detail page,
+    // independent of payout state. Kept separate from admin_note (system context).
+    if (action === 'update-notes' && req.method === 'POST') {
+      const { transactionId, payoutNotes } = req.body;
+      if (!transactionId) return res.status(400).json({ error: 'Transaction ID required' });
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .update({ payout_notes: payoutNotes ?? null })
+        .eq('id', transactionId)
+        .select()
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+      return res.status(200).json({ success: true, transaction: data });
     }
 
     // MANUAL RELEASE — force a delivered item to 'available' without waiting for the timer.
@@ -843,9 +864,12 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, transaction: updated, sellerPayout, notificationSent });
     }
 
-    // BULK MARK TRANSACTIONS AS PAID
+    // BULK MARK TRANSACTIONS AS PAID — used by the per-seller "Pay seller" action.
+    // All ids passed should belong to one seller / one real transfer; payoutReference
+    // (Zelle/Interac confirmation #) is stamped on every one so the batch shares it.
     if (action === 'bulk-mark-paid' && req.method === 'POST') {
-      const { transactionIds, sellerNote, adminNote, skipNotification } = req.body;
+      const { transactionIds, payoutMethod, payoutHandle, payoutReference, payoutNotes, sellerNote, adminNote, skipNotification } = req.body;
+      const method = payoutMethod || sellerNote;
 
       if (!transactionIds?.length) {
         return res.status(400).json({ error: 'transactionIds array required' });
@@ -880,7 +904,7 @@ export default async function handler(req, res) {
       // Record each payout through the shared service (writes structured fields:
       // payout_provider/method, paid_at). Notifications are sent in aggregate below.
       for (const t of validTxs) {
-        await payViaProvider(t, { provider: 'zelle_manual', method: sellerNote, adminNote, notify: false })
+        await payViaProvider(t, { provider: 'zelle_manual', method, handle: payoutHandle, reference: payoutReference, payoutNotes, adminNote, notify: false })
           .catch(e => console.error(`Bulk mark-paid write failed for ${t.id}:`, e.message));
       }
 
@@ -904,13 +928,13 @@ export default async function handler(req, res) {
           if (!seller?.email) continue;
 
           const totalPayout = txs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
-          const paymentMethod = sellerNote ? ` via ${sellerNote}` : '';
+          const paymentMethod = method ? ` via ${method}` : '';
 
           try {
             const itemDesc = txs.length === 1 ? txs[0].product_title : `${txs.length} items`;
-            const metadata = { totalPayout, itemCount: txs.length, paymentMethod: sellerNote };
+            const metadata = { totalPayout, itemCount: txs.length, paymentMethod: method };
 
-            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, sellerNote);
+            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, method);
             await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
@@ -927,7 +951,7 @@ export default async function handler(req, res) {
                       { type: 'text', text: seller.name || 'there' },
                       { type: 'text', text: `$${totalPayout.toFixed(2)}` },
                       { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
-                      { type: 'text', text: sellerNote ? ` via ${sellerNote}` : ' to your account on file' }
+                      { type: 'text', text: method ? ` via ${method}` : ' to your account on file' }
                     ]
                   }
                 ],
