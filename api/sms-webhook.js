@@ -486,6 +486,35 @@ export default async function handler(req, res) {
       return await handlePhoto(phone, message.image.id, conv, res);
     }
 
+    // Buyer delivery-confirmation button — not part of the seller flow. Handle + return early.
+    if (buttonId && buttonId.startsWith('BUYER_CONFIRM')) {
+      const { recordBuyerConfirm } = await import('../lib/buyer-review.js');
+      let txId = buttonId.includes(':') ? buttonId.split(':')[1] : null;
+      try {
+        if (!txId) {
+          // Meta may send a static payload — fall back to this buyer's most recent pending tx.
+          const norm = s => (s || '').replace(/\D/g, '');
+          const me = norm(phone);
+          const { data: pending } = await supabase
+            .from('transactions')
+            .select('id, buyer_address, review_request_sent_at')
+            .eq('review_status', 'requested')
+            .order('review_request_sent_at', { ascending: false })
+            .limit(50);
+          const match = (pending || []).find(t => {
+            const p = norm(t.buyer_address?.phone);
+            return p && (p.endsWith(me) || me.endsWith(p));
+          });
+          txId = match?.id;
+        }
+        if (txId) await recordBuyerConfirm(txId);
+        await sendMessage(phone, "Thank you! 🎉 Glad it arrived. Any issues? Email admin@thephirstory.com");
+      } catch (e) {
+        console.error('Buyer confirm (WhatsApp) failed:', e.message);
+      }
+      return res.status(200).json({ status: 'buyer_confirmed' });
+    }
+
     const cmd = text.toLowerCase();
     console.log(`📱 ${phone} [${conv.state}]: "${text}"`);
 

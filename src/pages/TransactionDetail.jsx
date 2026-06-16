@@ -54,6 +54,8 @@ export default function TransactionDetail() {
 
   // Set-commission
   const [rateInput, setRateInput] = useState('');
+  // Concierge shipping
+  const [tracking, setTracking] = useState('');
 
   useEffect(() => { fetchTx(); }, [id]);
 
@@ -101,6 +103,7 @@ export default function TransactionDetail() {
   const canRelease = tx.payout_status === 'delivered';
   const canMarkPaid = tx.payout_status !== 'paid' && tx.payout_status !== 'cancelled';
   const needsCommission = tx.commission_rate == null;
+  const conciergeNeedsShip = tx.listing_type === 'concierge' && ['concierge', 'pending_label'].includes(tx.shipping_status);
 
   async function markPaid() {
     const ok = await post('mark-paid', {
@@ -198,6 +201,15 @@ export default function TransactionDetail() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3 mt-6">
+        {conciergeNeedsShip && (
+          <div className="flex items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg p-2">
+            <Truck className="w-4 h-4 text-violet-600" />
+            <input value={tracking} onChange={e => setTracking(e.target.value)} placeholder="Tracking #"
+              className="w-40 px-2 py-1.5 text-sm border border-stone-300 rounded" />
+            <button disabled={busy || !tracking.trim()} onClick={() => post('mark-concierge-shipped', { transactionId: tx.id, trackingNumber: tracking.trim() })}
+              className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded disabled:opacity-50">Mark shipped + fulfill</button>
+          </div>
+        )}
         {needsCommission && (
           <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
             <input type="number" value={rateInput} onChange={e => setRateInput(e.target.value)} placeholder="Commission %"

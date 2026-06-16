@@ -15,6 +15,7 @@ import { cors } from '../lib/cors.js';
 import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
 import { withCache, cacheBust } from '../lib/cache.js';
 import { calculateSellerPayout } from '../lib/payout-calculation.js';
+import { sendBuyerConfirmRequest } from '../lib/buyer-review.js';
 import { logImpersonationEvent } from '../lib/audit-log.js';
 
 const CACHE_TTL_LISTINGS = 90; // seconds
@@ -1029,7 +1030,8 @@ export default async function handler(req, res) {
           updates.shipping_status = 'delivered';
           updates.payout_status = 'delivered';
           updates.delivered_at = new Date().toISOString();
-          updates.contest_window_ends = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+          // 48h buyer-confirmation window: confirm or silence → payout releases.
+          updates.contest_window_ends = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
           break;
         case 'FAILURE':
           updates.shipping_status = 'failed';
@@ -1045,6 +1047,11 @@ export default async function handler(req, res) {
 
       await supabase.from('transactions').update(updates).eq('id', tx.id);
       console.log(`📦 Shippo tracking update: ${trackingNumber} → ${status}`);
+
+      // On delivery, ask the buyer to confirm receipt (WhatsApp if phone, else email).
+      if (status === 'DELIVERED') {
+        await sendBuyerConfirmRequest(tx.id).catch(e => console.error('Buyer confirm request failed:', e.message));
+      }
 
       // Alert admin on failure or return
       if (status === 'FAILURE' || status === 'RETURNED') {

@@ -1,7 +1,7 @@
 // api/admin-listings.js
 // Consolidated admin listing actions: get-pending, approve, reject
 
-import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct, createDraft } from '../lib/shopify.js';
+import { approveDraft, getProduct, deleteProduct, getPendingDrafts, getProductCounts, updateProduct, createDraft, fulfillOrder } from '../lib/shopify.js';
 import { listingApprovedEmail, payoutNotificationEmail, listingRejectedEmail, listingRevisionEmail, salePriceConfirmedEmail } from '../lib/email.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
@@ -629,6 +629,40 @@ export default async function handler(req, res) {
       } catch (e) {
         return res.status(400).json({ error: e.message });
       }
+    }
+
+    // MARK CONCIERGE ITEM SHIPPED — Phirstory ships these, so there's no seller
+    // label. Fulfill the Shopify order with the tracking number and advance status.
+    if (action === 'mark-concierge-shipped' && req.method === 'POST') {
+      const { transactionId, trackingNumber, carrier } = req.body;
+      if (!transactionId || !trackingNumber) {
+        return res.status(400).json({ error: 'transactionId and trackingNumber required' });
+      }
+
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions').select('*').eq('id', transactionId).single();
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
+
+      let fulfillment = null;
+      if (tx.order_id) {
+        fulfillment = await fulfillOrder(tx.order_id, { tracking_number: trackingNumber, carrier: carrier || 'USPS' })
+          .catch(e => ({ success: false, error: e.message }));
+      }
+
+      const { data: updated, error: upErr } = await supabase
+        .from('transactions')
+        .update({
+          shipping_status: 'shipped',
+          payout_status:   'in_transit',
+          tracking_number: trackingNumber,
+          carrier:         carrier || 'USPS',
+        })
+        .eq('id', transactionId)
+        .select()
+        .single();
+      if (upErr) return res.status(400).json({ error: upErr.message });
+
+      return res.status(200).json({ success: true, transaction: updated, fulfillment });
     }
 
     // UPDATE TRANSACTION COMMISSION & PAYOUT
