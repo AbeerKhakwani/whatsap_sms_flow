@@ -56,6 +56,11 @@ export default function TransactionDetail() {
   const [rateInput, setRateInput] = useState('');
   // Concierge shipping
   const [tracking, setTracking] = useState('');
+  // Edit receipt
+  const [showEdit, setShowEdit] = useState(false);
+  const [editRate, setEditRate] = useState('');
+  const [editDiscount, setEditDiscount] = useState('');
+  const [editOverride, setEditOverride] = useState('');
 
   useEffect(() => { fetchTx(); }, [id]);
 
@@ -116,6 +121,29 @@ export default function TransactionDetail() {
     if (ok) setShowPaid(false);
   }
 
+  function openEdit() {
+    setEditRate(tx.commission_rate != null ? String(tx.commission_rate) : '');
+    setEditDiscount(tx.discount_amount != null ? String(tx.discount_amount) : '');
+    setEditOverride('');
+    setShowEdit(true);
+  }
+
+  async function saveReceipt() {
+    const ok = await post('update-receipt', {
+      transactionId: tx.id,
+      commissionRate: editRate !== '' ? editRate : undefined,
+      discount: editDiscount !== '' ? editDiscount : undefined,
+      payoutOverride: editOverride !== '' ? editOverride : undefined,
+      adminEmail: localStorage.getItem('admin_email') || undefined,
+    });
+    if (ok) setShowEdit(false);
+  }
+
+  // Live preview for the edit modal
+  const previewPayout = editOverride !== ''
+    ? parseFloat(editOverride)
+    : calculateSellerPayout({ grossPrice: tx.sale_price || 0, commissionRate: editRate !== '' ? parseFloat(editRate) : null, platformFee: fee }).sellerPayout;
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <Link to="/admin/transactions" className="inline-flex items-center gap-1 text-sm text-stone-500 hover:text-stone-800 mb-4">
@@ -158,7 +186,12 @@ export default function TransactionDetail() {
 
         {/* Price breakdown */}
         <div className="bg-white border border-stone-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-stone-700 mb-4 flex items-center gap-2"><DollarSign className="w-4 h-4" /> Payout breakdown</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-stone-700 flex items-center gap-2"><DollarSign className="w-4 h-4" /> Payout breakdown</h2>
+            {tx.payout_status !== 'paid' && (
+              <button onClick={openEdit} className="text-xs text-indigo-600 hover:underline">Edit</button>
+            )}
+          </div>
           <div className="space-y-1.5 text-sm">
             <Row label="Listed price" value={money(listedPrice)} />
             {(tx.discount_amount || 0) > 0 && <Row label="Discount" value={`-${money(tx.discount_amount)}`} red />}
@@ -255,6 +288,33 @@ export default function TransactionDetail() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowPaid(false)} className="px-4 py-2 text-sm text-stone-600">Cancel</button>
               <button disabled={busy} onClick={markPaid} className="px-4 py-2 text-sm bg-emerald-700 text-white rounded-lg disabled:opacity-50">Confirm paid</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit receipt modal */}
+      {showEdit && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowEdit(false)}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-1">Edit receipt</h3>
+            <p className="text-sm text-stone-500 mb-4">Corrects the transaction, resyncs Shopify, and logs a note.</p>
+            <label className="block text-sm text-stone-600 mb-1">Commission %</label>
+            <input type="number" value={editRate} onChange={e => setEditRate(e.target.value)} placeholder="e.g. 40"
+              className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg mb-3" />
+            <label className="block text-sm text-stone-600 mb-1">Discount ($)</label>
+            <input type="number" value={editDiscount} onChange={e => setEditDiscount(e.target.value)} placeholder="0"
+              className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg mb-3" />
+            <label className="block text-sm text-stone-600 mb-1">Payout override ($) <span className="text-stone-400">— optional, skips the math</span></label>
+            <input type="number" value={editOverride} onChange={e => setEditOverride(e.target.value)} placeholder="leave blank to auto-calculate"
+              className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg mb-3" />
+            <div className="flex justify-between text-sm bg-stone-50 rounded-lg p-3 mb-4">
+              <span className="text-stone-600">New payout</span>
+              <span className="font-semibold text-green-600">{previewPayout != null && !Number.isNaN(previewPayout) ? money(previewPayout) : '—'}</span>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowEdit(false)} className="px-4 py-2 text-sm text-stone-600">Cancel</button>
+              <button disabled={busy} onClick={saveReceipt} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50">Save receipt</button>
             </div>
           </div>
         </div>

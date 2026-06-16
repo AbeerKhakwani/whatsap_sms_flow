@@ -665,6 +665,67 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, transaction: updated, fulfillment });
     }
 
+    // EDIT RECEIPT — admin corrects commission / discount / payout on a transaction.
+    // Recomputes payout (unless an explicit override is given), resyncs the Shopify
+    // pricing metafields + appends a dated note to pricing.payout_notes, and logs it.
+    if (action === 'update-receipt' && req.method === 'POST') {
+      const { transactionId, commissionRate, discount, payoutOverride, adminEmail } = req.body;
+      if (!transactionId) return res.status(400).json({ error: 'transactionId required' });
+
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions').select('*').eq('id', transactionId).single();
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
+
+      const platformFee = tx.platform_fee ?? PLATFORM_FEE;
+      const rate = (commissionRate != null && commissionRate !== '') ? parseFloat(commissionRate) : tx.commission_rate;
+      const newDiscount = (discount != null && discount !== '') ? parseFloat(discount) : (tx.discount_amount ?? 0);
+      const hasOverride = payoutOverride != null && payoutOverride !== '';
+      const newPayout = hasOverride
+        ? parseFloat(payoutOverride)
+        : calculateSellerPayout({ grossPrice: tx.sale_price || 0, commissionRate: rate, platformFee }).sellerPayout;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const note = `${today} — sale $${Number(tx.sale_price || 0).toFixed(2)} − $${Number(platformFee).toFixed(2)} fee, commission ${tx.commission_rate ?? '—'}→${rate ?? '—'}%, payout $${tx.seller_payout ?? '—'}→$${newPayout ?? '—'}${hasOverride ? ' (manual override)' : ''}${adminEmail ? `, by ${adminEmail}` : ''}`;
+
+      const { data: updated, error: upErr } = await supabase.from('transactions').update({
+        commission_rate: rate,
+        discount_amount: newDiscount,
+        seller_payout:   newPayout,
+        payout_status:   (tx.payout_status === 'needs_commission' && rate != null) ? 'pending_shipping' : tx.payout_status,
+        admin_note:      tx.admin_note ? `${tx.admin_note}\n${note}` : note,
+      }).eq('id', transactionId).select().single();
+      if (upErr) return res.status(400).json({ error: upErr.message });
+
+      // Resync Shopify pricing metafields + append the breakdown note (best-effort).
+      let resync = { ok: false };
+      if (tx.product_id) {
+        try {
+          const metafields = await fetchMetafields(tx.product_id);
+          const ops = [];
+          if (rate != null) ops.push(upsertMetafield(tx.product_id, metafields, 'pricing', 'commission_rate', String(rate)));
+          if (newPayout != null) ops.push(upsertMetafield(tx.product_id, metafields, 'pricing', 'seller_payout', JSON.stringify({ amount: Number(newPayout).toFixed(2), currency_code: 'USD' })));
+          const existingNotes = getMetafieldValue(metafields, 'pricing', 'payout_notes') || '';
+          ops.push(upsertMetafield(tx.product_id, metafields, 'pricing', 'payout_notes', existingNotes ? `${existingNotes}\n${note}` : note, 'multi_line_text_field'));
+          await Promise.all(ops);
+          resync = { ok: true };
+        } catch (e) {
+          resync = { ok: false, error: e.message };
+        }
+      }
+
+      // Audit log (best-effort; non-impersonation admin action).
+      await supabase.from('audit_log').insert({
+        actor_admin_email: adminEmail || null,
+        target_seller_id:  tx.seller_id || null,
+        action:            'receipt_edited',
+        target_id:         String(tx.product_id || transactionId),
+        payload:           { transactionId, oldRate: tx.commission_rate, newRate: rate, oldPayout: tx.seller_payout, newPayout, discount: newDiscount, override: hasOverride },
+        request_path:      '/api/admin-listings?action=update-receipt',
+      }).catch(() => {});
+
+      return res.status(200).json({ success: true, transaction: updated, resync });
+    }
+
     // UPDATE TRANSACTION COMMISSION & PAYOUT
     if (action === 'update-transaction' && req.method === 'POST') {
       const { transactionId, commissionRate, notify } = req.body;
