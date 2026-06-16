@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Mic, MicOff, Camera, Trash2, RotateCcw, ArrowRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Mic, MicOff, Camera, Trash2, RotateCcw, ArrowRight, Pencil } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { useImageUpload } from '../hooks/useImageUpload';
@@ -573,6 +573,16 @@ export default function Dashboard() {
                       </span>
                     </div>
                   </div>
+
+                  {/* Open full edit page */}
+                  <Link
+                    to={`/admin/listings/${listing.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Open full edit page"
+                    className="flex-shrink-0 p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </Link>
 
                   {/* Expand Arrow */}
                   <div className="flex-shrink-0">

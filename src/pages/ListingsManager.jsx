@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle, Search, Loader2, ExternalLink, Edit2, X, AlertCircle, Send, Eye, MessageSquare, Mail, ChevronRight, ChevronLeft, Tag } from 'lucide-react';
 import { viewAsSeller } from '../lib/impersonation';
 
@@ -382,21 +383,23 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
     <div className={`bg-white rounded-2xl border overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
       !hasSeller ? 'border-amber-200' : 'border-stone-200'
     }`}>
-      {/* Image */}
+      {/* Image — opens the full edit page */}
       <div className="relative aspect-[3/4] bg-stone-100 overflow-hidden">
-        {listing.image
-          ? <img src={listing.image} alt={listing.title} className={`w-full h-full object-cover ${listing.isSold ? 'grayscale opacity-60' : ''}`} loading="lazy" />
-          : <div className="w-full h-full flex items-center justify-center text-stone-300 text-4xl">📷</div>
-        }
-        {/* Sold overlay */}
-        {listing.isSold && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="px-3 py-1 text-xs font-black tracking-widest uppercase rotate-[-15deg] shadow-lg"
-              style={{ background: 'rgba(37,99,235,0.85)', color: '#fff', border: '2px solid rgba(255,255,255,0.4)', borderRadius: 6 }}>
-              SOLD
-            </span>
-          </div>
-        )}
+        <Link to={`/admin/listings/${listing.id}`} className="block w-full h-full" title="Open listing details">
+          {listing.image
+            ? <img src={listing.image} alt={listing.title} className={`w-full h-full object-cover ${listing.isSold ? 'grayscale opacity-60' : ''}`} loading="lazy" />
+            : <div className="w-full h-full flex items-center justify-center text-stone-300 text-4xl">📷</div>
+          }
+          {/* Sold overlay */}
+          {listing.isSold && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="px-3 py-1 text-xs font-black tracking-widest uppercase rotate-[-15deg] shadow-lg"
+                style={{ background: 'rgba(37,99,235,0.85)', color: '#fff', border: '2px solid rgba(255,255,255,0.4)', borderRadius: 6 }}>
+                SOLD
+              </span>
+            </div>
+          )}
+        </Link>
         {/* Status badge overlay */}
         <div className="absolute top-2 left-2">
           <StatusBadge tags={listing.tags} />
@@ -417,7 +420,7 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
       <div className="p-3 flex flex-col gap-2 flex-1">
         {/* Title + designer */}
         <div>
-          <p className="text-sm font-semibold text-stone-900 leading-snug line-clamp-2">{listing.title}</p>
+          <Link to={`/admin/listings/${listing.id}`} className="text-sm font-semibold text-stone-900 leading-snug line-clamp-2 hover:text-indigo-600 transition-colors">{listing.title}</Link>
           <p className="text-[11px] text-amber-700 font-medium mt-0.5">{listing.designer}</p>
         </div>
 

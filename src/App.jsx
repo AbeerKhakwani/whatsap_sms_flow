@@ -19,6 +19,7 @@ const TransactionDetail = lazy(() => import('./pages/TransactionDetail'));
 const Scripts = lazy(() => import('./pages/Scripts'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ListingsManager = lazy(() => import('./pages/ListingsManager'));
+const ListingDetail = lazy(() => import('./pages/ListingDetail'));
 const ListingCleanup = lazy(() => import('./pages/ListingCleanup'));
 const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
 
@@ -83,6 +84,7 @@ export default function App() {
                 <Route path="/sellers" element={<Sellers />} />
                 <Route path="/sellers/:id" element={<SellerDetail />} />
                 <Route path="/listings" element={<ListingsManager />} />
+                <Route path="/listings/:id" element={<ListingDetail />} />
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/transactions/:id" element={<TransactionDetail />} />
                 <Route path="/activity" element={<ActivityFeed />} />

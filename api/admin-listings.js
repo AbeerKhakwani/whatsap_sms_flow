@@ -143,6 +143,125 @@ export default async function handler(req, res) {
       });
     }
 
+    // SINGLE LISTING (detail / edit page) — full editable shape from Shopify + metafields.
+    if (action === 'listing' && req.method === 'GET') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'id required' });
+
+      let product;
+      try { product = await getProduct(id, true); }
+      catch { return res.status(404).json({ error: 'Listing not found' }); }
+
+      const metafields = product.metafields || [];
+      const variant = product.variants?.[0] || {};
+      const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, variant.price);
+
+      const measurements = getMetafieldValue(metafields, 'custom', 'measurements') || '';
+      const chestMatch = measurements.match(/Chest:\s*([\d.]+)/i);
+      const hipMatch = measurements.match(/Hip:\s*([\d.]+)/i);
+      const titleParts = (product.title || '').split(' - ');
+      const item_type = titleParts.length > 1 ? titleParts.slice(1).join(' - ') : '';
+
+      const sellerEmail = getSellerEmail(metafields);
+      const sellerId = getSellerId(metafields);
+      const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone, paypal_email');
+
+      return res.status(200).json({
+        success: true,
+        listing: {
+          id: product.id,
+          shopify_product_id: product.id,
+          status: product.status, // draft (pending) / active (live)
+          product_name: product.title,
+          designer: product.vendor || '',
+          item_type,
+          size: variant.option1 || '',
+          color: variant.option2 || '',
+          condition: getMetafieldValue(metafields, 'custom', 'condition') || variant.option3 || '',
+          material: getMetafieldValue(metafields, 'custom', 'material') || '',
+          chest: chestMatch ? chestMatch[1] : '',
+          hip: hipMatch ? hipMatch[1] : '',
+          description: getMetafieldValue(metafields, 'custom', 'seller_description') || product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
+          asking_price_usd: sellerAskingPrice || 0,
+          original_price: parseFloat(getMetafieldValue(metafields, 'custom', 'estimated_retail_price')) || '',
+          list_price: parseFloat(variant.price) || 0,
+          commission_rate: commissionRate,
+          seller_payout: sellerPayout,
+          tags: product.tags ? product.tags.split(', ').map(t => t.trim()).filter(Boolean) : [],
+          images: (product.images || []).map(img => ({ id: img.id, src: img.src })),
+          variant_id: variant.id,
+          shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
+          seller: seller || null,
+        }
+      });
+    }
+
+    // UPDATE LISTING DETAILS — writes product fields + metafields the SAME way createDraft does
+    // (so metafields stay authoritative). Works for drafts (pending) and active (live) products.
+    if (action === 'update-listing' && req.method === 'POST') {
+      const { id, designer, item_type, size, color, condition, material, chest, hip,
+              description, asking_price, original_price, commission_rate, tags } = req.body;
+      if (!id) return res.status(400).json({ error: 'id required' });
+
+      let product;
+      try { product = await getProduct(id, true); }
+      catch { return res.status(404).json({ error: 'Listing not found' }); }
+      const metafields = product.metafields || [];
+      const variant = product.variants?.[0] || {};
+
+      const ask = parseFloat(asking_price);
+      const commission = (commission_rate != null && commission_rate !== '')
+        ? parseFloat(commission_rate)
+        : (parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18);
+      const listPrice = isNaN(ask) ? (parseFloat(variant.price) || 0) : ask + PLATFORM_FEE;
+      const payout = isNaN(ask) ? null : calculateSellerPayout({ grossPrice: listPrice, commissionRate: commission }).sellerPayout;
+
+      // Product-level fields (title mirrors createDraft's "Designer - ItemType" convention)
+      const productUpdates = {
+        title: `${designer || product.vendor || 'Unknown Designer'} - ${item_type || 'Designer Item'}`,
+        vendor: designer || product.vendor,
+        body_html: `<p>${description || ''}</p>`,
+      };
+      if (Array.isArray(tags)) productUpdates.tags = tags.join(', ');
+      if (variant.id) {
+        productUpdates.variants = [{
+          id: variant.id,
+          price: listPrice.toFixed(2),
+          option1: size || variant.option1,
+          option2: color || variant.option2,
+          option3: condition || variant.option3,
+        }];
+      }
+      await updateProduct(id, productUpdates);
+
+      // Metafields (same namespaces/keys/types as createDraft)
+      const measurementParts = [];
+      if (chest) measurementParts.push(`Chest: ${chest}"`);
+      if (hip) measurementParts.push(`Hip: ${hip}"`);
+      const measurements = measurementParts.join(' | ');
+
+      const ops = [];
+      ops.push(upsertMetafield(id, metafields, 'custom', 'measurements', measurements, 'multi_line_text_field'));
+      if (material != null) ops.push(upsertMetafield(id, metafields, 'custom', 'material', material, 'multi_line_text_field'));
+      if (condition) ops.push(upsertMetafield(id, metafields, 'custom', 'condition', condition, 'multi_line_text_field'));
+      if (description != null) ops.push(upsertMetafield(id, metafields, 'custom', 'seller_description', description, 'multi_line_text_field'));
+      const retail = parseFloat(original_price);
+      if (!isNaN(retail) && retail > 0) ops.push(upsertMetafield(id, metafields, 'custom', 'estimated_retail_price', String(Math.round(retail)), 'number_integer'));
+      if (!isNaN(ask)) {
+        ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_asking_price', JSON.stringify({ amount: ask.toFixed(2), currency_code: 'USD' }), 'money'));
+        if (payout != null) ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_payout', JSON.stringify({ amount: payout.toFixed(2), currency_code: 'USD' }), 'money'));
+      }
+      if (commission_rate != null && commission_rate !== '') ops.push(upsertMetafield(id, metafields, 'pricing', 'commission_rate', String(commission), 'number_integer'));
+      await Promise.all(ops);
+
+      // Bust caches so the dashboard / listings grid / seller portal reflect the edit
+      await Promise.all([cacheBust(CACHE_PENDING), cacheBust(CACHE_ALL)]);
+      const sellerEmail = getSellerEmail(metafields);
+      if (sellerEmail) await cacheBust(`listings:seller:${sellerEmail.toLowerCase()}`);
+
+      return res.status(200).json({ success: true, seller_payout: payout, list_price: listPrice });
+    }
+
     // APPROVE LISTING
     if (action === 'approve' && req.method === 'POST') {
       const { shopifyProductId, skipNotification } = req.body;
