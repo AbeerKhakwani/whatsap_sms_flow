@@ -143,6 +143,125 @@ export default async function handler(req, res) {
       });
     }
 
+    // SINGLE LISTING (detail / edit page) — full editable shape from Shopify + metafields.
+    if (action === 'listing' && req.method === 'GET') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'id required' });
+
+      let product;
+      try { product = await getProduct(id, true); }
+      catch { return res.status(404).json({ error: 'Listing not found' }); }
+
+      const metafields = product.metafields || [];
+      const variant = product.variants?.[0] || {};
+      const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, variant.price);
+
+      const measurements = getMetafieldValue(metafields, 'custom', 'measurements') || '';
+      const chestMatch = measurements.match(/Chest:\s*([\d.]+)/i);
+      const hipMatch = measurements.match(/Hip:\s*([\d.]+)/i);
+      const titleParts = (product.title || '').split(' - ');
+      const item_type = titleParts.length > 1 ? titleParts.slice(1).join(' - ') : '';
+
+      const sellerEmail = getSellerEmail(metafields);
+      const sellerId = getSellerId(metafields);
+      const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone, paypal_email');
+
+      return res.status(200).json({
+        success: true,
+        listing: {
+          id: product.id,
+          shopify_product_id: product.id,
+          status: product.status, // draft (pending) / active (live)
+          product_name: product.title,
+          designer: product.vendor || '',
+          item_type,
+          size: variant.option1 || '',
+          color: variant.option2 || '',
+          condition: getMetafieldValue(metafields, 'custom', 'condition') || variant.option3 || '',
+          material: getMetafieldValue(metafields, 'custom', 'material') || '',
+          chest: chestMatch ? chestMatch[1] : '',
+          hip: hipMatch ? hipMatch[1] : '',
+          description: getMetafieldValue(metafields, 'custom', 'seller_description') || product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
+          asking_price_usd: sellerAskingPrice || 0,
+          original_price: parseFloat(getMetafieldValue(metafields, 'custom', 'estimated_retail_price')) || '',
+          list_price: parseFloat(variant.price) || 0,
+          commission_rate: commissionRate,
+          seller_payout: sellerPayout,
+          tags: product.tags ? product.tags.split(', ').map(t => t.trim()).filter(Boolean) : [],
+          images: (product.images || []).map(img => ({ id: img.id, src: img.src })),
+          variant_id: variant.id,
+          shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
+          seller: seller || null,
+        }
+      });
+    }
+
+    // UPDATE LISTING DETAILS — writes product fields + metafields the SAME way createDraft does
+    // (so metafields stay authoritative). Works for drafts (pending) and active (live) products.
+    if (action === 'update-listing' && req.method === 'POST') {
+      const { id, designer, item_type, size, color, condition, material, chest, hip,
+              description, asking_price, original_price, commission_rate, tags } = req.body;
+      if (!id) return res.status(400).json({ error: 'id required' });
+
+      let product;
+      try { product = await getProduct(id, true); }
+      catch { return res.status(404).json({ error: 'Listing not found' }); }
+      const metafields = product.metafields || [];
+      const variant = product.variants?.[0] || {};
+
+      const ask = parseFloat(asking_price);
+      const commission = (commission_rate != null && commission_rate !== '')
+        ? parseFloat(commission_rate)
+        : (parseFloat(getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18);
+      const listPrice = isNaN(ask) ? (parseFloat(variant.price) || 0) : ask + PLATFORM_FEE;
+      const payout = isNaN(ask) ? null : calculateSellerPayout({ grossPrice: listPrice, commissionRate: commission }).sellerPayout;
+
+      // Product-level fields (title mirrors createDraft's "Designer - ItemType" convention)
+      const productUpdates = {
+        title: `${designer || product.vendor || 'Unknown Designer'} - ${item_type || 'Designer Item'}`,
+        vendor: designer || product.vendor,
+        body_html: `<p>${description || ''}</p>`,
+      };
+      if (Array.isArray(tags)) productUpdates.tags = tags.join(', ');
+      if (variant.id) {
+        productUpdates.variants = [{
+          id: variant.id,
+          price: listPrice.toFixed(2),
+          option1: size || variant.option1,
+          option2: color || variant.option2,
+          option3: condition || variant.option3,
+        }];
+      }
+      await updateProduct(id, productUpdates);
+
+      // Metafields (same namespaces/keys/types as createDraft)
+      const measurementParts = [];
+      if (chest) measurementParts.push(`Chest: ${chest}"`);
+      if (hip) measurementParts.push(`Hip: ${hip}"`);
+      const measurements = measurementParts.join(' | ');
+
+      const ops = [];
+      ops.push(upsertMetafield(id, metafields, 'custom', 'measurements', measurements, 'multi_line_text_field'));
+      if (material != null) ops.push(upsertMetafield(id, metafields, 'custom', 'material', material, 'multi_line_text_field'));
+      if (condition) ops.push(upsertMetafield(id, metafields, 'custom', 'condition', condition, 'multi_line_text_field'));
+      if (description != null) ops.push(upsertMetafield(id, metafields, 'custom', 'seller_description', description, 'multi_line_text_field'));
+      const retail = parseFloat(original_price);
+      if (!isNaN(retail) && retail > 0) ops.push(upsertMetafield(id, metafields, 'custom', 'estimated_retail_price', String(Math.round(retail)), 'number_integer'));
+      if (!isNaN(ask)) {
+        ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_asking_price', JSON.stringify({ amount: ask.toFixed(2), currency_code: 'USD' }), 'money'));
+        if (payout != null) ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_payout', JSON.stringify({ amount: payout.toFixed(2), currency_code: 'USD' }), 'money'));
+      }
+      if (commission_rate != null && commission_rate !== '') ops.push(upsertMetafield(id, metafields, 'pricing', 'commission_rate', String(commission), 'number_integer'));
+      await Promise.all(ops);
+
+      // Bust caches so the dashboard / listings grid / seller portal reflect the edit
+      await Promise.all([cacheBust(CACHE_PENDING), cacheBust(CACHE_ALL)]);
+      const sellerEmail = getSellerEmail(metafields);
+      if (sellerEmail) await cacheBust(`listings:seller:${sellerEmail.toLowerCase()}`);
+
+      return res.status(200).json({ success: true, seller_payout: payout, list_price: listPrice });
+    }
+
     // APPROVE LISTING
     if (action === 'approve' && req.method === 'POST') {
       const { shopifyProductId, skipNotification } = req.body;
@@ -517,7 +636,7 @@ export default async function handler(req, res) {
       const sellerIds = [...new Set((transactions || []).map(t => t.seller_id).filter(Boolean))];
       const { data: sellers } = await supabase
         .from('sellers')
-        .select('id, name, email, phone, paypal_email')
+        .select('id, name, email, phone, paypal_email, payout_method, payment_provider, payment_handle')
         .in('id', sellerIds.length ? sellerIds : ['none']);
 
       const sellersById = {};
@@ -587,7 +706,9 @@ export default async function handler(req, res) {
     if (action === 'mark-paid' && req.method === 'POST') {
       // payoutMethod/payoutHandle/payoutProvider are the new structured fields;
       // sellerNote is accepted for back-compat (old UI sent the method there).
-      const { transactionId, payoutProvider, payoutMethod, payoutHandle, sellerNote, adminNote, skipNotification } = req.body;
+      // payoutNotes is the freeform internal note (also accepts `notes`).
+      // payoutReference is the external confirmation # (Zelle/Interac), optional.
+      const { transactionId, payoutProvider, payoutMethod, payoutHandle, payoutReference, sellerNote, adminNote, payoutNotes, notes, skipNotification } = req.body;
 
       if (!transactionId) {
         return res.status(400).json({ error: 'Transaction ID required' });
@@ -602,13 +723,32 @@ export default async function handler(req, res) {
           provider: payoutProvider || 'zelle_manual',
           method:   payoutMethod || sellerNote,
           handle:   payoutHandle,
+          reference: payoutReference,
           adminNote,
+          payoutNotes: payoutNotes ?? notes,
           notify:   !skipNotification,
         });
         return res.status(200).json({ success: true, transaction, notificationSent });
       } catch (e) {
         return res.status(400).json({ error: e.message });
       }
+    }
+
+    // UPDATE FREEFORM NOTES on a transaction — editable any time from the detail page,
+    // independent of payout state. Kept separate from admin_note (system context).
+    if (action === 'update-notes' && req.method === 'POST') {
+      const { transactionId, payoutNotes } = req.body;
+      if (!transactionId) return res.status(400).json({ error: 'Transaction ID required' });
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .update({ payout_notes: payoutNotes ?? null })
+        .eq('id', transactionId)
+        .select()
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+      return res.status(200).json({ success: true, transaction: data });
     }
 
     // MANUAL RELEASE — force a delivered item to 'available' without waiting for the timer.
@@ -843,9 +983,12 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, transaction: updated, sellerPayout, notificationSent });
     }
 
-    // BULK MARK TRANSACTIONS AS PAID
+    // BULK MARK TRANSACTIONS AS PAID — used by the per-seller "Pay seller" action.
+    // All ids passed should belong to one seller / one real transfer; payoutReference
+    // (Zelle/Interac confirmation #) is stamped on every one so the batch shares it.
     if (action === 'bulk-mark-paid' && req.method === 'POST') {
-      const { transactionIds, sellerNote, adminNote, skipNotification } = req.body;
+      const { transactionIds, payoutMethod, payoutHandle, payoutReference, payoutNotes, sellerNote, adminNote, skipNotification } = req.body;
+      const method = payoutMethod || sellerNote;
 
       if (!transactionIds?.length) {
         return res.status(400).json({ error: 'transactionIds array required' });
@@ -880,7 +1023,7 @@ export default async function handler(req, res) {
       // Record each payout through the shared service (writes structured fields:
       // payout_provider/method, paid_at). Notifications are sent in aggregate below.
       for (const t of validTxs) {
-        await payViaProvider(t, { provider: 'zelle_manual', method: sellerNote, adminNote, notify: false })
+        await payViaProvider(t, { provider: 'zelle_manual', method, handle: payoutHandle, reference: payoutReference, payoutNotes, adminNote, notify: false })
           .catch(e => console.error(`Bulk mark-paid write failed for ${t.id}:`, e.message));
       }
 
@@ -904,13 +1047,13 @@ export default async function handler(req, res) {
           if (!seller?.email) continue;
 
           const totalPayout = txs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
-          const paymentMethod = sellerNote ? ` via ${sellerNote}` : '';
+          const paymentMethod = method ? ` via ${method}` : '';
 
           try {
             const itemDesc = txs.length === 1 ? txs[0].product_title : `${txs.length} items`;
-            const metadata = { totalPayout, itemCount: txs.length, paymentMethod: sellerNote };
+            const metadata = { totalPayout, itemCount: txs.length, paymentMethod: method };
 
-            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, sellerNote);
+            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, method);
             await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
@@ -927,7 +1070,7 @@ export default async function handler(req, res) {
                       { type: 'text', text: seller.name || 'there' },
                       { type: 'text', text: `$${totalPayout.toFixed(2)}` },
                       { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
-                      { type: 'text', text: sellerNote ? ` via ${sellerNote}` : ' to your account on file' }
+                      { type: 'text', text: method ? ` via ${method}` : ' to your account on file' }
                     ]
                   }
                 ],

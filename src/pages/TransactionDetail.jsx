@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, Package, Truck, CheckCircle, Clock, DollarSign,
-  ExternalLink, User, Mail, Phone, AlertTriangle, Zap
+  ExternalLink, User, Mail, Phone, AlertTriangle, Zap, StickyNote
 } from 'lucide-react';
 import { calculateSellerPayout } from '../../lib/payout-calculation';
 
@@ -50,7 +50,14 @@ export default function TransactionDetail() {
   const [showPaid, setShowPaid] = useState(false);
   const [payMethod, setPayMethod] = useState('');
   const [payHandle, setPayHandle] = useState('');
+  const [payReference, setPayReference] = useState('');
+  const [payNotes, setPayNotes] = useState('');
   const [skipNotify, setSkipNotify] = useState(false);
+
+  // Freeform notes (editable any time, persists on the transaction)
+  const [notes, setNotes] = useState('');
+  const [savedNotes, setSavedNotes] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
 
   // Set-commission
   const [rateInput, setRateInput] = useState('');
@@ -75,6 +82,8 @@ export default function TransactionDetail() {
         setPayMethod(s.payout_method || (s.payment_provider ? s.payment_provider : 'Zelle'));
         setPayHandle(s.payment_handle || s.paypal_email || '');
         setRateInput(data.transaction.commission_rate != null ? String(data.transaction.commission_rate) : '');
+        setNotes(data.transaction.payout_notes || '');
+        setSavedNotes(data.transaction.payout_notes || '');
       }
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -116,14 +125,33 @@ export default function TransactionDetail() {
   const canMarkDelivered = ['shipped', 'label_created', 'in_transit'].includes(tx.shipping_status) || tx.payout_status === 'in_transit';
 
   async function markPaid() {
+    // Fold any note typed in the modal into the persisted notes (newline-appended).
+    const mergedNotes = [savedNotes, payNotes].map(s => (s || '').trim()).filter(Boolean).join('\n');
     const ok = await post('mark-paid', {
       transactionId: tx.id,
       payoutProvider: seller.payment_provider || 'zelle_manual',
       payoutMethod: payMethod || undefined,
       payoutHandle: payHandle || undefined,
+      payoutReference: payReference || undefined,
+      payoutNotes: mergedNotes || undefined,
       skipNotification: skipNotify || undefined,
     });
-    if (ok) setShowPaid(false);
+    if (ok) { setShowPaid(false); setPayNotes(''); setPayReference(''); }
+  }
+
+  async function saveNotes() {
+    setSavingNotes(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin-listings?action=update-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: tx.id, payoutNotes: notes }),
+      });
+      const data = await res.json();
+      if (data.success) setSavedNotes(notes);
+      else alert('Failed to save notes: ' + (data.error || 'Unknown error'));
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { setSavingNotes(false); }
   }
 
   function openEdit() {
@@ -237,6 +265,31 @@ export default function TransactionDetail() {
         </div>
       </div>
 
+      {/* Notes — freeform, editable any time, saved to the transaction */}
+      <div className="bg-white border border-stone-200 rounded-xl p-5 mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-stone-700 flex items-center gap-2"><StickyNote className="w-4 h-4" /> Notes</h2>
+          {notes !== savedNotes && (
+            <button
+              onClick={saveNotes}
+              disabled={savingNotes}
+              className="text-xs px-3 py-1.5 bg-stone-800 text-white rounded-lg hover:bg-stone-900 disabled:opacity-50 inline-flex items-center gap-1.5"
+            >
+              {savingNotes ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+              Save
+            </button>
+          )}
+        </div>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          rows={3}
+          placeholder="Anything you want to remember about this payout — reference numbers, who you spoke to, why the amount changed…"
+          className="w-full px-3 py-2.5 text-sm border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-400 bg-stone-50 resize-y"
+        />
+        <p className="text-xs text-stone-400 mt-1.5">Internal only — never shown to the seller.</p>
+      </div>
+
       {/* Actions */}
       <div className="flex flex-wrap gap-3 mt-6">
         {conciergeNeedsShip && (
@@ -276,7 +329,7 @@ export default function TransactionDetail() {
         )}
         {tx.payout_status === 'paid' && (
           <div className="text-sm text-emerald-700 flex items-center gap-1.5">
-            <CheckCircle className="w-4 h-4" /> Paid {tx.paid_at ? new Date(tx.paid_at).toLocaleDateString() : ''} {tx.payout_method ? `via ${tx.payout_method}` : ''} {tx.payout_handle ? `(${tx.payout_handle})` : ''}
+            <CheckCircle className="w-4 h-4" /> Paid {tx.paid_at ? new Date(tx.paid_at).toLocaleDateString() : ''} {tx.payout_method ? `via ${tx.payout_method}` : ''} {tx.payout_handle ? `(${tx.payout_handle})` : ''}{tx.payout_reference ? ` · ref ${tx.payout_reference}` : ''}
           </div>
         )}
       </div>
@@ -293,6 +346,12 @@ export default function TransactionDetail() {
             <label className="block text-sm text-stone-600 mb-1">Paid to (handle)</label>
             <input value={payHandle} onChange={e => setPayHandle(e.target.value)} placeholder="email or phone"
               className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg mb-3" />
+            <label className="block text-sm text-indigo-600 mb-1">Confirmation # <span className="text-stone-400">— optional, attaches to this payout</span></label>
+            <input value={payReference} onChange={e => setPayReference(e.target.value)} placeholder="Zelle / Interac reference"
+              className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-lg mb-3 focus:ring-2 focus:ring-indigo-400 focus:outline-none" />
+            <label className="block text-sm text-stone-600 mb-1">Note <span className="text-stone-400">— internal, optional</span></label>
+            <textarea value={payNotes} onChange={e => setPayNotes(e.target.value)} rows={2} placeholder="e.g. Zelle confirmation #, anything to remember"
+              className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg mb-3 bg-stone-50 resize-y" />
             <label className="flex items-center gap-2 text-sm text-stone-600 mb-4">
               <input type="checkbox" checked={skipNotify} onChange={e => setSkipNotify(e.target.checked)} /> Don't notify the seller
             </label>
