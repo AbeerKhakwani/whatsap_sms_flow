@@ -649,6 +649,18 @@ export default async function handler(req, res) {
           .catch(e => ({ success: false, error: e.message }));
       }
 
+      // Register the externally-bought tracking with Shippo so the delivery webhook
+      // fires (concierge postage isn't a Shippo label, so it isn't tracked otherwise).
+      let tracking = null;
+      try {
+        const { registerShippoTracking } = await import('../lib/shipping.js');
+        await registerShippoTracking(carrier, trackingNumber);
+        tracking = { registered: true };
+      } catch (e) {
+        tracking = { registered: false, error: e.message };
+        console.warn(`Shippo track register failed for ${trackingNumber}: ${e.message}`);
+      }
+
       const { data: updated, error: upErr } = await supabase
         .from('transactions')
         .update({
@@ -662,7 +674,43 @@ export default async function handler(req, res) {
         .single();
       if (upErr) return res.status(400).json({ error: upErr.message });
 
-      return res.status(200).json({ success: true, transaction: updated, fulfillment });
+      return res.status(200).json({ success: true, transaction: updated, fulfillment, tracking });
+    }
+
+    // MARK DELIVERED — manual fallback (e.g. concierge with a carrier Shippo can't
+    // track). Mirrors the Shippo DELIVERED webhook: starts the 48h buyer-confirm window.
+    if (action === 'mark-delivered' && req.method === 'POST') {
+      const { transactionId } = req.body;
+      if (!transactionId) return res.status(400).json({ error: 'transactionId required' });
+
+      const { data: tx, error: txErr } = await supabase
+        .from('transactions').select('*').eq('id', transactionId).single();
+      if (txErr || !tx) return res.status(404).json({ error: 'Transaction not found' });
+      if (tx.payout_status === 'paid') return res.status(400).json({ error: 'Already paid' });
+
+      const now = new Date();
+      const { data: updated, error: upErr } = await supabase
+        .from('transactions')
+        .update({
+          shipping_status:     'delivered',
+          payout_status:       'delivered',
+          delivered_at:        now.toISOString(),
+          contest_window_ends: new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString(),
+        })
+        .eq('id', transactionId)
+        .select()
+        .single();
+      if (upErr) return res.status(400).json({ error: upErr.message });
+
+      // Kick off the buyer delivery-confirmation (WhatsApp/email).
+      try {
+        const { sendBuyerConfirmRequest } = await import('../lib/buyer-review.js');
+        await sendBuyerConfirmRequest(transactionId);
+      } catch (e) {
+        console.warn(`Buyer confirm request failed for ${transactionId}: ${e.message}`);
+      }
+
+      return res.status(200).json({ success: true, transaction: updated });
     }
 
     // EDIT RECEIPT — admin corrects commission / discount / payout on a transaction.

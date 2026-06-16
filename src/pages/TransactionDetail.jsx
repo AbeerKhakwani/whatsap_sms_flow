@@ -112,6 +112,8 @@ export default function TransactionDetail() {
   // not listing_type (a separate, often-unset metafield).
   const isConcierge = tx.shipping_status === 'concierge' || tx.listing_type === 'concierge';
   const conciergeNeedsShip = tx.shipping_status === 'concierge';
+  // Manual delivery fallback (e.g. concierge on a carrier Shippo can't track).
+  const canMarkDelivered = ['shipped', 'label_created', 'in_transit'].includes(tx.shipping_status) || tx.payout_status === 'in_transit';
 
   async function markPaid() {
     const ok = await post('mark-paid', {
@@ -253,6 +255,12 @@ export default function TransactionDetail() {
             <button disabled={busy || rateInput === ''} onClick={() => post('update-transaction', { transactionId: tx.id, commissionRate: parseFloat(rateInput), notify: true })}
               className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded disabled:opacity-50">Set commission</button>
           </div>
+        )}
+        {canMarkDelivered && (
+          <button disabled={busy} onClick={() => post('mark-delivered', { transactionId: tx.id })}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50">
+            <Truck className="w-4 h-4" /> Mark delivered
+          </button>
         )}
         {canRelease && (
           <button disabled={busy} onClick={() => post('release-payout', { transactionId: tx.id })}
