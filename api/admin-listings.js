@@ -234,13 +234,13 @@ export default async function handler(req, res) {
       if (wasConcierge) {
         await supabase
           .from('transactions')
-          .update({ shipping_status: 'pending_label' })
+          .update({ shipping_status: 'pending_label', listing_type: 'consignment' })
           .eq('product_id', shopifyProductId.toString())
           .eq('shipping_status', 'concierge');
       } else {
         await supabase
           .from('transactions')
-          .update({ shipping_status: 'concierge' })
+          .update({ shipping_status: 'concierge', listing_type: 'concierge' })
           .eq('product_id', shopifyProductId.toString())
           .eq('shipping_status', 'pending_label');
       }

@@ -124,6 +124,10 @@ export default async function handler(req, res) {
         console.warn(`Could not fetch product tags for ${productId}:`, e.message);
       }
 
+      // The concierge tag is authoritative — keep listing_type in sync so reminders,
+      // search, and the detail-page fulfill button all agree.
+      if (isConcierge) listingType = 'concierge';
+
       // ── Resolve seller ─────────────────────────────────────────────────────
       let seller = null;
       if (sellerId) {

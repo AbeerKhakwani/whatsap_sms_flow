@@ -108,7 +108,10 @@ export default function TransactionDetail() {
   const canRelease = tx.payout_status === 'delivered';
   const canMarkPaid = tx.payout_status !== 'paid' && tx.payout_status !== 'cancelled';
   const needsCommission = tx.commission_rate == null;
-  const conciergeNeedsShip = tx.listing_type === 'concierge' && ['concierge', 'pending_label'].includes(tx.shipping_status);
+  // Concierge state is carried by shipping_status (set from the Shopify tag at sale),
+  // not listing_type (a separate, often-unset metafield).
+  const isConcierge = tx.shipping_status === 'concierge' || tx.listing_type === 'concierge';
+  const conciergeNeedsShip = tx.shipping_status === 'concierge';
 
   async function markPaid() {
     const ok = await post('mark-paid', {
@@ -227,7 +230,7 @@ export default function TransactionDetail() {
             {tx.tracking_number && <div>Tracking: {tx.carrier || ''} {tx.tracking_number}</div>}
             {tx.shipping_label_url && <a href={tx.shipping_label_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600"><ExternalLink className="w-3 h-3" /> Label</a>}
             {tx.delivered_at && <div className="text-xs text-stone-500">Delivered {new Date(tx.delivered_at).toLocaleDateString()}</div>}
-            {tx.listing_type === 'concierge' && <div className="text-xs text-amber-700">★ Concierge (Phirstory ships)</div>}
+            {isConcierge && <div className="text-xs text-amber-700">★ Concierge (Phirstory ships)</div>}
           </div>
         </div>
       </div>
