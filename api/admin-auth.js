@@ -8,7 +8,9 @@ import {
   verifyCode,
   generateAdminToken,
   verifyToken,
-  isAdminEmail
+  isAdminEmail,
+  verifyAdminLogin,
+  getAdminName
 } from '../lib/auth-utils.js';
 import { sendVerificationCode } from '../lib/email.js';
 import { cors } from '../lib/cors.js';
@@ -26,6 +28,29 @@ export default async function handler(req, res) {
   const { action } = req.body;
 
   try {
+    // LOGIN - Per-admin email + password (credentials live in ADMIN_USERS).
+    // The token carries the admin's display name so actions can be attributed
+    // ("by Faqiha") without a second lookup. Falls back: if ADMIN_USERS isn't
+    // configured, no one matches and admins use the email-code path below.
+    if (action === 'login') {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password required' });
+      }
+
+      const admin = verifyAdminLogin(email, password);
+      if (!admin) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      const token = generateAdminToken(admin.email, admin.name);
+      return res.status(200).json({
+        success: true,
+        token,
+        admin: { email: admin.email, name: admin.name }
+      });
+    }
+
     // SEND-CODE - Send verification code to admin email
     if (action === 'send-code') {
       const { email } = req.body;
@@ -79,13 +104,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: result.error });
       }
 
-      // Generate token
-      const token = generateAdminToken(email);
+      // Generate token (carry the display name for attribution, same as login)
+      const name = getAdminName(email);
+      const token = generateAdminToken(email, name);
 
       return res.status(200).json({
         success: true,
         token,
-        admin: { email }
+        admin: { email, name }
       });
     }
 
@@ -106,7 +132,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         success: true,
         admin: {
-          email: decoded.email
+          email: decoded.email,
+          name: decoded.name || getAdminName(decoded.email)
         }
       });
     }

@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, ArrowRight, Loader2, ArrowLeft, Check } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Loader2, ArrowLeft, Check } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function AdminLogin() {
   const navigate = useNavigate();
 
-  // Flow state
-  const [step, setStep] = useState('email'); // email -> code
+  // Flow state: 'password' (primary) -> or 'email-code' -> 'code' (fallback)
+  const [step, setStep] = useState('password');
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState('');
 
   // User data
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
 
   // Check if already logged in
@@ -50,7 +51,41 @@ export default function AdminLogin() {
 
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_email');
+    localStorage.removeItem('admin_name');
     setChecking(false);
+  }
+
+  // Persist the session + identity (admin_name powers "who did what" attribution).
+  function storeSession(data) {
+    localStorage.setItem('admin_token', data.token);
+    localStorage.setItem('admin_email', data.admin.email);
+    if (data.admin.name) localStorage.setItem('admin_name', data.admin.name);
+    navigate('/admin/dashboard');
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin-auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', email: email.toLowerCase().trim(), password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Invalid email or password');
+
+      storeSession(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSendCode(e) {
@@ -68,10 +103,7 @@ export default function AdminLogin() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to send code');
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to send code');
 
       setStep('code');
     } catch (err) {
@@ -100,25 +132,14 @@ export default function AdminLogin() {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Invalid code');
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Invalid code');
-      }
-
-      localStorage.setItem('admin_token', data.token);
-      localStorage.setItem('admin_email', data.admin.email);
-      navigate('/admin/dashboard');
+      storeSession(data);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleBack() {
-    setError('');
-    setCode('');
-    setStep('email');
   }
 
   if (checking) {
@@ -139,11 +160,94 @@ export default function AdminLogin() {
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
 
-          {/* Step 1: Enter Email */}
-          {step === 'email' && (
+          {/* Primary: email + password */}
+          {step === 'password' && (
             <>
               <h2 className="text-lg font-medium text-gray-900 mb-2 text-center">
                 Admin Sign In
+              </h2>
+              <p className="text-sm text-gray-500 mb-6 text-center">
+                Sign in with your email and password
+              </p>
+
+              <form onSubmit={handleLogin}>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                      placeholder="you@example.com"
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                      placeholder="••••••••"
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={!email.trim() || !password || loading}
+                  className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      Sign In
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setError(''); setPassword(''); setStep('email-code'); }}
+                  disabled={loading}
+                  className="w-full mt-3 text-gray-500 hover:text-gray-700 text-sm py-2"
+                >
+                  Sign in with an email code instead
+                </button>
+              </form>
+            </>
+          )}
+
+          {/* Fallback step 1: request email code */}
+          {step === 'email-code' && (
+            <>
+              <button
+                onClick={() => { setError(''); setStep('password'); }}
+                className="flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-4 text-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to password
+              </button>
+
+              <h2 className="text-lg font-medium text-gray-900 mb-2 text-center">
+                Sign in with email code
               </h2>
               <p className="text-sm text-gray-500 mb-6 text-center">
                 Enter your admin email to receive a verification code
@@ -151,9 +255,7 @@ export default function AdminLogin() {
 
               <form onSubmit={handleSendCode}>
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                   <div className="relative">
                     <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                     <input
@@ -192,11 +294,11 @@ export default function AdminLogin() {
             </>
           )}
 
-          {/* Step 2: Enter Code */}
+          {/* Fallback step 2: enter code */}
           {step === 'code' && (
             <>
               <button
-                onClick={handleBack}
+                onClick={() => { setError(''); setCode(''); setStep('email-code'); }}
                 className="flex items-center gap-1 text-gray-500 hover:text-gray-700 mb-4 text-sm"
               >
                 <ArrowLeft className="w-4 h-4" />

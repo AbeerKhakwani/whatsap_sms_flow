@@ -153,7 +153,8 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          shopifyProductId: listing.shopify_product_id
+          shopifyProductId: listing.shopify_product_id,
+          adminEmail: localStorage.getItem('admin_email') || undefined
         })
       });
 

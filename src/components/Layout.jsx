@@ -127,6 +127,7 @@ export default function Layout({ children }) {
       } else {
         localStorage.removeItem('admin_token');
         localStorage.removeItem('admin_email');
+        localStorage.removeItem('admin_name');
         navigate('/admin');
       }
     } catch (err) {
@@ -149,6 +150,7 @@ export default function Layout({ children }) {
   function handleLogout() {
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_email');
+    localStorage.removeItem('admin_name');
     navigate('/admin');
   }
 

@@ -139,6 +139,7 @@ export default function Transactions() {
           payoutNotes: payNotes || undefined,
           payoutScreenshot: payScreenshot || undefined,
           skipNotification: paySkip || undefined,
+          adminEmail: localStorage.getItem('admin_email') || undefined,
         }),
       });
       const data = await res.json();

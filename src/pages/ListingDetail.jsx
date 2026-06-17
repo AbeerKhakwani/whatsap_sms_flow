@@ -143,7 +143,7 @@ export default function ListingDetail() {
     try {
       const res = await fetch(`${API_URL}/api/admin-listings?action=approve`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopifyProductId: id }),
+        body: JSON.stringify({ shopifyProductId: id, adminEmail: localStorage.getItem('admin_email') || undefined }),
       });
       const data = await res.json();
       if (data.success) navigate('/admin/dashboard');

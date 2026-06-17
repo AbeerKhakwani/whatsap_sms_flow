@@ -16,6 +16,8 @@ import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.j
 import { payViaProvider, releasePayout } from '../lib/payout-service.js';
 import { runPayoutSync } from '../lib/payout-sync.js';
 import { uploadToSupabase, getExtensionFromContentType } from '../lib/sms/media.js';
+import { notifySlack } from '../lib/notify-slack.js';
+import { getAdminName } from '../lib/auth-utils.js';
 
 const CACHE_PENDING = 'listings:pending';
 const CACHE_ALL = 'listings:all';
@@ -266,7 +268,7 @@ export default async function handler(req, res) {
 
     // APPROVE LISTING
     if (action === 'approve' && req.method === 'POST') {
-      const { shopifyProductId, skipNotification } = req.body;
+      const { shopifyProductId, skipNotification, adminEmail } = req.body;
 
       if (!shopifyProductId) {
         return res.status(400).json({ error: 'Please provide shopifyProductId' });
@@ -326,6 +328,11 @@ export default async function handler(req, res) {
       }
 
       await cacheBust(CACHE_PENDING, CACHE_ALL);
+
+      // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
+      const approverName = getAdminName(adminEmail);
+      await notifySlack(`✅ Approved: "${product.title}" from ${seller?.name || sellerEmail || 'unknown seller'}${approverName ? ` · by ${approverName}` : ''}`);
+
       return res.status(200).json({
         success: true,
         productId: product.id,
@@ -710,7 +717,7 @@ export default async function handler(req, res) {
       // sellerNote is accepted for back-compat (old UI sent the method there).
       // payoutNotes is the freeform internal note (also accepts `notes`).
       // payoutReference is the external confirmation # (Zelle/Interac), optional.
-      const { transactionId, payoutProvider, payoutMethod, payoutHandle, payoutReference, sellerNote, adminNote, payoutNotes, notes, skipNotification } = req.body;
+      const { transactionId, payoutProvider, payoutMethod, payoutHandle, payoutReference, sellerNote, adminNote, payoutNotes, notes, skipNotification, adminEmail } = req.body;
 
       if (!transactionId) {
         return res.status(400).json({ error: 'Transaction ID required' });
@@ -730,6 +737,12 @@ export default async function handler(req, res) {
           payoutNotes: payoutNotes ?? notes,
           notify:   !skipNotification,
         });
+
+        // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
+        const payerName = getAdminName(adminEmail);
+        const amount = Number(transaction?.seller_payout ?? tx.seller_payout ?? 0).toFixed(2);
+        await notifySlack(`💸 Payout sent: "${transaction?.product_title || tx.product_title}" — $${amount}${payerName ? ` · by ${payerName}` : ''}`);
+
         return res.status(200).json({ success: true, transaction, notificationSent });
       } catch (e) {
         return res.status(400).json({ error: e.message });
@@ -992,7 +1005,7 @@ export default async function handler(req, res) {
     // All ids passed should belong to one seller / one real transfer; payoutReference
     // (Zelle/Interac confirmation #) is stamped on every one so the batch shares it.
     if (action === 'bulk-mark-paid' && req.method === 'POST') {
-      const { transactionIds, payoutMethod, payoutHandle, payoutReference, payoutNotes, payoutScreenshot, sellerNote, adminNote, skipNotification } = req.body;
+      const { transactionIds, payoutMethod, payoutHandle, payoutReference, payoutNotes, payoutScreenshot, sellerNote, adminNote, skipNotification, adminEmail } = req.body;
       const method = payoutMethod || sellerNote;
 
       if (!transactionIds?.length) {
@@ -1106,6 +1119,14 @@ export default async function handler(req, res) {
           }
         }
       }
+
+      // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
+      const payerName = getAdminName(adminEmail);
+      const grandTotal = validTxs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
+      const label = validTxs.length === 1
+        ? `"${validTxs[0].product_title}" — $${grandTotal.toFixed(2)}`
+        : `${validTxs.length} payouts, $${grandTotal.toFixed(2)} total`;
+      await notifySlack(`💸 Payout sent: ${label}${payerName ? ` · by ${payerName}` : ''}`);
 
       return res.status(200).json({
         success: true,

@@ -136,6 +136,7 @@ export default function TransactionDetail() {
       payoutReference: payReference || undefined,
       payoutNotes: mergedNotes || undefined,
       skipNotification: skipNotify || undefined,
+      adminEmail: localStorage.getItem('admin_email') || undefined,
     });
     if (ok) { setShowPaid(false); setPayNotes(''); setPayReference(''); }
   }
