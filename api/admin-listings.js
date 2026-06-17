@@ -903,15 +903,18 @@ export default async function handler(req, res) {
         }
       }
 
-      // Audit log (best-effort; non-impersonation admin action).
-      await supabase.from('audit_log').insert({
-        actor_admin_email: adminEmail || null,
-        target_seller_id:  tx.seller_id || null,
-        action:            'receipt_edited',
-        target_id:         String(tx.product_id || transactionId),
-        payload:           { transactionId, oldRate: tx.commission_rate, newRate: rate, oldPayout: tx.seller_payout, newPayout, discount: newDiscount, override: hasOverride },
-        request_path:      '/api/admin-listings?action=update-receipt',
-      }).catch(() => {});
+      // Audit log (best-effort; non-impersonation admin action). The Supabase builder is a
+      // thenable, not a Promise, so it has no .catch — wrap in try/catch instead.
+      try {
+        await supabase.from('audit_log').insert({
+          actor_admin_email: adminEmail || null,
+          target_seller_id:  tx.seller_id || null,
+          action:            'receipt_edited',
+          target_id:         String(tx.product_id || transactionId),
+          payload:           { transactionId, oldRate: tx.commission_rate, newRate: rate, oldPayout: tx.seller_payout, newPayout, discount: newDiscount, override: hasOverride },
+          request_path:      '/api/admin-listings?action=update-receipt',
+        });
+      } catch {}
 
       return res.status(200).json({ success: true, transaction: updated, resync });
     }

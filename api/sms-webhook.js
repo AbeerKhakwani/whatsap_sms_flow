@@ -383,17 +383,20 @@ export default async function handler(req, res) {
         .eq('phone', from)
         .maybeSingle();
 
-      // Log to messages table on terminate (final state)
+      // Log to messages table on terminate (final state). The Supabase builder is a
+      // thenable, not a Promise — it has no .catch, so wrap in try/catch.
       if (event === 'terminate') {
-        await supabase.from('messages').insert({
-          seller_id: seller?.id || null,
-          type: 'call',
-          recipient: from,
-          content: isMissed ? 'Missed call' : `Call completed (${duration}s)`,
-          context: 'call',
-          metadata: { call_id: callId, event, status: call.status, from, duration },
-          status: 'received'
-        }).catch(() => {});
+        try {
+          await supabase.from('messages').insert({
+            seller_id: seller?.id || null,
+            type: 'call',
+            recipient: from,
+            content: isMissed ? 'Missed call' : `Call completed (${duration}s)`,
+            context: 'call',
+            metadata: { call_id: callId, event, status: call.status, from, duration },
+            status: 'received'
+          });
+        } catch {}
 
         // Missed call — auto-reply to seller + alert admin
         if (isMissed) {

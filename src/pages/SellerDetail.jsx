@@ -550,7 +550,7 @@ export default function SellerDetail() {
       </div>
 
       {/* ── STATS ROW ──────────────────────────────────────────────── */}
-      <div className="grid grid-cols-4 bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: `1px solid ${BORDER}` }}>
+      <div className="grid grid-cols-3 bg-white rounded-2xl overflow-hidden shadow-sm" style={{ border: `1px solid ${BORDER}` }}>
         {/* Listings */}
         <div className="py-5 px-5 text-center" style={{ borderRight: `1px solid ${BORDER}` }}>
           <p className="text-3xl font-bold" style={{ color: INK }}>{listings.length}</p>
@@ -562,45 +562,9 @@ export default function SellerDetail() {
           <p className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: STONE }}>Earnings</p>
         </div>
         {/* Pending */}
-        <div className="py-5 px-5 text-center" style={{ borderRight: `1px solid ${BORDER}` }}>
+        <div className="py-5 px-5 text-center">
           <p className="text-3xl font-bold" style={{ color: GOLD }}>${txStats.pending.toFixed(0)}</p>
           <p className="text-[9px] font-bold tracking-widest uppercase mt-0.5" style={{ color: STONE }}>Pending</p>
-        </div>
-        {/* PayPal — editable */}
-        <div className="py-4 px-5 flex flex-col items-center justify-center group relative">
-          <p className="text-[9px] font-bold tracking-widest uppercase mb-1" style={{ color: STONE }}>PayPal</p>
-          {editing === 'paypal_email' ? (
-            <div className="flex items-center gap-1 w-full">
-              <input
-                ref={editInputRef}
-                type="text"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="flex-1 px-2 py-1 text-xs rounded focus:outline-none"
-                style={{ border: `1px solid ${CRIMSON}`, color: INK }}
-                placeholder="paypal@email.com"
-              />
-              <button onClick={saveEdit} disabled={saving} style={{ color: '#16A34A' }}>
-                <Check className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={cancelEdit} style={{ color: STONE }}>
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => startEdit('paypal_email')}
-              className="flex items-center gap-1 text-sm font-medium truncate max-w-full group"
-              style={{ color: INK }}
-            >
-              {seller.paypal_email
-                ? <span className="truncate">{seller.paypal_email}</span>
-                : <span className="italic text-xs" style={{ color: '#A8A29E' }}>Not set</span>
-              }
-              <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" style={{ color: CRIMSON }} />
-            </button>
-          )}
         </div>
       </div>
 
@@ -640,8 +604,8 @@ export default function SellerDetail() {
                 </div>
               ) : (
                 <button onClick={() => startEdit('payment_handle')} className="flex items-center gap-1 text-sm font-medium truncate max-w-full group" style={{ color: INK }}>
-                  {seller.payment_handle
-                    ? <span className="truncate">{seller.payment_handle}</span>
+                  {(seller.payment_handle || seller.paypal_email)
+                    ? <span className="truncate">{seller.payment_handle || seller.paypal_email}</span>
                     : <span className="italic text-xs" style={{ color: '#A8A29E' }}>Not set</span>}
                   <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" style={{ color: CRIMSON }} />
                 </button>
