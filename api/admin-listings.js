@@ -15,6 +15,7 @@ import { withCache, cacheBust } from '../lib/cache.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
 import { payViaProvider, releasePayout } from '../lib/payout-service.js';
 import { runPayoutSync } from '../lib/payout-sync.js';
+import { uploadToSupabase, getExtensionFromContentType } from '../lib/sms/media.js';
 
 const CACHE_PENDING = 'listings:pending';
 const CACHE_ALL = 'listings:all';
@@ -988,7 +989,7 @@ export default async function handler(req, res) {
     // All ids passed should belong to one seller / one real transfer; payoutReference
     // (Zelle/Interac confirmation #) is stamped on every one so the batch shares it.
     if (action === 'bulk-mark-paid' && req.method === 'POST') {
-      const { transactionIds, payoutMethod, payoutHandle, payoutReference, payoutNotes, sellerNote, adminNote, skipNotification } = req.body;
+      const { transactionIds, payoutMethod, payoutHandle, payoutReference, payoutNotes, payoutScreenshot, sellerNote, adminNote, skipNotification } = req.body;
       const method = payoutMethod || sellerNote;
 
       if (!transactionIds?.length) {
@@ -1021,10 +1022,24 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'No transactions in "available" status to mark as paid' });
       }
 
+      // Optional payment screenshot (e.g. Zelle) — upload once, reuse the URL across the batch.
+      let screenshotUrl = null;
+      if (payoutScreenshot) {
+        const m = /^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/.exec(payoutScreenshot);
+        if (m) {
+          try {
+            const buffer = Buffer.from(m[2], 'base64');
+            const ext = getExtensionFromContentType(m[1]);
+            const path = `payouts/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            screenshotUrl = await uploadToSupabase(buffer, path, m[1]);
+          } catch (e) { console.error('Payout screenshot upload failed:', e.message); }
+        }
+      }
+
       // Record each payout through the shared service (writes structured fields:
       // payout_provider/method, paid_at). Notifications are sent in aggregate below.
       for (const t of validTxs) {
-        await payViaProvider(t, { provider: 'zelle_manual', method, handle: payoutHandle, reference: payoutReference, payoutNotes, adminNote, notify: false })
+        await payViaProvider(t, { provider: 'zelle_manual', method, handle: payoutHandle, reference: payoutReference, payoutNotes, adminNote, screenshotUrl, notify: false })
           .catch(e => console.error(`Bulk mark-paid write failed for ${t.id}:`, e.message));
       }
 
@@ -1054,30 +1069,34 @@ export default async function handler(req, res) {
             const itemDesc = txs.length === 1 ? txs[0].product_title : `${txs.length} items`;
             const metadata = { totalPayout, itemCount: txs.length, paymentMethod: method };
 
-            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, method);
+            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, method, screenshotUrl);
             await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
-            // WhatsApp — template: payout_sent ({{1}}=name, {{2}}=$amount, {{3}}=item desc, {{4}}=method)
+            // WhatsApp — payout_sent ({{1}}=name, {{2}}=$amount, {{3}}=item desc, {{4}}=method).
+            // With a screenshot we use payout_sent_image (same body + an image header). Create
+            // that template in Meta with an image header; until then this send just no-ops.
             if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
+              const waComponents = [{
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: seller.name || 'there' },
+                  { type: 'text', text: `$${totalPayout.toFixed(2)}` },
+                  { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
+                  { type: 'text', text: method ? ` via ${method}` : ' to your account on file' }
+                ]
+              }];
+              if (screenshotUrl) {
+                waComponents.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: screenshotUrl } }] });
+              }
               await sendWhatsApp({
                 sellerId,
                 to: seller.phone,
-                template: 'payout_sent',
-                components: [
-                  {
-                    type: 'body',
-                    parameters: [
-                      { type: 'text', text: seller.name || 'there' },
-                      { type: 'text', text: `$${totalPayout.toFixed(2)}` },
-                      { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
-                      { type: 'text', text: method ? ` via ${method}` : ' to your account on file' }
-                    ]
-                  }
-                ],
+                template: screenshotUrl ? 'payout_sent_image' : 'payout_sent',
+                components: waComponents,
                 context: 'payout_sent',
                 metadata
-              });
+              }).catch(e => console.error('payout_sent WA failed:', e.message));
             }
           } catch (e) {
             console.error(`Bulk payout notification failed for ${seller.email}:`, e.message);

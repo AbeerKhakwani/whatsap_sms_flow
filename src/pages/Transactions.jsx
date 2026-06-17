@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   DollarSign, Clock, CheckCircle, Package, Truck, Printer,
-  AlertTriangle, RefreshCw, Download, X, Link2, ChevronRight
+  AlertTriangle, RefreshCw, Download, X, Link2, ChevronRight, Upload
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -69,6 +69,7 @@ export default function Transactions() {
   const [payReference, setPayReference] = useState('');
   const [payNotes, setPayNotes] = useState('');
   const [paySkip, setPaySkip] = useState(false);
+  const [payScreenshot, setPayScreenshot] = useState(null); // data URL of the Zelle screenshot
   const [paying, setPaying] = useState(false);
 
   useEffect(() => { fetchTransactions(); }, []);
@@ -119,6 +120,7 @@ export default function Transactions() {
     setPayReference('');
     setPayNotes('');
     setPaySkip(false);
+    setPayScreenshot(null);
   }
   function closePay() { setPayGroup(null); }
 
@@ -135,6 +137,7 @@ export default function Transactions() {
           payoutHandle: payHandle || undefined,
           payoutReference: payReference || undefined,
           payoutNotes: payNotes || undefined,
+          payoutScreenshot: payScreenshot || undefined,
           skipNotification: paySkip || undefined,
         }),
       });
@@ -385,6 +388,26 @@ export default function Transactions() {
                 <label className="block text-xs font-medium text-stone-600 mb-1">Note <span className="text-stone-400 font-normal">— internal, optional</span></label>
                 <textarea value={payNotes} onChange={e => setPayNotes(e.target.value)} rows={2} placeholder="anything to remember"
                   className="w-full px-3 py-2 text-sm border border-stone-200 rounded-lg bg-stone-50 resize-y" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Payment screenshot <span className="text-stone-400 font-normal">— optional, sent to seller with the receipt</span></label>
+                {payScreenshot ? (
+                  <div className="flex items-center gap-3">
+                    <img src={payScreenshot} alt="payment screenshot" className="w-14 h-14 object-cover rounded-lg border border-stone-200" />
+                    <button onClick={() => setPayScreenshot(null)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                  </div>
+                ) : (
+                  <label className="flex items-center gap-2 px-3 py-2 text-sm border border-dashed border-stone-300 rounded-lg cursor-pointer hover:bg-stone-50 text-stone-500">
+                    <Upload className="w-4 h-4" /> Upload Zelle screenshot
+                    <input type="file" accept="image/*" className="hidden" onChange={e => {
+                      const f = e.target.files?.[0]; e.target.value = '';
+                      if (!f) return;
+                      const r = new FileReader();
+                      r.onload = () => setPayScreenshot(String(r.result));
+                      r.readAsDataURL(f);
+                    }} />
+                  </label>
+                )}
               </div>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={paySkip} onChange={e => setPaySkip(e.target.checked)} className="w-4 h-4 rounded border-stone-300" />
