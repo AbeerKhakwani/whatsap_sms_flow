@@ -6,6 +6,7 @@ import {
   RotateCcw, Image as ImageIcon, ArrowRightLeft, Search, User, MessageSquare, XCircle, AlertCircle
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
+import BuyerAcceptedBadge from '../components/BuyerAcceptedBadge';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -25,6 +26,7 @@ export default function SellerDetail() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [rejectedListings, setRejectedListings] = useState([]);
   const [txStats, setTxStats] = useState({ earned: 0, pending: 0 });
+  const [txByProduct, setTxByProduct] = useState({}); // shopify_product_id -> tx (for buyer-accepted badge)
   const [syncing, setSyncing] = useState(false);
 
   // Edit state
@@ -109,7 +111,7 @@ export default function SellerDetail() {
     if (!sellerId) return;
     const { data } = await supabase
       .from('transactions')
-      .select('seller_payout, payout_status')
+      .select('seller_payout, payout_status, product_id, review_responded_at')
       .eq('seller_id', sellerId)
       .not('seller_payout', 'is', null);
 
@@ -121,6 +123,11 @@ export default function SellerDetail() {
       .filter(t => ['available', 'in_transit', 'delivered', 'pending_shipping'].includes(t.payout_status))
       .reduce((s, t) => s + (t.seller_payout || 0), 0);
     setTxStats({ earned, pending });
+
+    // Index transactions by Shopify product id so sold cards can show the buyer-accepted badge.
+    const byProduct = {};
+    for (const t of data) { if (t.product_id) byProduct[String(t.product_id)] = t; }
+    setTxByProduct(byProduct);
   }
 
   async function syncListings() {
@@ -861,6 +868,13 @@ export default function SellerDetail() {
                   <div className="p-2">
                     <h3 className="font-medium text-xs truncate" style={{ color: STONE }}>{listing.title}</h3>
                     <div className="text-[10px] mt-0.5" style={{ color: STONE }}>${listing.price?.toFixed(2)}</div>
+                    {txByProduct[String(listing.id)] && (
+                      <BuyerAcceptedBadge
+                        reviewRespondedAt={txByProduct[String(listing.id)].review_responded_at}
+                        payoutStatus={txByProduct[String(listing.id)].payout_status}
+                        className="mt-1"
+                      />
+                    )}
                   </div>
                 </div>
               ))}

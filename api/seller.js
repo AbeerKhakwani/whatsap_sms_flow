@@ -9,7 +9,8 @@ import { getShippingLabel, getShippingInstructions, WAREHOUSE_ADDRESS } from '..
 import { getSellerMessages } from '../lib/messages.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
-import { itemSoldInlineEmail, shippingLabelEmail, sendTransferFromNotification, sendTransferToNotification } from '../lib/email.js';
+import { shippingLabelEmail, sendTransferFromNotification, sendTransferToNotification } from '../lib/email.js';
+import { notifySellerItemSold } from '../lib/notify-sale.js';
 import { supabase } from '../lib/supabase-admin.js';
 import { cors } from '../lib/cors.js';
 import { fetchMetafields, fetchMetafieldsBatch, extractPricing, getMetafieldValue, getSellerEmail, getSellerId, upsertMetafield, updatePricingMetafields } from '../lib/shopify-metafields.js';
@@ -194,6 +195,7 @@ export default async function handler(req, res) {
         shipBy: tx.ship_by,
         deliveredAt: tx.delivered_at,
         contestWindowEnds: tx.contest_window_ends,
+        reviewRespondedAt: tx.review_responded_at, // buyer tapped "Yes, got it"
         image: tx.product_image
       }));
 
@@ -1950,36 +1952,9 @@ export default async function handler(req, res) {
   }
 }
 
-// Send sale notification to seller via WhatsApp and email
+// Sale notification to seller — single source of truth in lib/notify-sale.js (WhatsApp + stripped email).
 async function notifySellerOfSale(seller, saleInfo) {
-  const { productTitle, salePrice, sellerPayout, commissionRate, discount = 0, platformFee = 10 } = saleInfo;
-  const metadata = { productTitle, salePrice, payout: sellerPayout };
-
-  // Send WhatsApp
-  if (seller.phone) {
-    await sendWhatsApp({
-      sellerId: seller.id,
-      to: seller.phone,
-      template: 'item_sold',
-      params: [productTitle, salePrice.toFixed(0)],
-      context: 'item_sold',
-      metadata,
-      textPreview: `🎉 Your item "${productTitle}" sold for $${salePrice.toFixed(0)}! Your payout: $${sellerPayout.toFixed(0)}`
-    });
-  }
-
-  // Send email
-  if (seller.email) {
-    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, { salePrice, discount, commissionRate, platformFee, sellerPayout });
-    await sendEmail({
-      sellerId: seller.id,
-      to: seller.email,
-      subject,
-      html,
-      context: 'item_sold',
-      metadata
-    });
-  }
+  return notifySellerItemSold({ seller, productTitle: saleInfo.productTitle, salePrice: saleInfo.salePrice });
 }
 
 // Send shipping label to seller via WhatsApp and email

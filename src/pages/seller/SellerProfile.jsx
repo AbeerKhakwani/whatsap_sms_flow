@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, LogOut, User, DollarSign, Check, ChevronRight, Package, Tag, CreditCard, Lock, Printer, Truck, ExternalLink, MoreVertical, CheckCircle, Clock, RotateCcw, XCircle, Camera, Trash2 } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
+import BuyerAcceptedBadge from '../../components/BuyerAcceptedBadge';
 import SellerLayout from './SellerLayout';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -1062,7 +1063,10 @@ export default function SellerProfile() {
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-gray-900 truncate">{item.title}</h3>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-medium text-gray-900 truncate">{item.title}</h3>
+                        <BuyerAcceptedBadge reviewRespondedAt={item.reviewRespondedAt} payoutStatus={item.payoutStatus} />
+                      </div>
                       <div className="flex items-center gap-3 text-sm text-gray-500 mt-1">
                         {item.brand && <span>{item.brand}</span>}
                         <span>Sold for ${item.retailPrice}</span>

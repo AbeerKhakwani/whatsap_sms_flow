@@ -15,7 +15,8 @@ import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue } from 
 import { getProduct } from '../lib/shopify.js';
 import { sendEmail } from '../lib/send-email.js';
 import { sendWhatsApp } from '../lib/send-whatsapp.js';
-import { itemSoldInlineEmail, orderCancelledSellerEmail } from '../lib/email.js';
+import { orderCancelledSellerEmail } from '../lib/email.js';
+import { notifySellerItemSold } from '../lib/notify-sale.js';
 import { supabase } from '../lib/supabase-admin.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
 
@@ -448,23 +449,7 @@ async function relistItem(productId, variantId) {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function notifySellerOfSale(seller, { productTitle, salePrice, sellerPayout, commissionRate, discount = 0, platformFee = PLATFORM_FEE }) {
-  const metadata = { productTitle, salePrice, payout: sellerPayout };
-
-  if (seller.phone) {
-    await sendWhatsApp({
-      sellerId: seller.id,
-      to: seller.phone,
-      template: 'item_sold',
-      params: [productTitle, salePrice.toFixed(0)],
-      context: 'item_sold',
-      metadata,
-      textPreview: `🎉 Your item "${productTitle}" sold for $${salePrice.toFixed(0)}! Your payout: $${sellerPayout.toFixed(0)}`
-    });
-  }
-
-  if (seller.email) {
-    const { subject, html } = itemSoldInlineEmail(seller.name, productTitle, { salePrice, discount, commissionRate, platformFee, sellerPayout });
-    await sendEmail({ sellerId: seller.id, to: seller.email, subject, html, context: 'item_sold', metadata });
-  }
+async function notifySellerOfSale(seller, { productTitle, salePrice }) {
+  // Single source of truth lives in lib/notify-sale.js (WhatsApp + stripped email).
+  return notifySellerItemSold({ seller, productTitle, salePrice });
 }
