@@ -330,7 +330,7 @@ export default async function handler(req, res) {
       await cacheBust(CACHE_PENDING, CACHE_ALL);
 
       // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
-      const approverName = getAdminName(adminEmail);
+      const approverName = await getAdminName(adminEmail);
       await notifySlack(`✅ Approved: "${product.title}" from ${seller?.name || sellerEmail || 'unknown seller'}${approverName ? ` · by ${approverName}` : ''}`);
 
       return res.status(200).json({
@@ -739,7 +739,7 @@ export default async function handler(req, res) {
         });
 
         // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
-        const payerName = getAdminName(adminEmail);
+        const payerName = await getAdminName(adminEmail);
         const amount = Number(transaction?.seller_payout ?? tx.seller_payout ?? 0).toFixed(2);
         await notifySlack(`💸 Payout sent: "${transaction?.product_title || tx.product_title}" — $${amount}${payerName ? ` · by ${payerName}` : ''}`);
 
@@ -1121,7 +1121,7 @@ export default async function handler(req, res) {
       }
 
       // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
-      const payerName = getAdminName(adminEmail);
+      const payerName = await getAdminName(adminEmail);
       const grandTotal = validTxs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
       const label = validTxs.length === 1
         ? `"${validTxs[0].product_title}" — $${grandTotal.toFixed(2)}`

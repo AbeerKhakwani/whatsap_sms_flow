@@ -52,6 +52,7 @@ export default function AdminLogin() {
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_email');
     localStorage.removeItem('admin_name');
+    localStorage.removeItem('admin_master');
     setChecking(false);
   }
 
@@ -60,6 +61,10 @@ export default function AdminLogin() {
     localStorage.setItem('admin_token', data.token);
     localStorage.setItem('admin_email', data.admin.email);
     if (data.admin.name) localStorage.setItem('admin_name', data.admin.name);
+    // master = the email-code (Gmail) login; only it can manage team passwords.
+    // UI-only hint — the real gate is the JWT check on the server.
+    if (data.admin.master) localStorage.setItem('admin_master', '1');
+    else localStorage.removeItem('admin_master');
     navigate('/admin/dashboard');
   }
 
