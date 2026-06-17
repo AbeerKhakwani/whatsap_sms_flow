@@ -5,6 +5,7 @@ import {
   ExternalLink, User, Mail, Phone, AlertTriangle, Zap, StickyNote
 } from 'lucide-react';
 import { calculateSellerPayout } from '../../lib/payout-calculation';
+import BuyerAcceptedBadge from '../components/BuyerAcceptedBadge';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const money = n => `$${(Number(n) || 0).toFixed(2)}`;
@@ -190,6 +191,9 @@ export default function TransactionDetail() {
           <div>
             <h1 className="text-xl font-semibold text-stone-900">{tx.product_title}</h1>
             <p className="text-sm text-stone-500">{tx.order_name} · sold {tx.created_at ? new Date(tx.created_at).toLocaleDateString() : '—'}</p>
+            <div className="mt-1.5">
+              <BuyerAcceptedBadge reviewRespondedAt={tx.review_responded_at} payoutStatus={tx.payout_status} />
+            </div>
           </div>
         </div>
         <span className={`px-3 py-1 rounded-full text-xs font-medium ${badgeClass}`}>{badgeLabel}</span>
