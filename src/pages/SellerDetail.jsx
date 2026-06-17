@@ -868,13 +868,19 @@ export default function SellerDetail() {
                   <div className="p-2">
                     <h3 className="font-medium text-xs truncate" style={{ color: STONE }}>{listing.title}</h3>
                     <div className="text-[10px] mt-0.5" style={{ color: STONE }}>${listing.price?.toFixed(2)}</div>
-                    {txByProduct[String(listing.id)] && (
-                      <BuyerAcceptedBadge
-                        reviewRespondedAt={txByProduct[String(listing.id)].review_responded_at}
-                        payoutStatus={txByProduct[String(listing.id)].payout_status}
-                        className="mt-1"
-                      />
-                    )}
+                    {(() => {
+                      const t = txByProduct[String(listing.id)];
+                      if (!t) return null;
+                      const paid = t.payout_status === 'paid';
+                      return (
+                        <div className="mt-1 flex flex-col items-start gap-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${paid ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {paid ? '✓ Paid out' : 'Not paid out'}
+                          </span>
+                          <BuyerAcceptedBadge reviewRespondedAt={t.review_responded_at} payoutStatus={t.payout_status} />
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               ))}
