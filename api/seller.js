@@ -1168,7 +1168,7 @@ export default async function handler(req, res) {
 
     // UPDATE SELLER (admin)
     if (action === 'update-seller' && req.method === 'POST') {
-      const { sellerId, name, email, phone, commission_rate, paypal_email } = req.body;
+      const { sellerId, name, email, phone, commission_rate, paypal_email, payment_provider, payment_handle } = req.body;
 
       if (!sellerId) {
         return res.status(400).json({ error: 'Seller ID required' });
@@ -1180,6 +1180,9 @@ export default async function handler(req, res) {
       if (phone !== undefined) updates.phone = phone;
       if (commission_rate !== undefined) updates.commission_rate = commission_rate;
       if (paypal_email !== undefined) updates.paypal_email = paypal_email;
+      // Payout method shown on the Pay screen (e.g. "Zelle" + the email/phone to send to).
+      if (payment_provider !== undefined) updates.payment_provider = payment_provider;
+      if (payment_handle !== undefined) updates.payment_handle = payment_handle;
 
       const { data, error } = await supabase
         .from('sellers')

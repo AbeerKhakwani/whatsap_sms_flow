@@ -604,6 +604,54 @@ export default function SellerDetail() {
         </div>
       </div>
 
+      {/* ── PAYOUT METHOD ──────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl overflow-hidden shadow-sm mt-4" style={{ border: `1px solid ${BORDER}` }}>
+        <div className="px-5 py-4">
+          <p className="text-[9px] font-bold tracking-widest uppercase mb-3" style={{ color: STONE }}>Payout method</p>
+          <div className="grid grid-cols-2 gap-4">
+            {/* Method */}
+            <div>
+              <p className="text-[10px] mb-1" style={{ color: STONE }}>Method</p>
+              {editing === 'payment_provider' ? (
+                <div className="flex items-center gap-1">
+                  <input ref={editInputRef} value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown}
+                    className="flex-1 px-2 py-1 text-xs rounded focus:outline-none" style={{ border: `1px solid ${CRIMSON}`, color: INK }} placeholder="Zelle" />
+                  <button onClick={saveEdit} disabled={saving} style={{ color: '#16A34A' }}><Check className="w-3.5 h-3.5" /></button>
+                  <button onClick={cancelEdit} style={{ color: STONE }}><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ) : (
+                <button onClick={() => startEdit('payment_provider')} className="flex items-center gap-1 text-sm font-medium group" style={{ color: INK }}>
+                  {seller.payment_provider
+                    ? <span>{seller.payment_provider === 'zelle_manual' ? 'Zelle' : seller.payment_provider}</span>
+                    : <span className="italic text-xs" style={{ color: '#A8A29E' }}>Zelle (default)</span>}
+                  <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" style={{ color: CRIMSON }} />
+                </button>
+              )}
+            </div>
+            {/* Handle */}
+            <div>
+              <p className="text-[10px] mb-1" style={{ color: STONE }}>Send to</p>
+              {editing === 'payment_handle' ? (
+                <div className="flex items-center gap-1">
+                  <input ref={editInputRef} value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown}
+                    className="flex-1 px-2 py-1 text-xs rounded focus:outline-none" style={{ border: `1px solid ${CRIMSON}`, color: INK }} placeholder="email or phone" />
+                  <button onClick={saveEdit} disabled={saving} style={{ color: '#16A34A' }}><Check className="w-3.5 h-3.5" /></button>
+                  <button onClick={cancelEdit} style={{ color: STONE }}><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ) : (
+                <button onClick={() => startEdit('payment_handle')} className="flex items-center gap-1 text-sm font-medium truncate max-w-full group" style={{ color: INK }}>
+                  {seller.payment_handle
+                    ? <span className="truncate">{seller.payment_handle}</span>
+                    : <span className="italic text-xs" style={{ color: '#A8A29E' }}>Not set</span>}
+                  <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" style={{ color: CRIMSON }} />
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] mt-3" style={{ color: STONE }}>Used by the Pay screen. Once “Send to” is set, this seller drops off the “needs payout info” list.</p>
+        </div>
+      </div>
+
       {/* ── ACTIVE LISTINGS SECTION ────────────────────────────────── */}
       <div>
         {/* Section header */}
