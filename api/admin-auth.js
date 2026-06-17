@@ -9,7 +9,7 @@ import {
   generateAdminToken,
   verifyToken,
   isAdminEmail,
-  verifyAdminLogin,
+  verifyAdminByPassword,
   getAdminName
 } from '../lib/auth-utils.js';
 import { sendVerificationCode } from '../lib/email.js';
@@ -28,19 +28,20 @@ export default async function handler(req, res) {
   const { action } = req.body;
 
   try {
-    // LOGIN - Per-admin email + password (credentials live in ADMIN_USERS).
-    // The token carries the admin's display name so actions can be attributed
-    // ("by Faqiha") without a second lookup. Falls back: if ADMIN_USERS isn't
-    // configured, no one matches and admins use the email-code path below.
+    // LOGIN - Password-only (credentials live in ADMIN_USERS). No email entered:
+    // the password itself identifies the admin (Abeer vs Faqiha). The token carries
+    // the display name so actions can be attributed ("by Faqiha") without a second
+    // lookup. If ADMIN_USERS isn't configured, nothing matches and admins use the
+    // email-code (Gmail) master login below.
     if (action === 'login') {
-      const { email, password } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password required' });
+      const { password } = req.body;
+      if (!password) {
+        return res.status(400).json({ error: 'Password required' });
       }
 
-      const admin = verifyAdminLogin(email, password);
+      const admin = verifyAdminByPassword(password);
       if (!admin) {
-        return res.status(401).json({ error: 'Invalid email or password' });
+        return res.status(401).json({ error: 'Incorrect password' });
       }
 
       const token = generateAdminToken(admin.email, admin.name);

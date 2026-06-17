@@ -65,7 +65,7 @@ export default function AdminLogin() {
 
   async function handleLogin(e) {
     e.preventDefault();
-    if (!email.trim() || !password) return;
+    if (!password) return;
 
     setLoading(true);
     setError('');
@@ -74,11 +74,11 @@ export default function AdminLogin() {
       const res = await fetch(`${API_URL}/api/admin-auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'login', email: email.toLowerCase().trim(), password })
+        body: JSON.stringify({ action: 'login', password })
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Invalid email or password');
+      if (!res.ok) throw new Error(data.error || 'Incorrect password');
 
       storeSession(data);
     } catch (err) {
@@ -160,33 +160,17 @@ export default function AdminLogin() {
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
 
-          {/* Primary: email + password */}
+          {/* Primary: password-only (the password identifies who you are) */}
           {step === 'password' && (
             <>
               <h2 className="text-lg font-medium text-gray-900 mb-2 text-center">
                 Admin Sign In
               </h2>
               <p className="text-sm text-gray-500 mb-6 text-center">
-                Sign in with your email and password
+                Enter your password
               </p>
 
               <form onSubmit={handleLogin}>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                      placeholder="you@example.com"
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
-                      required
-                      autoFocus
-                    />
-                  </div>
-                </div>
-
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
                   <div className="relative">
@@ -198,6 +182,7 @@ export default function AdminLogin() {
                       placeholder="••••••••"
                       className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition"
                       required
+                      autoFocus
                     />
                   </div>
                 </div>
@@ -210,7 +195,7 @@ export default function AdminLogin() {
 
                 <button
                   type="submit"
-                  disabled={!email.trim() || !password || loading}
+                  disabled={!password || loading}
                   className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
                 >
                   {loading ? (
