@@ -14,6 +14,7 @@ import { scrapePage } from '../lib/scraper.js';
 import { withCache, cacheBust } from '../lib/cache.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
 import { payViaProvider, releasePayout } from '../lib/payout-service.js';
+import { runPayoutSync } from '../lib/payout-sync.js';
 
 const CACHE_PENDING = 'listings:pending';
 const CACHE_ALL = 'listings:all';
@@ -1682,6 +1683,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, dryRun, days, ...results });
     }
 
+    // SYNC FROM SHOPIFY — shared logic in lib/payout-sync.js (the daily cron runs the same).
+    if (action === 'sync-fulfillments' && req.method === 'POST') {
+      const dryRun = req.body?.dryRun === true;
+      const results = await runPayoutSync({ dryRun });
+      console.log(`🔄 Sync from Shopify (${dryRun ? 'dry-run' : 'apply'}): checked ${results.checked}, updated ${results.updated}, released ${results.released}, errors ${results.errors.length}`);
+      return res.status(200).json({ success: true, dryRun, ...results });
+    }
+
     if (action === 'scrape-url' && req.method === 'POST') {
       const { url } = req.body;
       if (!url) return res.status(400).json({ error: 'URL is required' });
@@ -2223,7 +2232,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, productIds: merged, sources });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, sync-fulfillments, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
 
   } catch (error) {
     console.error('Admin listings error:', error);
