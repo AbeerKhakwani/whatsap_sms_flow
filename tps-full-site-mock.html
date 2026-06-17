@@ -1,0 +1,1744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Phir Story - Wear it Again. Love it Phir.</title>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700&family=Archivo+Black&family=Figtree:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --black: #0a0a0a;
+      --white: #ffffff;
+      --cream: #faf9f7;
+      --warm-gray: #8a8580;
+      --light-gray: #e8e6e3;
+      --tps-red: #E8352E;
+      --tps-red-dark: #c4372c;
+      --headings: 'Archivo', -apple-system, sans-serif;
+      --display: 'Archivo Black', 'Archivo', sans-serif;
+      --body: 'Figtree', -apple-system, sans-serif;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      font-family: var(--body);
+      color: var(--black);
+      background: var(--white);
+      overflow-x: hidden;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      font-family: var(--headings);
+    }
+
+    .hero-headline {
+      font-family: var(--display);
+      font-weight: 900;
+    }
+
+    /* ===== ANNOUNCEMENT BAR ===== */
+    .announcement-bar {
+      background: var(--black);
+      color: var(--white);
+      text-align: center;
+      padding: 12px 0;
+      font-size: 12px;
+      letter-spacing: 1px;
+      font-family: var(--body);
+      font-weight: 500;
+    }
+
+    /* ===== HEADER / NAV ===== */
+    header {
+      background: var(--white);
+      border-bottom: 1px solid var(--light-gray);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 40px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .nav-left {
+      display: flex;
+      gap: 40px;
+      align-items: center;
+      flex: 1;
+    }
+
+    .nav-link {
+      font-size: 13px;
+      font-family: var(--body);
+      font-weight: 500;
+      color: var(--black);
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .nav-link:hover {
+      color: var(--tps-red);
+    }
+
+    .nav-arrow {
+      font-size: 12px;
+      color: var(--warm-gray);
+      margin-left: 4px;
+    }
+
+    .nav-center {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+    }
+
+    .logo {
+      height: 32px;
+      width: auto;
+      cursor: pointer;
+    }
+
+    .nav-right {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      flex: 1;
+      justify-content: flex-end;
+    }
+
+    .search-container {
+      display: flex;
+      align-items: center;
+      background: var(--cream);
+      border-radius: 30px;
+      padding: 8px 16px;
+      width: 220px;
+    }
+
+    .search-input {
+      border: none;
+      background: transparent;
+      font-family: var(--body);
+      font-size: 13px;
+      width: 100%;
+      outline: none;
+      color: var(--black);
+    }
+
+    .search-input::placeholder {
+      color: var(--warm-gray);
+    }
+
+    .search-icon {
+      color: var(--warm-gray);
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .cta-pill {
+      background: var(--tps-red);
+      color: var(--white);
+      border: none;
+      padding: 8px 18px;
+      border-radius: 25px;
+      font-family: var(--body);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .cta-pill:hover {
+      background: var(--tps-red-dark);
+    }
+
+    .nav-icon {
+      font-size: 18px;
+      cursor: pointer;
+      color: var(--black);
+      transition: color 0.2s;
+    }
+
+    .nav-icon:hover {
+      color: var(--tps-red);
+    }
+
+    /* ===== HERO SECTION ===== */
+    .hero {
+      width: 100%;
+      height: 600px;
+      background-image: url('https://thephirstory.com/cdn/shop/files/2.png');
+      background-size: cover;
+      background-position: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(10, 10, 10, 0.3);
+      z-index: 1;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
+      text-align: center;
+      max-width: 700px;
+      color: var(--white);
+    }
+
+    .hero-headline {
+      font-size: 56px;
+      line-height: 1.2;
+      margin-bottom: 16px;
+      letter-spacing: -0.5px;
+    }
+
+    .hero-subline {
+      font-size: 16px;
+      font-family: var(--body);
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.95);
+      margin-bottom: 32px;
+      letter-spacing: 0.3px;
+    }
+
+    .hero-cta {
+      background: var(--tps-red);
+      color: var(--white);
+      border: none;
+      padding: 14px 40px;
+      font-size: 14px;
+      font-family: var(--body);
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+      letter-spacing: 0.5px;
+    }
+
+    .hero-cta:hover {
+      background: var(--tps-red-dark);
+    }
+
+    /* ===== CHEST FILTER OVERLAY ===== */
+    .chest-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 3;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .chest-overlay .co-label {
+      font-family: var(--display);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .chest-overlay .co-slider-wrap {
+      flex: 1;
+      max-width: 360px;
+      position: relative;
+    }
+
+    .chest-overlay .co-range-track {
+      position: relative;
+      height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+    }
+
+    .chest-overlay .co-range-fill {
+      position: absolute;
+      height: 100%;
+      background: var(--tps-red);
+      border-radius: 2px;
+      top: 0;
+      left: 10%;
+      width: 80%;
+    }
+
+    .chest-overlay .co-range-input {
+      position: absolute;
+      top: -8px;
+      width: 100%;
+      height: 20px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      pointer-events: none;
+      margin: 0;
+    }
+
+    .chest-overlay .co-range-input::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--tps-red);
+      border: 2px solid #fff;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.4);
+      cursor: pointer;
+      pointer-events: all;
+    }
+
+    .chest-overlay .co-range-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.6);
+    }
+
+    .chest-overlay .co-value {
+      font-family: var(--display);
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+      white-space: nowrap;
+      min-width: 90px;
+      text-align: center;
+    }
+
+    .chest-overlay .co-value span {
+      color: var(--tps-red);
+    }
+
+    .chest-overlay .co-btn {
+      background: var(--tps-red);
+      color: #fff;
+      border: none;
+      padding: 10px 28px;
+      font-family: var(--display);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+
+    .chest-overlay .co-btn:hover {
+      background: #fff;
+      color: var(--tps-red);
+    }
+
+    @media (max-width: 700px) {
+      .chest-overlay {
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 16px 20px;
+      }
+      .chest-overlay .co-slider-wrap {
+        max-width: 100%;
+        order: 3;
+        width: 100%;
+      }
+    }
+
+    /* ===== CHEST SIZE SECTION ===== */
+    .chest-size-section {
+      padding: 80px 40px;
+      background: var(--white);
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .section-heading {
+      font-family: var(--headings);
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+
+    .section-subtext {
+      font-family: var(--body);
+      font-size: 15px;
+      color: var(--warm-gray);
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .chest-size-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 16px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .chest-size-pill {
+      padding: 16px 20px;
+      border: 2px solid var(--light-gray);
+      background: var(--white);
+      text-align: center;
+      cursor: pointer;
+      font-family: var(--body);
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s;
+      border-radius: 4px;
+    }
+
+    .chest-size-pill:hover {
+      border-color: var(--tps-red);
+      background: rgba(232, 53, 46, 0.05);
+      transform: translateY(-2px);
+    }
+
+    /* ===== FEATURED DESIGNERS SECTION ===== */
+    .designers-section {
+      padding: 80px 40px;
+      background: var(--cream);
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .designers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 40px 30px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .designer-name {
+      font-family: var(--headings);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--black);
+      cursor: pointer;
+      transition: color 0.2s;
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    .designer-name:hover {
+      color: var(--tps-red);
+    }
+
+    /* ===== PRODUCT GRID SECTION ===== */
+    .products-section {
+      padding: 80px 40px;
+      background: var(--white);
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 1200px) {
+      .product-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .product-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .product-card {
+      position: relative;
+      cursor: pointer;
+      overflow: hidden;
+      background: var(--cream);
+      border-radius: 2px;
+    }
+
+    .product-image {
+      width: 100%;
+      aspect-ratio: 3/4;
+      object-fit: cover;
+      transition: transform 0.3s;
+    }
+
+    .product-card:hover .product-image {
+      transform: scale(1.02);
+    }
+
+    .product-info {
+      padding: 16px;
+      background: var(--white);
+    }
+
+    .product-name {
+      font-family: var(--body);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--black);
+      margin-bottom: 4px;
+    }
+
+    .product-designer {
+      font-family: var(--body);
+      font-size: 12px;
+      color: var(--warm-gray);
+      margin-bottom: 8px;
+    }
+
+    .product-price {
+      font-family: var(--body);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--black);
+    }
+
+    .product-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(10, 10, 10, 0.5);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 24px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .product-card:hover .product-overlay {
+      opacity: 1;
+    }
+
+    .add-to-bag-btn {
+      background: var(--tps-red);
+      color: var(--white);
+      border: none;
+      padding: 12px 32px;
+      font-family: var(--body);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .add-to-bag-btn:hover {
+      background: var(--tps-red-dark);
+    }
+
+    /* ===== FOOTER ===== */
+    footer {
+      background: var(--black);
+      color: var(--white);
+      padding: 60px 40px 30px;
+    }
+
+    .footer-content {
+      max-width: 1600px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 60px;
+      margin-bottom: 40px;
+    }
+
+    .footer-column h3 {
+      font-family: var(--headings);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .footer-link {
+      display: block;
+      font-family: var(--body);
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.8);
+      text-decoration: none;
+      margin-bottom: 12px;
+      transition: color 0.2s;
+    }
+
+    .footer-link:hover {
+      color: var(--tps-red);
+    }
+
+    .social-links {
+      display: flex;
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    .social-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.2s;
+      font-size: 16px;
+    }
+
+    .social-icon:hover {
+      background: var(--tps-red);
+    }
+
+    .footer-bottom {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 30px;
+      text-align: center;
+      font-family: var(--body);
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    /* ===== COLLECTION PAGE ===== */
+    .collection-container {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 40px;
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 40px;
+    }
+
+    .collection-filters {
+      background: var(--cream);
+      padding: 24px;
+      border-radius: 2px;
+      height: fit-content;
+      position: sticky;
+      top: 120px;
+    }
+
+    .filter-title {
+      font-family: var(--headings);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      margin-top: 20px;
+    }
+
+    .filter-title:first-child {
+      margin-top: 0;
+    }
+
+    .filter-checkbox {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+      font-family: var(--body);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .filter-checkbox input {
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    /* ===== PRODUCT DETAIL PAGE ===== */
+    .product-detail {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+    }
+
+    .product-gallery {
+      position: sticky;
+      top: 120px;
+      height: fit-content;
+    }
+
+    .gallery-main {
+      width: 100%;
+      aspect-ratio: 3/4;
+      background: var(--cream);
+      margin-bottom: 16px;
+      border-radius: 2px;
+      object-fit: cover;
+    }
+
+    .gallery-thumbs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .thumb {
+      aspect-ratio: 1;
+      background: var(--cream);
+      cursor: pointer;
+      border-radius: 2px;
+      border: 2px solid transparent;
+      transition: border-color 0.2s;
+      object-fit: cover;
+    }
+
+    .thumb:hover,
+    .thumb.active {
+      border-color: var(--black);
+    }
+
+    .product-details {
+      padding: 24px 0;
+    }
+
+    .product-details h1 {
+      font-family: var(--headings);
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .product-details .designer {
+      font-family: var(--body);
+      font-size: 14px;
+      color: var(--warm-gray);
+      margin-bottom: 20px;
+    }
+
+    .product-price-detail {
+      font-family: var(--body);
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 24px;
+    }
+
+    .size-selector {
+      margin-bottom: 24px;
+    }
+
+    .size-label {
+      font-family: var(--body);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .size-options {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .size-option {
+      padding: 12px;
+      border: 1px solid var(--light-gray);
+      background: var(--white);
+      text-align: center;
+      cursor: pointer;
+      font-family: var(--body);
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .size-option:hover {
+      border-color: var(--black);
+    }
+
+    .size-option.selected {
+      background: var(--black);
+      color: var(--white);
+      border-color: var(--black);
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .btn-add-to-bag {
+      flex: 1;
+      background: var(--tps-red);
+      color: var(--white);
+      border: none;
+      padding: 16px;
+      font-family: var(--body);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-add-to-bag:hover {
+      background: var(--tps-red-dark);
+    }
+
+    .btn-whatsapp {
+      flex: 1;
+      background: var(--white);
+      color: var(--black);
+      border: 1px solid var(--light-gray);
+      padding: 16px;
+      font-family: var(--body);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-whatsapp:hover {
+      border-color: var(--black);
+      background: var(--cream);
+    }
+
+    .delivery-estimate {
+      padding: 16px;
+      background: var(--cream);
+      border-radius: 2px;
+      font-family: var(--body);
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+
+    .delivery-estimate strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .product-description {
+      font-family: var(--body);
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--warm-gray);
+      margin-bottom: 32px;
+    }
+
+    /* ===== PHIR GUARANTEE PAGE ===== */
+    .guarantee-page {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 60px 40px;
+    }
+
+    .guarantee-page h1 {
+      font-family: var(--headings);
+      font-size: 36px;
+      font-weight: 700;
+      margin-bottom: 32px;
+    }
+
+    .guarantee-content {
+      font-family: var(--body);
+      font-size: 15px;
+      line-height: 1.8;
+      color: var(--warm-gray);
+    }
+
+    .guarantee-content h2 {
+      font-family: var(--headings);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--black);
+      margin-top: 32px;
+      margin-bottom: 16px;
+    }
+
+    .guarantee-content ul {
+      margin: 16px 0 16px 24px;
+      list-style: disc;
+    }
+
+    .guarantee-content li {
+      margin-bottom: 8px;
+    }
+
+    /* ===== PAGE VISIBILITY ===== */
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    /* ===== UTILITIES ===== */
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 0 40px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--black);
+      color: var(--white);
+      padding: 16px 24px;
+      border-radius: 4px;
+      font-family: var(--body);
+      font-size: 13px;
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+
+    .whatsapp-button {
+      position: fixed;
+      bottom: 24px;
+      left: 24px;
+      width: 56px;
+      height: 56px;
+      background: #25D366;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--white);
+      font-size: 24px;
+      cursor: pointer;
+      text-decoration: none;
+      z-index: 999;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      transition: transform 0.2s;
+    }
+
+    .whatsapp-button:hover {
+      transform: scale(1.1);
+    }
+
+    /* ===== CART DRAWER ===== */
+    .cart-drawer {
+      position: fixed;
+      right: -400px;
+      top: 0;
+      width: 400px;
+      height: 100vh;
+      background: var(--white);
+      box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+      z-index: 500;
+      transition: right 0.3s ease;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .cart-drawer.open {
+      right: 0;
+    }
+
+    .cart-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--light-gray);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .cart-header h2 {
+      font-family: var(--headings);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .cart-close {
+      font-size: 24px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      color: var(--black);
+    }
+
+    .cart-items {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .cart-item {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--light-gray);
+    }
+
+    .cart-item-image {
+      width: 80px;
+      height: 100px;
+      background: var(--cream);
+      object-fit: cover;
+    }
+
+    .cart-item-details {
+      font-family: var(--body);
+      font-size: 13px;
+    }
+
+    .cart-item-name {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .cart-item-price {
+      color: var(--warm-gray);
+      margin-bottom: 8px;
+    }
+
+    .cart-item-remove {
+      color: var(--tps-red);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .cart-footer {
+      padding: 24px;
+      border-top: 1px solid var(--light-gray);
+      background: var(--cream);
+    }
+
+    .cart-total {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--body);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .checkout-btn {
+      width: 100%;
+      background: var(--tps-red);
+      color: var(--white);
+      border: none;
+      padding: 14px;
+      font-family: var(--body);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .checkout-btn:hover {
+      background: var(--tps-red-dark);
+    }
+
+  </style>
+</head>
+
+<body>
+
+  <!-- ===== ANNOUNCEMENT BAR ===== -->
+  <div class="announcement-bar">
+    WEAR IT AGAIN. LOVE IT PHIR. | FREE SHIPPING ON ORDERS OVER $200
+  </div>
+
+  <!-- ===== HEADER ===== -->
+  <header>
+    <nav>
+      <div class="nav-left">
+        <a class="nav-link" onclick="showPage('home')">Women</a>
+        <a class="nav-link" onclick="showPage('collection')">Collections</a>
+        <a class="nav-link" onclick="showPage('guarantee')">The Phir Guarantee <span class="nav-arrow">→</span></a>
+      </div>
+      <div class="nav-center">
+        <img src="https://thephirstory.com/cdn/shop/files/headerlogotps_4.svg" alt="The Phir Story" class="logo" onclick="showPage('home')">
+      </div>
+      <div class="nav-right">
+        <div class="search-container">
+          <input type="text" class="search-input" placeholder="Search designers, styles...">
+          <span class="search-icon">🔍</span>
+        </div>
+        <button class="cta-pill" onclick="alert('Sell With Us - Coming Soon')">Sell With Us</button>
+        <a class="nav-icon" onclick="alert('Account')">👤</a>
+        <a class="nav-icon" onclick="openCart()">🛍️</a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- ===== HOME PAGE ===== -->
+  <div id="home-page" class="page active">
+
+    <!-- HERO SECTION -->
+    <section class="hero">
+      <div class="hero-content">
+        <h1 class="hero-headline">Pre-Loved Pakistani Designer Fashion</h1>
+        <p class="hero-subline">Authenticated luxury. Worn once, loved phir.</p>
+        <button class="hero-cta" onclick="showPage('collection')">Shop Now</button>
+      </div>
+
+      <!-- CHEST SIZE OVERLAY -->
+      <div class="chest-overlay">
+        <span class="co-label">Find Your Fit</span>
+        <div class="co-value"><span id="co-min">32</span>" — <span id="co-max">42</span>"</div>
+        <div class="co-slider-wrap">
+          <div class="co-range-track">
+            <div class="co-range-fill" id="co-fill"></div>
+          </div>
+          <input type="range" class="co-range-input" id="co-range-min" min="28" max="50" value="32" step="1">
+          <input type="range" class="co-range-input" id="co-range-max" min="28" max="50" value="42" step="1">
+          <div class="co-range-labels">
+            <span>28"</span>
+            <span>50"</span>
+          </div>
+        </div>
+        <button class="co-btn" onclick="showPage('collection')">Find My Fit</button>
+      </div>
+    </section>
+
+    <!-- CHEST SIZE SECTION -->
+    <section class="chest-size-section">
+      <h2 class="section-heading">Find Your Perfect Fit</h2>
+      <p class="section-subtext">Every piece measured. Shop by your chest size.</p>
+      <div class="chest-size-grid">
+        <div class="chest-size-pill" onclick="filterByChestSize('30')">30"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('32')">32"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('34')">34"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('36')">36"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('38')">38"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('40')">40"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('42')">42"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('44')">44"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('46')">46"</div>
+        <div class="chest-size-pill" onclick="filterByChestSize('48')">48"</div>
+      </div>
+    </section>
+
+    <!-- FEATURED DESIGNERS SECTION -->
+    <section class="designers-section">
+      <h2 class="section-heading">Shop by Designer</h2>
+      <div class="designers-grid">
+        <div class="designer-name" onclick="filterByDesigner('Suffuse')">Suffuse</div>
+        <div class="designer-name" onclick="filterByDesigner('Elan')">Élan</div>
+        <div class="designer-name" onclick="filterByDesigner('Sana Safinaz')">Sana Safinaz</div>
+        <div class="designer-name" onclick="filterByDesigner('Maria B')">Maria B</div>
+        <div class="designer-name" onclick="filterByDesigner('Faraz Manan')">Faraz Manan</div>
+        <div class="designer-name" onclick="filterByDesigner('Asim Jofa')">Asim Jofa</div>
+        <div class="designer-name" onclick="filterByDesigner('Zara Shahjahan')">Zara Shahjahan</div>
+        <div class="designer-name" onclick="filterByDesigner('Sapphire')">Sapphire</div>
+        <div class="designer-name" onclick="filterByDesigner('Agha Noor')">Agha Noor</div>
+        <div class="designer-name" onclick="filterByDesigner('Mohsin Naveed Ranjha')">Mohsin Naveed Ranjha</div>
+      </div>
+    </section>
+
+    <!-- PRODUCT GRID SECTION -->
+    <section class="products-section">
+      <h2 class="section-heading">Featured Pieces</h2>
+      <div class="product-grid" id="home-product-grid">
+        <div class="product-card" onclick="showProductDetail(1)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_5765.heic" alt="Ava - Suffuse" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(1, 'Ava', 'Suffuse', 185)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Ava</div>
+            <div class="product-designer">Suffuse</div>
+            <div class="product-price">$185</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(2)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_6041.heic" alt="Kanwal Malik" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(2, 'Kanwal', 'Kanwal Malik', 220)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Kanwal</div>
+            <div class="product-designer">Kanwal Malik</div>
+            <div class="product-price">$220</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(3)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_3613.jpg" alt="Pink Anarkali" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(3, 'Pink Anarkali', 'Sana Safinaz', 340)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Pink Anarkali</div>
+            <div class="product-designer">Sana Safinaz</div>
+            <div class="product-price">$340</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(4)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_3503_e8e0f44f-eb46-45ca-b7ea-ee9b08a3e57a.jpg" alt="Emerald Lehenga" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(4, 'Emerald Lehenga', 'Maria B', 275)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Emerald Lehenga</div>
+            <div class="product-designer">Maria B</div>
+            <div class="product-price">$275</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(5)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_5867.heic" alt="Libaas-e-Khaas" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(5, 'Libaas-e-Khaas', 'Faraz Manan', 195)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Libaas-e-Khaas</div>
+            <div class="product-designer">Faraz Manan</div>
+            <div class="product-price">$195</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(6)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_6060.heic" alt="Red Sharara" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(6, 'Red Sharara', 'Asim Jofa', 160)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Red Sharara</div>
+            <div class="product-designer">Asim Jofa</div>
+            <div class="product-price">$160</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(7)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_6101.heic" alt="Firozi" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(7, 'Firozi', 'Zara Shahjahan', 290)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Firozi</div>
+            <div class="product-designer">Zara Shahjahan</div>
+            <div class="product-price">$290</div>
+          </div>
+        </div>
+
+        <div class="product-card" onclick="showProductDetail(8)">
+          <img src="https://thephirstory.com/cdn/shop/files/IMG_4810.heic" alt="Royal Blue Ensemble" class="product-image">
+          <div class="product-overlay">
+            <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(8, 'Royal Blue Ensemble', 'Agha Noor', 245)">Add to Bag</button>
+          </div>
+          <div class="product-info">
+            <div class="product-name">Royal Blue Ensemble</div>
+            <div class="product-designer">Agha Noor</div>
+            <div class="product-price">$245</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ===== COLLECTION PAGE ===== -->
+  <div id="collection-page" class="page">
+    <div class="collection-container">
+      <div class="collection-filters">
+        <div class="filter-title">Designer</div>
+        <label class="filter-checkbox"><input type="checkbox"> Suffuse</label>
+        <label class="filter-checkbox"><input type="checkbox"> Élan</label>
+        <label class="filter-checkbox"><input type="checkbox"> Sana Safinaz</label>
+        <label class="filter-checkbox"><input type="checkbox"> Maria B</label>
+        <label class="filter-checkbox"><input type="checkbox"> Faraz Manan</label>
+
+        <div class="filter-title">Chest Size</div>
+        <label class="filter-checkbox"><input type="checkbox"> 30"</label>
+        <label class="filter-checkbox"><input type="checkbox"> 34"</label>
+        <label class="filter-checkbox"><input type="checkbox"> 36"</label>
+        <label class="filter-checkbox"><input type="checkbox"> 38"</label>
+        <label class="filter-checkbox"><input type="checkbox"> 40"</label>
+
+        <div class="filter-title">Price Range</div>
+        <label class="filter-checkbox"><input type="checkbox"> Under $150</label>
+        <label class="filter-checkbox"><input type="checkbox"> $150 - $250</label>
+        <label class="filter-checkbox"><input type="checkbox"> $250 - $350</label>
+        <label class="filter-checkbox"><input type="checkbox"> $350+</label>
+      </div>
+
+      <div>
+        <h1 class="section-heading" style="text-align: left; margin-bottom: 40px;">All Collections</h1>
+        <div class="product-grid" id="collection-product-grid">
+          <div class="product-card" onclick="showProductDetail(1)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_5765.heic" alt="Ava - Suffuse" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(1, 'Ava', 'Suffuse', 185)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Ava</div>
+              <div class="product-designer">Suffuse</div>
+              <div class="product-price">$185</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(2)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_6041.heic" alt="Kanwal Malik" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(2, 'Kanwal', 'Kanwal Malik', 220)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Kanwal</div>
+              <div class="product-designer">Kanwal Malik</div>
+              <div class="product-price">$220</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(3)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_3613.jpg" alt="Pink Anarkali" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(3, 'Pink Anarkali', 'Sana Safinaz', 340)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Pink Anarkali</div>
+              <div class="product-designer">Sana Safinaz</div>
+              <div class="product-price">$340</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(4)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_3503_e8e0f44f-eb46-45ca-b7ea-ee9b08a3e57a.jpg" alt="Emerald Lehenga" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(4, 'Emerald Lehenga', 'Maria B', 275)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Emerald Lehenga</div>
+              <div class="product-designer">Maria B</div>
+              <div class="product-price">$275</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(5)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_5867.heic" alt="Libaas-e-Khaas" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(5, 'Libaas-e-Khaas', 'Faraz Manan', 195)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Libaas-e-Khaas</div>
+              <div class="product-designer">Faraz Manan</div>
+              <div class="product-price">$195</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(6)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_6060.heic" alt="Red Sharara" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(6, 'Red Sharara', 'Asim Jofa', 160)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Red Sharara</div>
+              <div class="product-designer">Asim Jofa</div>
+              <div class="product-price">$160</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(7)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_6101.heic" alt="Firozi" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(7, 'Firozi', 'Zara Shahjahan', 290)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Firozi</div>
+              <div class="product-designer">Zara Shahjahan</div>
+              <div class="product-price">$290</div>
+            </div>
+          </div>
+
+          <div class="product-card" onclick="showProductDetail(8)">
+            <img src="https://thephirstory.com/cdn/shop/files/IMG_4810.heic" alt="Royal Blue Ensemble" class="product-image">
+            <div class="product-overlay">
+              <button class="add-to-bag-btn" onclick="event.stopPropagation(); addToCart(8, 'Royal Blue Ensemble', 'Agha Noor', 245)">Add to Bag</button>
+            </div>
+            <div class="product-info">
+              <div class="product-name">Royal Blue Ensemble</div>
+              <div class="product-designer">Agha Noor</div>
+              <div class="product-price">$245</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PRODUCT DETAIL PAGE ===== -->
+  <div id="product-detail-page" class="page">
+    <div class="product-detail">
+      <div class="product-gallery">
+        <img id="gallery-main" src="" alt="Product" class="gallery-main">
+        <div class="gallery-thumbs">
+          <img class="thumb active" src="" onclick="switchGalleryImage(this.src)" style="grid-column: 1;">
+          <img class="thumb" src="" onclick="switchGalleryImage(this.src)" style="grid-column: 2;">
+          <img class="thumb" src="" onclick="switchGalleryImage(this.src)" style="grid-column: 3;">
+          <img class="thumb" src="" onclick="switchGalleryImage(this.src)" style="grid-column: 4;">
+        </div>
+      </div>
+
+      <div class="product-details">
+        <h1 id="product-detail-name">Product Name</h1>
+        <p class="designer">by <span id="product-detail-designer">Designer</span></p>
+        <p class="product-price-detail" id="product-detail-price">$0</p>
+
+        <div class="size-selector">
+          <label class="size-label">Select Size (Chest)</label>
+          <div class="size-options">
+            <div class="size-option" onclick="selectSize(this, '30\\'')">30"</div>
+            <div class="size-option" onclick="selectSize(this, '34\\'')">34"</div>
+            <div class="size-option" onclick="selectSize(this, '36\\'')">36"</div>
+            <div class="size-option" onclick="selectSize(this, '38\\'')">38"</div>
+            <div class="size-option" onclick="selectSize(this, '40\\'')">40"</div>
+            <div class="size-option" onclick="selectSize(this, '42\\'')">42"</div>
+            <div class="size-option" onclick="selectSize(this, '44\\'')">44"</div>
+            <div class="size-option" onclick="selectSize(this, '46\\'')">46"</div>
+          </div>
+        </div>
+
+        <div class="action-buttons">
+          <button class="btn-add-to-bag" onclick="addProductDetailToCart()">Add to Bag</button>
+          <button class="btn-whatsapp" onclick="openWhatsApp()">Inquire on WhatsApp</button>
+        </div>
+
+        <div class="delivery-estimate">
+          <strong>Delivery Estimate</strong>
+          5-7 business days to US / Canada
+        </div>
+
+        <p class="product-description" id="product-detail-description">
+          This is an authenticated pre-loved piece from a carefully curated collection of Pakistani designer fashion. Each item is inspected for quality and authenticity.
+        </p>
+
+        <div class="delivery-estimate">
+          <strong>Only 1 left in stock!</strong>
+        </div>
+
+        <div class="delivery-estimate" style="background: rgba(232, 53, 46, 0.08); border-color: var(--tps-red);">
+          <strong>12 people viewing this</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PHIR GUARANTEE PAGE ===== -->
+  <div id="guarantee-page" class="page">
+    <div class="guarantee-page">
+      <h1>The Phir Guarantee</h1>
+      <div class="guarantee-content">
+        <p>Every piece on The Phir Story is authenticated, inspected, and guaranteed genuine. We're committed to excellence at every step.</p>
+
+        <h2>Our Authentication Process</h2>
+        <p>All items undergo rigorous verification by our expert team:</p>
+        <ul>
+          <li>Visual inspection for authenticity markers</li>
+          <li>Material and construction quality assessment</li>
+          <li>Comparison with original designer specifications</li>
+          <li>Detailed documentation of condition</li>
+        </ul>
+
+        <h2>Quality Standards</h2>
+        <p>We only stock pre-loved pieces that meet our strict standards:</p>
+        <ul>
+          <li>Gently worn, carefully maintained pieces</li>
+          <li>Minor signs of wear acceptable and noted</li>
+          <li>No structural damage or defects</li>
+          <li>Original quality and wearability preserved</li>
+        </ul>
+
+        <h2>Your Protection</h2>
+        <p>We stand behind every piece sold on The Phir Story:</p>
+        <ul>
+          <li>30-day return policy, no questions asked</li>
+          <li>Full refund if item doesn't match description</li>
+          <li>Secure authentication documentation included</li>
+          <li>Direct support via WhatsApp for any concerns</li>
+        </ul>
+
+        <h2>Sustainability Matters</h2>
+        <p>By shopping pre-loved, you're choosing sustainability. Every piece has a story, and now it's yours.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== FOOTER ===== -->
+  <footer>
+    <div class="footer-content">
+      <div class="footer-column">
+        <h3>Shop</h3>
+        <a class="footer-link" onclick="showPage('collection')">All Collections</a>
+        <a class="footer-link" onclick="showPage('home')">New Arrivals</a>
+        <a class="footer-link" onclick="alert('Sales')">Sale</a>
+      </div>
+      <div class="footer-column">
+        <h3>About</h3>
+        <a class="footer-link" onclick="showPage('guarantee')">The Phir Guarantee</a>
+        <a class="footer-link" onclick="alert('Our Story')">Our Story</a>
+        <a class="footer-link" onclick="alert('Sustainability')">Sustainability</a>
+      </div>
+      <div class="footer-column">
+        <h3>Connect</h3>
+        <a class="footer-link" href="https://wa.me/1234567890" target="_blank">WhatsApp</a>
+        <a class="footer-link" href="https://instagram.com/thephirstory" target="_blank">Instagram</a>
+        <a class="footer-link" href="https://facebook.com/thephirstory" target="_blank">Facebook</a>
+        <div class="social-links">
+          <a class="social-icon" href="https://instagram.com/thephirstory" target="_blank">📷</a>
+          <a class="social-icon" href="https://facebook.com/thephirstory" target="_blank">f</a>
+          <a class="social-icon" href="https://wa.me/1234567890" target="_blank">💬</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      © 2024 The Phir Story. All Rights Reserved.
+    </div>
+  </footer>
+
+  <!-- ===== CART DRAWER ===== -->
+  <div class="cart-drawer" id="cart-drawer">
+    <div class="cart-header">
+      <h2>Your Bag</h2>
+      <button class="cart-close" onclick="closeCart()">✕</button>
+    </div>
+    <div class="cart-items" id="cart-items">
+      <p style="color: var(--warm-gray); padding: 24px; text-align: center;">Your bag is empty</p>
+    </div>
+    <div class="cart-footer">
+      <div class="cart-total">
+        <span>Total</span>
+        <span id="cart-total">$0</span>
+      </div>
+      <button class="checkout-btn" onclick="alert('Checkout - Coming Soon')">Proceed to Checkout</button>
+    </div>
+  </div>
+
+  <!-- ===== WHATSAPP FLOATING BUTTON ===== -->
+  <a href="https://wa.me/1234567890" target="_blank" class="whatsapp-button" title="Chat with us on WhatsApp">💬</a>
+
+  <script>
+    let cart = [];
+    let currentProduct = {};
+
+    // Chest overlay range slider
+    (function() {
+      var minS = document.getElementById('co-range-min');
+      var maxS = document.getElementById('co-range-max');
+      var minD = document.getElementById('co-min');
+      var maxD = document.getElementById('co-max');
+      var fill = document.getElementById('co-fill');
+      var MIN = 28, MAX = 50;
+
+      function upd() {
+        var lo = parseInt(minS.value), hi = parseInt(maxS.value);
+        var range = MAX - MIN;
+        fill.style.left = ((lo - MIN) / range * 100) + '%';
+        fill.style.width = ((hi - lo) / range * 100) + '%';
+        minD.textContent = lo;
+        maxD.textContent = hi;
+      }
+      minS.addEventListener('input', function() {
+        if (parseInt(minS.value) >= parseInt(maxS.value)) minS.value = parseInt(maxS.value) - 1;
+        upd();
+      });
+      maxS.addEventListener('input', function() {
+        if (parseInt(maxS.value) <= parseInt(minS.value)) maxS.value = parseInt(minS.value) + 1;
+        upd();
+      });
+      upd();
+    })();
+
+    function showPage(pageName) {
+      document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+      document.getElementById(pageName + '-page').classList.add('active');
+      window.scrollTo(0, 0);
+    }
+
+    function openCart() {
+      document.getElementById('cart-drawer').classList.add('open');
+    }
+
+    function closeCart() {
+      document.getElementById('cart-drawer').classList.remove('open');
+    }
+
+    function addToCart(id, name, designer, price) {
+      const item = { id, name, designer, price, image: getProductImage(id) };
+      cart.push(item);
+      showToast(`${name} added to bag!`);
+      updateCartUI();
+    }
+
+    function addProductDetailToCart() {
+      if (Object.keys(currentProduct).length === 0) {
+        showToast('Please select a product');
+        return;
+      }
+      const item = { ...currentProduct };
+      cart.push(item);
+      showToast(`${item.name} added to bag!`);
+      updateCartUI();
+      closeCart();
+    }
+
+    function removeFromCart(index) {
+      cart.splice(index, 1);
+      updateCartUI();
+    }
+
+    function updateCartUI() {
+      const cartItemsContainer = document.getElementById('cart-items');
+      if (cart.length === 0) {
+        cartItemsContainer.innerHTML = '<p style="color: var(--warm-gray); padding: 24px; text-align: center;">Your bag is empty</p>';
+        document.getElementById('cart-total').textContent = '$0';
+        return;
+      }
+
+      let total = 0;
+      let html = '';
+      cart.forEach((item, index) => {
+        total += item.price;
+        html += `
+          <div class="cart-item">
+            <img src="${item.image}" alt="${item.name}" class="cart-item-image">
+            <div class="cart-item-details">
+              <div class="cart-item-name">${item.name}</div>
+              <div class="cart-item-price">${item.designer}</div>
+              <div class="cart-item-price">$${item.price}</div>
+              <div class="cart-item-remove" onclick="removeFromCart(${index})">Remove</div>
+            </div>
+          </div>
+        `;
+      });
+
+      cartItemsContainer.innerHTML = html;
+      document.getElementById('cart-total').textContent = '$' + total;
+    }
+
+    function showToast(message) {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    function getProductImage(id) {
+      const images = {
+        1: 'https://thephirstory.com/cdn/shop/files/IMG_5765.heic',
+        2: 'https://thephirstory.com/cdn/shop/files/IMG_6041.heic',
+        3: 'https://thephirstory.com/cdn/shop/files/IMG_3613.jpg',
+        4: 'https://thephirstory.com/cdn/shop/files/IMG_3503_e8e0f44f-eb46-45ca-b7ea-ee9b08a3e57a.jpg',
+        5: 'https://thephirstory.com/cdn/shop/files/IMG_5867.heic',
+        6: 'https://thephirstory.com/cdn/shop/files/IMG_6060.heic',
+        7: 'https://thephirstory.com/cdn/shop/files/IMG_6101.heic',
+        8: 'https://thephirstory.com/cdn/shop/files/IMG_4810.heic',
+      };
+      return images[id] || '';
+    }
+
+    function showProductDetail(id) {
+      const products = {
+        1: { name: 'Ava', designer: 'Suffuse', price: 185, description: 'Beautifully tailored Ava by Suffuse. A timeless piece perfect for any occasion.' },
+        2: { name: 'Kanwal', designer: 'Kanwal Malik', price: 220, description: 'Elegant Kanwal ensemble from the renowned Kanwal Malik collection.' },
+        3: { name: 'Pink Anarkali', designer: 'Sana Safinaz', price: 340, description: 'Stunning pink anarkali by Sana Safinaz with intricate embroidery.' },
+        4: { name: 'Emerald Lehenga', designer: 'Maria B', price: 275, description: 'Exquisite emerald lehenga from Maria B\'s signature collection.' },
+        5: { name: 'Libaas-e-Khaas', designer: 'Faraz Manan', price: 195, description: 'Special piece by Faraz Manan, handcrafted with attention to detail.' },
+        6: { name: 'Red Sharara', designer: 'Asim Jofa', price: 160, description: 'Bold red sharara by Asim Jofa, perfect for celebrations.' },
+        7: { name: 'Firozi', designer: 'Zara Shahjahan', price: 290, description: 'Turquoise firozi piece by Zara Shahjahan, a statement ensemble.' },
+        8: { name: 'Royal Blue Ensemble', designer: 'Agha Noor', price: 245, description: 'Royal blue ensemble by Agha Noor with premium fabric.' },
+      };
+
+      const product = products[id] || {};
+      currentProduct = { id, ...product, image: getProductImage(id) };
+
+      document.getElementById('product-detail-name').textContent = product.name || '';
+      document.getElementById('product-detail-designer').textContent = product.designer || '';
+      document.getElementById('product-detail-price').textContent = '$' + (product.price || 0);
+      document.getElementById('product-detail-description').textContent = product.description || '';
+
+      const mainImage = getProductImage(id);
+      document.getElementById('gallery-main').src = mainImage;
+      document.querySelectorAll('.gallery-thumbs .thumb').forEach(thumb => thumb.src = mainImage);
+
+      showPage('product-detail');
+    }
+
+    function switchGalleryImage(src) {
+      document.getElementById('gallery-main').src = src;
+      document.querySelectorAll('.gallery-thumbs .thumb').forEach(thumb => thumb.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    function selectSize(element, size) {
+      document.querySelectorAll('.size-option').forEach(opt => opt.classList.remove('selected'));
+      element.classList.add('selected');
+      currentProduct.size = size;
+    }
+
+    function openWhatsApp() {
+      const product = currentProduct;
+      const size = currentProduct.size || 'not specified';
+      const message = `Hi! I'm interested in the ${product.name} by ${product.designer} (Size: ${size}). Can you tell me more details?`;
+      const whatsappUrl = `https://wa.me/1234567890?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
+    }
+
+    function filterByChestSize(size) {
+      showToast(`Filtering by chest size ${size}"`);
+      showPage('collection');
+    }
+
+    function filterByDesigner(designer) {
+      showToast(`Filtering by ${designer}`);
+      showPage('collection');
+    }
+  </script>
+
+</body>
+</html>
