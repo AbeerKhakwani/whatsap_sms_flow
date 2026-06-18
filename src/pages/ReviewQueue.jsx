@@ -70,9 +70,12 @@ export default function ReviewQueue() {
         });
         const data = await res.json();
         if (data.success) {
-          const revised = (data.listings || []).filter(l => (l.tags || '').includes('seller-revised'));
-          const rest = (data.listings || []).filter(l => !(l.tags || '').includes('seller-revised'));
-          setQueue([...revised, ...rest]); // re-review first
+          // needs-revision items are awaiting the seller — not actionable here.
+          // They live on the dashboard's "Waiting on sellers" block instead.
+          const actionable = (data.listings || []).filter(l => !(l.tags || []).includes('needs-revision'));
+          const revised = actionable.filter(l => (l.tags || []).includes('seller-revised'));
+          const fresh = actionable.filter(l => !(l.tags || []).includes('seller-revised'));
+          setQueue([...revised, ...fresh]); // re-review first, then new submissions
         }
       } catch { /* surfaced via empty state */ }
       setLoading(false);

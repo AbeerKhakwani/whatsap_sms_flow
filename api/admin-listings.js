@@ -109,6 +109,11 @@ export default async function handler(req, res) {
         const sellerId = getSellerId(metafields);
         const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, variant.price);
 
+        // Revision context (metafields already fetched above — free to surface). Lets the
+        // dashboard split "waiting on seller" items into their own block with a deadline.
+        const revisionNote = getMetafieldValue(metafields, 'custom', 'revision_note') || null;
+        const revisionRequestedAt = getMetafieldValue(metafields, 'custom', 'revision_requested_at') || null;
+
         // Find seller in DB (try ID, email, then product ID fallback)
         const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone');
 
@@ -128,6 +133,8 @@ export default async function handler(req, res) {
           created_at: product.created_at,
           shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
           tags,
+          revisionNote,
+          revisionRequestedAt,
           seller: seller ? {
             id: seller.id,
             name: seller.name,

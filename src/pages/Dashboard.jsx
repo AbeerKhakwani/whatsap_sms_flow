@@ -1,12 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Check, X, Clock, DollarSign, Shirt, Sparkles, Image, Banknote, Plus, Loader2, Search, Mic, MicOff, Camera, ArrowRight } from 'lucide-react';
-import { getThumbnail } from '../utils/image';
+import { Link } from 'react-router-dom';
+import { Check, X, Clock, Sparkles, Banknote, Plus, Loader2, Search, Mic, MicOff, Camera, ChevronRight, RotateCcw } from 'lucide-react';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { useImageUpload } from '../hooks/useImageUpload';
 
+// Days-since / days-left for a revision request (7-day auto-expire window).
+function revisionTiming(requestedAt) {
+  if (!requestedAt) return { agoLabel: null, leftLabel: null, urgent: false };
+  const reqMs = new Date(requestedAt).getTime();
+  if (Number.isNaN(reqMs)) return { agoLabel: null, leftLabel: null, urgent: false };
+  const dayMs = 86400000;
+  const daysAgo = Math.floor((Date.now() - reqMs) / dayMs);
+  const daysLeft = 7 - daysAgo;
+  const agoLabel = daysAgo <= 0 ? 'today' : daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`;
+  const leftLabel = daysLeft <= 0 ? 'expiring' : daysLeft === 1 ? '1 day left' : `${daysLeft} days left`;
+  return { agoLabel, leftLabel, urgent: daysLeft <= 1 };
+}
+
 export default function Dashboard() {
-  const navigate = useNavigate();
   const [listings, setListings] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [totalPending, setTotalPending] = useState(0);
@@ -29,7 +40,6 @@ export default function Dashboard() {
   const [adminScrapeUrl, setAdminScrapeUrl] = useState('');
   const [adminScraping, setAdminScraping] = useState(false);
   const [voiceError, setVoiceError] = useState('');
-  const [togglingConcierge, setTogglingConcierge] = useState(null);
 
   // Voice recording hook for admin create
   const voice = useVoiceRecording({
@@ -85,36 +95,6 @@ export default function Dashboard() {
       console.error('Error fetching data:', error);
     }
     setLoading(false);
-  }
-
-  async function toggleConcierge(listing, event) {
-    event.stopPropagation();
-    if (togglingConcierge) return;
-    setTogglingConcierge(listing.id);
-    const wasConcierge = listing.tags?.includes('concierge');
-    // Optimistic UI
-    setListings(prev => prev.map(l => l.id === listing.id
-      ? { ...l, tags: wasConcierge
-          ? (l.tags || []).filter(t => t !== 'concierge')
-          : [...(l.tags || []), 'concierge'] }
-      : l));
-    try {
-      const res = await fetch('/api/admin-listings?action=toggle-concierge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopifyProductId: listing.shopify_product_id })
-      });
-      const data = await res.json();
-      if (!data.success) {
-        // Revert on failure
-        setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: listing.tags || [] } : l));
-        alert(`Failed: ${data.error || 'unknown error'}`);
-      }
-    } catch (err) {
-      setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: listing.tags || [] } : l));
-      alert(`Failed: ${err.message}`);
-    }
-    setTogglingConcierge(null);
   }
 
   // Admin listing helpers
@@ -241,38 +221,29 @@ export default function Dashboard() {
     );
   }
 
+  // Group the pending list by whose move it is — the core declutter.
+  const hasTag = (l, t) => (l.tags || []).includes(t);
+  const reReview = listings.filter(l => hasTag(l, 'seller-revised'));
+  const fresh = listings.filter(l => !hasTag(l, 'seller-revised') && !hasTag(l, 'needs-revision'));
+  const waiting = listings.filter(l => hasTag(l, 'needs-revision') && !hasTag(l, 'seller-revised'));
+  const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold text-stone-900">Dashboard</h1>
-        <p className="text-stone-500 text-sm">Overview of listings and payouts</p>
-      </div>
-
-      {/* Needs you — action items lead, with functional color drawing the eye */}
-      {(stats.pending > 0 || payouts.length > 0) && (
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs text-stone-400 uppercase tracking-wider mb-2">Needs you</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {stats.pending > 0 && (
-              <Link to="/admin/review" className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100 hover:bg-amber-100 active:scale-[0.99] transition">
-                <Clock className="w-6 h-6 text-amber-600 flex-shrink-0" />
-                <span className="flex-1 text-sm text-amber-800">Review listings</span>
-                <span className="text-lg font-semibold text-amber-800">{stats.pending}</span>
-                <ArrowRight className="w-4 h-4 text-amber-600 flex-shrink-0" />
-              </Link>
-            )}
-            {payouts.length > 0 && (
-              <Link to="/admin/transactions" className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-100 hover:bg-green-100 active:scale-[0.99] transition">
-                <Banknote className="w-6 h-6 text-green-600 flex-shrink-0" />
-                <span className="flex-1 text-sm text-green-800">Payouts to send · ${totalPending.toFixed(0)}</span>
-                <span className="text-lg font-semibold text-green-800">{payouts.length}</span>
-                <ArrowRight className="w-4 h-4 text-green-600 flex-shrink-0" />
-              </Link>
-            )}
-          </div>
+          <h1 className="text-xl font-semibold text-stone-900">Dashboard</h1>
+          <p className="text-stone-500 text-sm">{todayLabel}</p>
         </div>
-      )}
+        <button
+          onClick={() => setCreateModal(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex-shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add listing
+        </button>
+      </div>
 
       {/* At a glance — informational metrics */}
       <div className="grid grid-cols-3 gap-3">
@@ -290,142 +261,89 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Pending Listings */}
-      <div id="pending-approval" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-            <Clock className="w-4 h-4" />
-            Pending Approval ({listings.length})
-          </h2>
-          <div className="flex items-center gap-2">
-            {listings.length > 0 && (
+      {/* Your move — only the things you can act on right now */}
+      <div>
+        <p className="text-xs text-stone-400 uppercase tracking-wider mb-2">Your move</p>
+        {(reReview.length > 0 || fresh.length > 0 || payouts.length > 0) ? (
+          <div className="flex flex-col gap-2.5">
+            {reReview.length > 0 && (
               <Link
                 to="/admin/review"
-                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                className="flex items-center gap-3.5 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 active:scale-[0.99] transition p-4"
+                style={{ borderLeft: '3px solid #378ADD' }}
               >
-                Review all <ArrowRight className="w-3.5 h-3.5" />
+                <RotateCcw className="w-5 h-5 flex-shrink-0" style={{ color: '#185FA5' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-stone-900">Re-review <span className="font-normal text-stone-500">— sellers fixed these</span></p>
+                  <p className="text-xs text-stone-400 mt-0.5">Each shows exactly what changed</p>
+                </div>
+                <span className="text-lg font-semibold" style={{ color: '#185FA5' }}>{reReview.length}</span>
+                <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
               </Link>
             )}
-            <button
-              onClick={() => setCreateModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Listing
-            </button>
-          </div>
-        </div>
-
-        {listings.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
-            <Check className="w-16 h-16 mx-auto mb-4 text-green-500" />
-            <p className="text-xl font-medium">All caught up!</p>
-            <p className="text-sm">No listings pending approval</p>
+            {fresh.length > 0 && (
+              <Link
+                to="/admin/review"
+                className="flex items-center gap-3.5 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 active:scale-[0.99] transition p-4"
+                style={{ borderLeft: '3px solid #EF9F27' }}
+              >
+                <Sparkles className="w-5 h-5 flex-shrink-0" style={{ color: '#854F0B' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-stone-900">New submissions</p>
+                  <p className="text-xs text-stone-400 mt-0.5">Never reviewed yet</p>
+                </div>
+                <span className="text-lg font-semibold" style={{ color: '#854F0B' }}>{fresh.length}</span>
+                <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+              </Link>
+            )}
+            {payouts.length > 0 && (
+              <Link
+                to="/admin/transactions"
+                className="flex items-center gap-3.5 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 active:scale-[0.99] transition p-4"
+                style={{ borderLeft: '3px solid #1D9E75' }}
+              >
+                <Banknote className="w-5 h-5 flex-shrink-0" style={{ color: '#0F6E56' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-stone-900">Payouts to send</p>
+                  <p className="text-xs text-stone-400 mt-0.5">${totalPending.toFixed(0)} across {payouts.length} {payouts.length === 1 ? 'seller' : 'sellers'}</p>
+                </div>
+                <span className="text-lg font-semibold" style={{ color: '#0F6E56' }}>{payouts.length}</span>
+                <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+              </Link>
+            )}
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
-            {/* Section header: Revised */}
-            {listings.some(l => l.tags?.includes('seller-revised')) && (
-              <div className="px-5 py-2.5 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
-                <span className="text-sm">✓</span>
-                <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Seller Revised — Re-Review</span>
-                <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full font-medium">
-                  {listings.filter(l => l.tags?.includes('seller-revised')).length}
-                </span>
-              </div>
-            )}
-            {[
-              ...listings.filter(l => l.tags?.includes('seller-revised')),
-              ...listings.filter(l => !l.tags?.includes('seller-revised'))
-            ].map((listing, index) => {
-              const revisedCount = listings.filter(l => l.tags?.includes('seller-revised')).length;
-              const showNewHeader = index === revisedCount && revisedCount > 0 && revisedCount < listings.length;
-              return (
-              <div key={listing.id}>
-                {showNewHeader && (
-                  <div className="px-5 py-2 bg-gray-50 border-b border-gray-100">
-                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                      New Submissions ({listings.length - revisedCount})
-                    </span>
-                  </div>
-                )}
-              <div className="hover:bg-gray-50 transition-colors">
-                {/* Collapsed Header — opens its own review page */}
-                <div
-                  className="p-4 cursor-pointer flex items-center gap-4"
-                  onClick={() => navigate(`/admin/listings/${listing.id}`)}
-                >
-                  {/* Thumbnail */}
-                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
-                    {listing.images && listing.images.length > 0 ? (
-                      <img
-                        src={getThumbnail(listing.images[0])}
-                        alt={listing.product_name}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(e) => e.target.src = 'https://via.placeholder.com/64?text=No+Image'}
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-400">
-                        <Image className="w-6 h-6" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-gray-900 truncate">{listing.designer}</span>
-                      <span className="text-gray-400">-</span>
-                      <span className="text-gray-600 truncate">{listing.product_name}</span>
-                      {listing.tags?.includes('needs-revision') && (
-                        <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-medium flex-shrink-0">Needs Revision</span>
-                      )}
-                      {listing.tags?.includes('seller-revised') && (
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium flex-shrink-0">✓ Seller Revised</span>
-                      )}
-                      <button
-                        onClick={(e) => toggleConcierge(listing, e)}
-                        disabled={togglingConcierge === listing.id}
-                        title={listing.tags?.includes('concierge')
-                          ? 'Concierge: Phirstory ships. Click to unset.'
-                          : 'Not concierge. Click to mark as held & shipped by Phirstory.'}
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 transition-colors disabled:opacity-50 ${
-                          listing.tags?.includes('concierge')
-                            ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                        }`}
-                      >
-                        {listing.tags?.includes('concierge') ? '★ Concierge' : '☆ Concierge'}
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
-                      <span className="flex items-center gap-1">
-                        <DollarSign className="w-3 h-3" />
-                        asks ${listing.asking_price_usd || 0}
-                        <span className="text-gray-300 text-xs">→ lists ${listing.asking_price_usd || 0}</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Shirt className="w-3 h-3" />
-                        {listing.size}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" />
-                        {listing.condition}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Opens its own review page */}
-                  <ArrowRight className="w-5 h-5 text-gray-300 flex-shrink-0" />
-                </div>
-              </div>
-              </div>
-              );
-            })}
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-stone-50 border border-stone-100">
+            <Check className="w-5 h-5 text-green-500 flex-shrink-0" />
+            <span className="text-sm text-stone-600">All caught up — nothing waiting on you.</span>
           </div>
         )}
       </div>
+
+      {/* Waiting on sellers — sent back for revision, the ball's in their court */}
+      {waiting.length > 0 && (
+        <div>
+          <p className="text-xs text-stone-400 uppercase tracking-wider mb-2">Waiting on sellers</p>
+          <div className="bg-stone-50 rounded-xl border border-stone-100 divide-y divide-stone-100">
+            {waiting.map(l => {
+              const { agoLabel, leftLabel, urgent } = revisionTiming(l.revisionRequestedAt);
+              return (
+                <div key={l.id} className="flex items-center gap-3 px-4 py-3">
+                  <Clock className="w-4 h-4 text-stone-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-stone-600 truncate">{l.seller?.name || 'Seller'} — {l.product_name}</p>
+                    <p className="text-xs text-stone-400 truncate">{l.revisionNote || 'Revision requested'}{agoLabel ? ` · ${agoLabel}` : ''}</p>
+                  </div>
+                  {leftLabel && (
+                    <span className={`text-xs flex-shrink-0 ${urgent ? 'text-red-600' : 'text-stone-400'}`}>{leftLabel}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-stone-400 mt-2.5">These aren't in your review queue — the ball's in their court. They auto-expire after 7 days.</p>
+        </div>
+      )}
 
       {/* Create Listing Modal */}
       {createModal && (

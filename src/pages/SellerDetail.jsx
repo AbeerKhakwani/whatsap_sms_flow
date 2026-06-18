@@ -15,6 +15,30 @@ const supabase = createClient(
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+// Renders the full message body. Long messages collapse to a preview with a "Show more"
+// toggle so the log stays scannable — but nothing is permanently truncated anymore.
+function MessageBody({ content, color, accent }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = content || '';
+  const LIMIT = 240;
+  const isLong = text.length > LIMIT;
+  const shown = expanded || !isLong ? text : text.slice(0, LIMIT).trimEnd() + '…';
+  return (
+    <div className="text-sm whitespace-pre-wrap break-words" style={{ color }}>
+      {shown}
+      {isLong && (
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="ml-1.5 text-xs font-semibold underline"
+          style={{ color: accent }}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function SellerDetail() {
   const { id } = useParams();
   const [seller, setSeller] = useState(null);
@@ -1136,9 +1160,8 @@ export default function SellerDetail() {
                     {msg.subject && (
                       <div className="text-sm font-semibold mb-0.5" style={{ color: INK }}>{msg.subject}</div>
                     )}
-                    <div className="text-sm whitespace-pre-wrap break-words" style={{ color: STONE }}>
-                      {msg.content?.slice(0, 200)}{msg.content?.length > 200 && '…'}
-                    </div>
+                    <MessageBody content={msg.content} color={STONE} accent={CRIMSON} />
+
                     <div className="text-xs mt-1" style={{ color: STONE }}>To: {msg.recipient}</div>
                   </div>
                 </div>
