@@ -14,6 +14,25 @@ export default function Scripts() {
       icon: '🔗',
       category: 'sellers',
       duration: '~10 seconds'
+    },
+    {
+      id: 'reconcile-ownership-dry',
+      name: 'Reconcile Ownership — Dry Run',
+      description: 'Rebuilds every seller\'s product list from Shopify metafields (the source of truth) and shows exactly what would change — who is over- or under-assigned, plus orphan products with no owner. Writes NOTHING.',
+      endpoint: '/api/scripts?action=reconcile-ownership',
+      icon: '🔍',
+      category: 'ownership',
+      duration: '~10–20 seconds'
+    },
+    {
+      id: 'reconcile-ownership-apply',
+      name: 'Reconcile Ownership — APPLY',
+      description: 'Writes the reconciled product lists. Each seller\'s products are set to exactly what Shopify metafields say they own. Run the Dry Run first and review. A backup table (ownership_backup_20260618) exists for rollback.',
+      endpoint: '/api/scripts?action=reconcile-ownership&apply=true',
+      icon: '✅',
+      category: 'ownership',
+      duration: '~20–40 seconds',
+      warning: 'Overwrites shopify_product_ids — run the Dry Run first'
     }
   ];
 
@@ -27,7 +46,10 @@ export default function Scripts() {
     try {
       const response = await fetch(script.endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('admin_token')}`
+        }
       });
 
       const data = await response.json();
