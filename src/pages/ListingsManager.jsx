@@ -351,6 +351,29 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
+  const [tagEditing, setTagEditing] = useState(false);
+  const [tagsVal, setTagsVal] = useState(listing.tags || '');
+  const [tagSaving, setTagSaving] = useState(false);
+
+  async function saveTags() {
+    setTagSaving(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API_URL}/api/admin-listings?action=update-tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
+        body: JSON.stringify({ productId: listing.id, tags: tagsVal })
+      });
+      const d = await r.json();
+      if (!d.success) throw new Error(d.error || 'Failed to update tags');
+      setTagEditing(false);
+      onSaved({ ...listing, tags: d.tags });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setTagSaving(false);
+    }
+  }
 
   async function save() {
     if (!seller) return;
@@ -533,6 +556,35 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
             >
               {isConcierge ? '★ Concierge' : '☆ Mark Concierge'}
             </button>
+
+            {/* Tags editor */}
+            {tagEditing ? (
+              <div className="mt-1.5 space-y-1.5">
+                <input
+                  value={tagsVal}
+                  onChange={e => setTagsVal(e.target.value)}
+                  placeholder="tag1, tag2, …"
+                  className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 outline-none focus:border-stone-400"
+                />
+                <div className="flex gap-1.5">
+                  <button onClick={saveTags} disabled={tagSaving} className="flex-1 py-1 bg-stone-900 text-white text-xs rounded-lg disabled:opacity-40 flex items-center justify-center gap-1">
+                    {tagSaving ? <Loader2 size={10} className="animate-spin" /> : 'Save tags'}
+                  </button>
+                  <button onClick={() => { setTagEditing(false); setTagsVal(listing.tags || ''); setError(null); }} className="px-2 py-1 text-stone-400 hover:text-stone-700 text-xs">
+                    Cancel
+                  </button>
+                </div>
+                {error && <p className="text-[10px] text-red-500">{error}</p>}
+              </div>
+            ) : (
+              <button
+                onClick={() => { setTagEditing(true); setTagsVal(listing.tags || ''); setError(null); }}
+                title="Edit this listing's Shopify tags"
+                className="w-full flex items-center justify-center gap-1 py-1.5 text-xs mt-1.5 rounded-xl border border-stone-200 text-stone-500 bg-white hover:bg-stone-50 transition-colors"
+              >
+                <Edit2 size={11} /> Edit tags{tagList.filter(Boolean).length ? ` (${tagList.filter(Boolean).length})` : ''}
+              </button>
+            )}
           </>
         )}
       </div>

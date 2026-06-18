@@ -2274,7 +2274,20 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, sync-fulfillments, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
+    // UPDATE TAGS — edit a listing's Shopify tags from the listings page.
+    if (action === 'update-tags' && req.method === 'POST') {
+      const { productId, tags } = req.body;
+      if (!productId) return res.status(400).json({ error: 'productId required' });
+      // Accept an array or a comma string; normalize, dedupe, drop blanks.
+      const list = (Array.isArray(tags) ? tags : String(tags || '').split(','))
+        .map(t => t.trim()).filter(Boolean);
+      const tagStr = [...new Set(list)].join(', ');
+      const updated = await updateProduct(productId, { tags: tagStr });
+      await cacheBust(CACHE_ALL);
+      return res.status(200).json({ success: true, tags: updated.tags ?? tagStr });
+    }
+
+    return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, sync-fulfillments, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings, update-tags' });
 
   } catch (error) {
     console.error('Admin listings error:', error);
