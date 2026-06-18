@@ -114,6 +114,16 @@ export default async function handler(req, res) {
         // dashboard split "waiting on seller" items into their own block with a deadline.
         const revisionNote = getMetafieldValue(metafields, 'custom', 'revision_note') || null;
         const revisionRequestedAt = getMetafieldValue(metafields, 'custom', 'revision_requested_at') || null;
+        let revisionFields = null;
+        try {
+          const rf = getMetafieldValue(metafields, 'custom', 'revision_fields');
+          revisionFields = rf ? JSON.parse(rf) : null;
+        } catch { revisionFields = null; }
+
+        // More detail for the review card so admins don't have to click through.
+        const material = getMetafieldValue(metafields, 'custom', 'material') || '';
+        const measurements = getMetafieldValue(metafields, 'custom', 'measurements') || '';
+        const sellerDescription = getMetafieldValue(metafields, 'custom', 'seller_description') || '';
 
         // Find seller in DB (try ID, email, then product ID fallback)
         const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone');
@@ -129,13 +139,16 @@ export default async function handler(req, res) {
           asking_price_usd: sellerAskingPrice || 0,          // what seller wants (used throughout UI)
           seller_payout: sellerPayout,
           commission_rate: commissionRate,
-          description: product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
+          description: sellerDescription || product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
+          material,
+          measurements,
           images: product.images?.map(img => img.src) || [],
           created_at: product.created_at,
           shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
           tags,
           revisionNote,
           revisionRequestedAt,
+          revisionFields,
           seller: seller ? {
             id: seller.id,
             name: seller.name,
