@@ -9,6 +9,32 @@ import { getAllSellerMetafields } from '../lib/shopify-graphql.js';
 import { cacheBust } from '../lib/cache.js';
 import { setProductOwnership } from '../lib/listing-ownership.js';
 
+// The 21 active orphans resolved from the Notion Sellers ledger (exact, unique-title matches).
+// Applied via the Scripts-page button (admin-clicked) so the write originates from the dashboard.
+const CONFIRMED_ORPHAN_OWNERS = [
+  { productId: '8905591030055', sellerEmail: 'mahrukh_khalid@hotmail.com' },
+  { productId: '9053878714663', sellerEmail: 'faqiha.g@gmail.com' },
+  { productId: '9725043933479', sellerEmail: 'faqiha.g@gmail.com' },
+  { productId: '9774848868647', sellerEmail: 'faqiha.g@gmail.com' },
+  { productId: '9774924497191', sellerEmail: 'faqiha.g@gmail.com' },
+  { productId: '9056688996647', sellerEmail: 'hinu0802@gmail.com' },
+  { productId: '9059942105383', sellerEmail: 'mariakari1988@gmail.com' },
+  { productId: '9215419973927', sellerEmail: 'mariam.haroon@gmail.com' },
+  { productId: '9547627790631', sellerEmail: 'Bjaved@msn.com' },
+  { productId: '9599862735143', sellerEmail: 'hannahmk60@gmail.com' },
+  { productId: '9600667386151', sellerEmail: 'maham.shoaib206@gmail.com' },
+  { productId: '9622855090471', sellerEmail: 'ali.noorua@gmail.com' },
+  { productId: '9622905225511', sellerEmail: 'zanabtanveer99@gmail.com' },
+  { productId: '9622930850087', sellerEmail: 'zanabtanveer99@gmail.com' },
+  { productId: '9622948512039', sellerEmail: 'zanabtanveer99@gmail.com' },
+  { productId: '9670319440167', sellerEmail: 'maheensafdar14@gmail.com' },
+  { productId: '9670319472935', sellerEmail: 'jnayem248@gmail.com' },
+  { productId: '9801388196135', sellerEmail: 'mredrose123@aol.com' },
+  { productId: '9868879659303', sellerEmail: 'rehanamanzar@hotmail.com' },
+  { productId: '9869252264231', sellerEmail: 'rehanamanzar@hotmail.com' },
+  { productId: '10010719879463', sellerEmail: 'kirn666@gmail.com' },
+];
+
 function isAdmin(req) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return false;
@@ -41,6 +67,12 @@ export default async function handler(req, res) {
       // Write seller metafields for products that have none (orphan recovery from CSV) — admin only.
       if (!isAdmin(req)) return res.status(401).json({ success: false, error: 'Unauthorized' });
       return await assignOwners(req, res);
+    }
+
+    if (action === 'assign-confident-orphans') {
+      // Apply the 21 Notion-confirmed owner assignments. Admin-clicked from the Scripts page.
+      if (!isAdmin(req)) return res.status(401).json({ success: false, error: 'Unauthorized' });
+      return await assignOwners(req, res, CONFIRMED_ORPHAN_OWNERS);
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
@@ -151,8 +183,10 @@ async function backfillAdminListings(res) {
  *
  * Body: { assignments: [{ productId, sellerEmail }], apply?: boolean }
  */
-async function assignOwners(req, res) {
-  const { assignments = [], apply = false } = req.body || {};
+async function assignOwners(req, res, preset) {
+  const assignments = preset || req.body?.assignments || [];
+  // apply can come from the request body (API) or the ?apply=true query (Scripts button).
+  const apply = (req.body && req.body.apply === true) || req.query?.apply === 'true';
   const output = [];
   const log = (msg) => { output.push(msg); console.log(msg); };
 

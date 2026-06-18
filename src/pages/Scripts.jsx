@@ -16,6 +16,25 @@ export default function Scripts() {
       duration: '~10 seconds'
     },
     {
+      id: 'assign-confident-orphans-dry',
+      name: 'Assign 21 Notion-Confirmed Owners — Dry Run',
+      description: 'Previews assigning the 21 active orphans whose owner was confirmed from the Notion Sellers ledger (e.g. Faqiha ×4, Zanab ×3). Writes NOTHING.',
+      endpoint: '/api/scripts?action=assign-confident-orphans',
+      icon: '🧩',
+      category: 'ownership',
+      duration: '~10–20 seconds'
+    },
+    {
+      id: 'assign-confident-orphans-apply',
+      name: 'Assign 21 Notion-Confirmed Owners — APPLY',
+      description: 'Writes the seller metafield for the 21 Notion-confirmed orphans (the record that decides payouts). Run the Dry Run first. Do the remaining 16 (see scripts/ownership-unresolved-2026-06-18.md), then run Reconcile Ownership → Apply.',
+      endpoint: '/api/scripts?action=assign-confident-orphans&apply=true',
+      icon: '🧩',
+      category: 'ownership',
+      duration: '~20–40 seconds',
+      warning: 'Writes Shopify seller metafields for 21 products'
+    },
+    {
       id: 'reconcile-ownership-dry',
       name: 'Reconcile Ownership — Dry Run',
       description: 'Rebuilds every seller\'s product list from Shopify metafields (the source of truth) and shows exactly what would change — who is over- or under-assigned, plus orphan products with no owner. Writes NOTHING.',
