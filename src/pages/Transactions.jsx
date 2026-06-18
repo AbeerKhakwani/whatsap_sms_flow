@@ -150,8 +150,24 @@ export default function Transactions() {
         }),
       });
       const data = await res.json();
-      if (data.success) { closeInfo(); await fetchTransactions(); }
-      else alert('Failed to save: ' + (data.error || 'Unknown error'));
+      if (data.success) {
+        // Update the card immediately — the re-fetch is async (and can be cached),
+        // so patch local state so the seller flips to "Mark paid" right away.
+        const method = infoMethod.trim() || 'Zelle';
+        const handle = infoHandle.trim();
+        setTransactions(prev => prev.map(t =>
+          t.seller_id === infoSeller.id
+            ? { ...t, seller: {
+                ...(t.seller || {}),
+                payment_provider: data.seller?.payment_provider ?? method,
+                payment_handle:   data.seller?.payment_handle ?? handle,
+              } }
+            : t
+        ));
+        closeInfo();
+      } else {
+        alert('Failed to save: ' + (data.error || 'Unknown error'));
+      }
     } catch (e) { alert('Error: ' + e.message); }
     finally { setSavingInfo(false); }
   }
