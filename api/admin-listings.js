@@ -1095,27 +1095,25 @@ export default async function handler(req, res) {
             await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
-            // WhatsApp — payout_sent ({{1}}=name, {{2}}=$amount, {{3}}=item desc, {{4}}=method).
-            // With a screenshot we use payout_sent_image (same body + an image header). Create
-            // that template in Meta with an image header; until then this send just no-ops.
+            // WhatsApp — always the approved text template `payout_sent`
+            // ({{1}}=name, {{2}}=$amount, {{3}}=item desc, {{4}}=method). The payment
+            // screenshot is NOT attached to WhatsApp (that would need a separate
+            // Meta-approved image-header template); it still goes in the receipt email
+            // (passed to payoutNotificationEmail above) and stays on the transaction.
             if (seller.phone && !seller.phone.startsWith('NOPHONE')) {
-              const waComponents = [{
-                type: 'body',
-                parameters: [
-                  { type: 'text', text: seller.name || 'there' },
-                  { type: 'text', text: `$${totalPayout.toFixed(2)}` },
-                  { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
-                  { type: 'text', text: method ? ` via ${method}` : ' to your account on file' }
-                ]
-              }];
-              if (screenshotUrl) {
-                waComponents.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: screenshotUrl } }] });
-              }
               await sendWhatsApp({
                 sellerId,
                 to: seller.phone,
-                template: screenshotUrl ? 'payout_sent_image' : 'payout_sent',
-                components: waComponents,
+                template: 'payout_sent',
+                components: [{
+                  type: 'body',
+                  parameters: [
+                    { type: 'text', text: seller.name || 'there' },
+                    { type: 'text', text: `$${totalPayout.toFixed(2)}` },
+                    { type: 'text', text: txs.length === 1 ? txs[0].product_title : `${txs.length} items` },
+                    { type: 'text', text: method ? ` via ${method}` : ' to your account on file' }
+                  ]
+                }],
                 context: 'payout_sent',
                 metadata
               }).catch(e => console.error('payout_sent WA failed:', e.message));
