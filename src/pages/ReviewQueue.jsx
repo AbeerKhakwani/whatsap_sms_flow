@@ -12,8 +12,9 @@ const UNDO_MS = 5000;
 const REJECT_REASONS = ['Photos too unclear', 'Price too high', 'Wrong/missing details', 'Not a fit for the store', 'Authenticity concern'];
 
 function sourceOf(tags) {
-  const t = (tags || '').split(',').map(s => s.trim());
-  const src = t.find(x => x.startsWith('source:'));
+  // pending API returns tags as an array; tolerate a comma-string too.
+  const list = Array.isArray(tags) ? tags : (tags || '').split(',');
+  const src = list.map(s => (s || '').trim()).find(x => x.startsWith('source:'));
   return src ? src.replace('source:', '') : null;
 }
 
