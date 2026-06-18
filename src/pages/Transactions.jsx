@@ -72,6 +72,12 @@ export default function Transactions() {
   const [payScreenshot, setPayScreenshot] = useState(null); // data URL of the Zelle screenshot
   const [paying, setPaying] = useState(false);
 
+  // Add-payout-info modal (for sellers with no payout destination on file)
+  const [infoSeller, setInfoSeller] = useState(null);
+  const [infoMethod, setInfoMethod] = useState('Zelle');
+  const [infoHandle, setInfoHandle] = useState('');
+  const [savingInfo, setSavingInfo] = useState(false);
+
   useEffect(() => { fetchTransactions(); }, []);
 
   async function fetchTransactions() {
@@ -121,6 +127,33 @@ export default function Transactions() {
     setPayNotes('');
     setPaySkip(false);
     setPayScreenshot(null);
+  }
+
+  // Add/edit a seller's payout destination inline (no navigating away).
+  function openInfo(group) {
+    setInfoSeller(group.seller);
+    setInfoMethod(sellerMethod(group.seller) || 'Zelle');
+    setInfoHandle(payoutHandleOf(group.seller) || '');
+  }
+  function closeInfo() { setInfoSeller(null); }
+  async function saveInfo() {
+    if (!infoHandle.trim()) return;
+    setSavingInfo(true);
+    try {
+      const res = await fetch(`${API_URL}/api/seller?action=update-seller`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sellerId: infoSeller.id,
+          payment_provider: infoMethod.trim() || 'Zelle',
+          payment_handle: infoHandle.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) { closeInfo(); await fetchTransactions(); }
+      else alert('Failed to save: ' + (data.error || 'Unknown error'));
+    } catch (e) { alert('Error: ' + e.message); }
+    finally { setSavingInfo(false); }
   }
   function closePay() { setPayGroup(null); }
 
@@ -250,7 +283,7 @@ export default function Transactions() {
                       Mark paid
                     </button>
                   ) : (
-                    <button onClick={() => navigate(`/admin/sellers/${group.seller.id}`)} className="px-4 py-2 text-sm border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors font-medium">
+                    <button onClick={() => openInfo(group)} className="px-4 py-2 text-sm border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors font-medium">
                       Add info
                     </button>
                   )}
@@ -421,6 +454,37 @@ export default function Transactions() {
                 className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">
                 {paying ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Processing…</>
                         : <><CheckCircle className="w-4 h-4" /> Mark {payGroup.items.length} item{payGroup.items.length !== 1 ? 's' : ''} paid</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add payout info modal — set a seller's destination without leaving the page */}
+      {infoSeller && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={closeInfo}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-stone-200">
+              <h3 className="text-lg font-semibold text-stone-900">Payout info — {infoSeller.name || 'seller'}</h3>
+              <p className="text-sm text-stone-500 mt-0.5">Where do their payouts go?</p>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Method</label>
+                <input value={infoMethod} onChange={e => setInfoMethod(e.target.value)} placeholder="Zelle / Interac / PayPal"
+                  className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-stone-600 mb-1">Account / handle <span className="text-stone-400 font-normal">— email, phone, or account #</span></label>
+                <input value={infoHandle} onChange={e => setInfoHandle(e.target.value)} placeholder="e.g. seller@email.com or 2065551234" autoFocus
+                  className="w-full px-3 py-2 text-sm border border-stone-300 rounded-lg" />
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-stone-200 flex gap-3">
+              <button onClick={closeInfo} disabled={savingInfo} className="flex-1 px-4 py-2.5 border border-stone-300 text-stone-700 rounded-lg hover:bg-stone-50 text-sm font-medium disabled:opacity-50">Cancel</button>
+              <button onClick={saveInfo} disabled={savingInfo || !infoHandle.trim()}
+                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2">
+                {savingInfo ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving…</> : <><CheckCircle className="w-4 h-4" /> Save payout info</>}
               </button>
             </div>
           </div>

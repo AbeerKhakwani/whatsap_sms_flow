@@ -99,7 +99,7 @@ function requireAdmin(req, res) {
   if (!token) return false;
   if (token === 'email-auth') return true; // legacy admin tokens
   const decoded = verifyToken(token);
-  return decoded && decoded.role === 'admin';
+  return decoded && decoded.type === 'admin'; // tokens carry type:'admin' (not role)
 }
 
 export default async function handler(req, res) {
