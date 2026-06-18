@@ -174,6 +174,7 @@ async function reconcileOwnership(req, res) {
   let orphans = 0, unknown = 0;
   const orphanSample = [], unknownSample = [];
   const orphanStatus = {}; // ACTIVE/ARCHIVED/DRAFT breakdown for orphans
+  const activeOrphanList = []; // {id, title} — the live ones that need a real owner
 
   for (const p of products) {
     const mfId = (p.sellerId || '').trim();
@@ -186,6 +187,7 @@ async function reconcileOwnership(req, res) {
       if (!mfId && !mfEmail) {
         orphans++;
         orphanStatus[p.status] = (orphanStatus[p.status] || 0) + 1;
+        if (p.status === 'ACTIVE') activeOrphanList.push({ id: p.id, title: p.title });
         if (orphanSample.length < 12) orphanSample.push(p.id);
       } else {
         unknown++;
@@ -227,7 +229,7 @@ async function reconcileOwnership(req, res) {
   if (!apply) {
     log('');
     log('Dry run complete. Re-run with Apply to write these changes.');
-    return res.status(200).json({ success: true, dryRun: true, output, summary });
+    return res.status(200).json({ success: true, dryRun: true, output, summary, activeOrphanList });
   }
 
   // 5. Apply: overwrite each changed seller's array with the metafield-derived truth.
