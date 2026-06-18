@@ -5,6 +5,8 @@ import {
   AlertTriangle, RefreshCw, Download, X, Link2, ChevronRight, Upload
 } from 'lucide-react';
 
+import { payoutMethodLabel, payoutHandle } from '../lib/payout-display.js';
+
 const API_URL = import.meta.env.VITE_API_URL || '';
 const money = n => `$${(Number(n) || 0).toFixed(0)}`;
 const money2 = n => `$${(Number(n) || 0).toFixed(2)}`;
@@ -43,12 +45,10 @@ function statusBadge(tx) {
 
 // Dedicated payout destination on file (Zelle/Interac handle or PayPal email).
 // Their login email does NOT count — we want to flag sellers we can't actually pay.
-function payoutHandleOf(s) {
-  return s?.payment_handle || s?.paypal_email || '';
-}
-function sellerMethod(s) {
-  return s?.payout_method || (s?.payment_provider === 'zelle_manual' ? 'Zelle' : s?.payment_provider) || 'Zelle';
-}
+// Both delegate to the shared normalizers, which safely handle payout_method being
+// either a string or a { name, type, account } object (the latter crashed the page).
+const payoutHandleOf = payoutHandle;
+const sellerMethod = payoutMethodLabel;
 
 const TABS = [
   { value: 'pending', label: 'Pending payouts' },

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { calculateSellerPayout } from '../../lib/payout-calculation';
 import BuyerAcceptedBadge from '../components/BuyerAcceptedBadge';
+import { payoutMethodLabel, payoutHandle } from '../lib/payout-display.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const money = n => `$${(Number(n) || 0).toFixed(2)}`;
@@ -80,8 +81,10 @@ export default function TransactionDetail() {
       if (data.success) {
         setTx(data.transaction);
         const s = data.transaction.seller || {};
-        setPayMethod(s.payout_method || (s.payment_provider ? s.payment_provider : 'Zelle'));
-        setPayHandle(s.payment_handle || s.paypal_email || '');
+        // payout_method may be a { name, type, account } object — normalize to strings
+        // so the modal inputs (and any render) never receive a raw object.
+        setPayMethod(payoutMethodLabel(s));
+        setPayHandle(payoutHandle(s));
         setRateInput(data.transaction.commission_rate != null ? String(data.transaction.commission_rate) : '');
         setNotes(data.transaction.payout_notes || '');
         setSavedNotes(data.transaction.payout_notes || '');
@@ -251,7 +254,7 @@ export default function TransactionDetail() {
               {seller.email && <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-stone-400" /> {seller.email}</div>}
               {seller.phone && <div className="flex items-center gap-2"><Phone className="w-4 h-4 text-stone-400" /> {seller.phone}</div>}
               <div className="text-xs text-stone-500 pt-2">
-                Payout on file: {seller.payment_handle || seller.paypal_email || '—'} {seller.payment_provider ? `(${seller.payment_provider})` : ''}
+                Payout on file: {payoutHandle(seller) || '—'} ({payoutMethodLabel(seller)})
               </div>
             </div>
           ) : <p className="text-sm text-red-600">⚠️ No seller linked.</p>}
