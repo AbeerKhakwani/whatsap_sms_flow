@@ -22,8 +22,14 @@ Table: sellers
   - name (text) — seller's full name
   - email (text)
   - phone (text)
-  - paypal_email (text)
+  - paypal_email (text) — legacy PayPal payout email
+  - payment_handle (text) — Zelle / account handle the seller is paid to
+  - payout_method (jsonb) — payout details (a string, or { name, type, account })
   - created_at (timestamp)
+
+A seller has NO payment method on file when there is no usable payout destination —
+none of payment_handle, paypal_email, or payout_method.account is set. These are the
+sellers who cannot be paid yet.
 
 Table: transactions
   - id (uuid)
@@ -63,7 +69,9 @@ RETURN FORMAT (valid JSON only, no markdown, no explanation outside JSON):
   "intent": "search_sellers | search_transactions | search_both | count_only",
   "seller_filter": {
     "name": "partial name to match (optional)",
-    "email": "partial email (optional)"
+    "email": "partial email (optional)",
+    "no_payment_method": true,
+    "has_payment_method": true
   },
   "transaction_filter": {
     "product_title": "partial match (optional)",
@@ -92,6 +100,10 @@ Examples:
   "concierge items" → transaction_filter: { listing_type: "concierge" }, intent: search_transactions
   "orders with discounts" → transaction_filter: { has_discount: true }, intent: search_transactions
   "sellers who haven't been paid" → transaction_filter: { payout_status: ["available", "in_transit", "delivered", "pending_shipping"] }, intent: search_both
+  "sellers without a payment method" → seller_filter: { no_payment_method: true }, intent: search_sellers
+  "sellers with payout info on file" → seller_filter: { has_payment_method: true }, intent: search_sellers
+  "all sellers" / "list every seller" → intent: search_sellers (no filter)
+Note: intent "search_sellers" may be used with no name/email — e.g. to list all sellers, or to filter only by payment method.
 `;
 
 function requireAdmin(req, res) {
@@ -177,6 +189,17 @@ export default async function handler(req, res) {
   }
 }
 
+// A seller can be paid only if one of these yields a destination. Mirrors
+// src/lib/payout-display.js → payoutHandle() so "no payment method" here matches
+// the "Add info" / "No payout info on file" flag admins see on the payouts screen.
+function sellerPayoutHandle(s) {
+  if (s.payment_handle) return s.payment_handle;
+  if (s.paypal_email) return s.paypal_email;
+  const pm = s.payout_method;
+  if (pm && typeof pm === 'object' && pm.account) return pm.account;
+  return '';
+}
+
 async function executeSearch(filter) {
   const limit = Math.min(filter.limit || 20, 50);
   const results = { sellers: [], transactions: [], counts: {} };
@@ -185,17 +208,34 @@ async function executeSearch(filter) {
   const needsTransactions = ['search_transactions', 'search_both', 'count_only'].includes(filter.intent);
 
   // ── Seller search ──────────────────────────────────────────────────────────
-  if (needsSellers && (filter.seller_filter?.name || filter.seller_filter?.email || filter.transaction_filter?.seller_name)) {
-    const nameTerm = filter.seller_filter?.name || filter.transaction_filter?.seller_name;
-    let q = supabase.from('sellers').select('id, name, email, phone, paypal_email, created_at');
+  const sf = filter.seller_filter || {};
+  const sellerNameTerm = sf.name || filter.transaction_filter?.seller_name;
+  // Run when there's any seller criterion, OR the query is explicitly about sellers
+  // (e.g. "all sellers", "sellers without a payment method") — no name term required.
+  const runSellerSearch = needsSellers && (
+    sellerNameTerm || sf.email || sf.no_payment_method || sf.has_payment_method ||
+    filter.intent === 'search_sellers'
+  );
 
-    if (nameTerm) q = q.ilike('name', `%${nameTerm}%`);
-    if (filter.seller_filter?.email) q = q.ilike('email', `%${filter.seller_filter.email}%`);
+  if (runSellerSearch) {
+    let q = supabase
+      .from('sellers')
+      .select('id, name, email, phone, paypal_email, payment_handle, payout_method, created_at');
 
-    q = q.order('name').limit(limit);
-    const { data } = await q;
-    results.sellers = data || [];
-    results.counts.sellers = results.sellers.length;
+    if (sellerNameTerm) q = q.ilike('name', `%${sellerNameTerm}%`);
+    if (sf.email) q = q.ilike('email', `%${sf.email}%`);
+
+    // Fetch generously, then apply the payment-method filter in code: payout_method is
+    // dual-shaped jsonb, so "has a destination" can't be expressed cleanly in one query.
+    q = q.order('name').limit(500);
+    let { data } = await q;
+    data = data || [];
+
+    if (sf.no_payment_method) data = data.filter(s => !sellerPayoutHandle(s));
+    if (sf.has_payment_method) data = data.filter(s => !!sellerPayoutHandle(s));
+
+    results.counts.sellers = data.length;     // true match count
+    results.sellers = data.slice(0, 200);     // show all (≤134 sellers total)
   }
 
   // ── Transaction search ─────────────────────────────────────────────────────
