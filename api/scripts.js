@@ -7,6 +7,7 @@ import { cors } from '../lib/cors.js';
 import { verifyToken } from '../lib/auth-utils.js';
 import { getAllSellerMetafields } from '../lib/shopify-graphql.js';
 import { cacheBust } from '../lib/cache.js';
+import { setProductOwnership } from '../lib/listing-ownership.js';
 
 function isAdmin(req) {
   const token = req.headers.authorization?.replace('Bearer ', '');
@@ -34,6 +35,12 @@ export default async function handler(req, res) {
       // Mutating ownership repair — admin only.
       if (!isAdmin(req)) return res.status(401).json({ success: false, error: 'Unauthorized' });
       return await reconcileOwnership(req, res);
+    }
+
+    if (action === 'assign-owners') {
+      // Write seller metafields for products that have none (orphan recovery from CSV) — admin only.
+      if (!isAdmin(req)) return res.status(401).json({ success: false, error: 'Unauthorized' });
+      return await assignOwners(req, res);
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });
@@ -134,6 +141,50 @@ async function backfillAdminListings(res) {
       'product IDs added': totalMissing,
       'failures': fail
     }
+  });
+}
+
+/**
+ * Assign owners (write seller metafields) for products that currently have none — orphan recovery.
+ * Each assignment routes through setProductOwnership (the single write path: metafields + array +
+ * listings + cache bust). Dry-run by default; pass apply:true in the body to write.
+ *
+ * Body: { assignments: [{ productId, sellerEmail }], apply?: boolean }
+ */
+async function assignOwners(req, res) {
+  const { assignments = [], apply = false } = req.body || {};
+  const output = [];
+  const log = (msg) => { output.push(msg); console.log(msg); };
+
+  if (!Array.isArray(assignments) || assignments.length === 0) {
+    return res.status(400).json({ success: false, error: 'No assignments provided' });
+  }
+
+  log(apply ? `⚠️  APPLY — writing ${assignments.length} owner assignments.` : `Dry run — ${assignments.length} assignments.`);
+  let ok = 0, fail = 0, skip = 0;
+
+  for (const a of assignments) {
+    const productId = a.productId && String(a.productId);
+    const sellerEmail = a.sellerEmail && String(a.sellerEmail).trim();
+    if (!productId || !sellerEmail) { skip++; log(`  SKIP (missing field): ${JSON.stringify(a)}`); continue; }
+
+    if (!apply) { log(`  would assign ${productId} → ${sellerEmail}`); continue; }
+
+    try {
+      await setProductOwnership(productId, sellerEmail);
+      ok++;
+      log(`  ✓ ${productId} → ${sellerEmail}`);
+    } catch (err) {
+      fail++;
+      log(`  ✗ ${productId} → ${sellerEmail}: ${err.message}`);
+    }
+  }
+
+  return res.status(200).json({
+    success: fail === 0,
+    dryRun: !apply,
+    output,
+    summary: { assignments: assignments.length, assigned: ok, failed: fail, skipped: skip },
   });
 }
 
