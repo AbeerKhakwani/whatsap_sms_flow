@@ -55,6 +55,7 @@ export default function SearchPalette({ open, onClose }) {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [interpretation, setInterpretation] = useState('');
+  const [answer, setAnswer] = useState('');
   const [error, setError] = useState('');
 
   // Focus input when opened
@@ -64,6 +65,7 @@ export default function SearchPalette({ open, onClose }) {
       setQuery('');
       setResults(null);
       setInterpretation('');
+      setAnswer('');
       setError('');
     }
   }, [open]);
@@ -82,6 +84,7 @@ export default function SearchPalette({ open, onClose }) {
     setError('');
     setResults(null);
     setInterpretation('');
+    setAnswer('');
     try {
       const res = await fetch(`${API_URL}/api/search`, {
         method: 'POST',
@@ -95,6 +98,7 @@ export default function SearchPalette({ open, onClose }) {
       if (!res.ok) throw new Error(data.error || 'Search failed');
       setResults(data.results);
       setInterpretation(data.interpretation || q);
+      setAnswer(data.answer || '');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -170,12 +174,14 @@ export default function SearchPalette({ open, onClose }) {
             </div>
           )}
 
-          {/* Interpretation banner */}
-          {interpretation && !loading && (
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-stone-50 border-b border-stone-100 text-xs text-stone-500">
-              <Sparkles className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
-              <span>{interpretation}</span>
-              <span className="ml-auto text-stone-400">
+          {/* AI answer (falls back to the query interpretation) */}
+          {(answer || interpretation) && !loading && (
+            <div className="flex items-start gap-2 px-4 py-3 bg-stone-50 border-b border-stone-100">
+              <Sparkles className={`w-3.5 h-3.5 flex-shrink-0 mt-0.5 ${answer ? 'text-amber-500' : 'text-stone-400'}`} />
+              <span className={answer ? 'text-sm text-stone-700 font-medium' : 'text-xs text-stone-500'}>
+                {answer || interpretation}
+              </span>
+              <span className="ml-auto text-xs text-stone-400 flex-shrink-0 whitespace-nowrap">
                 {totalResults} result{totalResults !== 1 ? 's' : ''}
               </span>
             </div>

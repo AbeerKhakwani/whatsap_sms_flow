@@ -160,6 +160,48 @@ Examples:
 Note: intent "search_sellers" may be used with no name/email. "search_listings" covers the approval queue + drafts only (never live/sold items).
 `;
 
+// One short, data-grounded sentence answering the query. A second cheap pass over the
+// numbers we already computed — Haiku keeps the palette snappy, and it only rephrases the
+// given facts (it is told never to invent any). Non-blocking: if it fails, the card + list
+// still render and the frontend falls back to the query interpretation.
+const ANSWER_SYSTEM = `You write ONE short, plain-English sentence answering an admin's search of a resale-marketplace dashboard, using ONLY the result numbers provided.
+Rules:
+- Use only the numbers given. Never invent figures, names, sellers, or details not present.
+- Lead with the key number; sound like a colleague reporting back.
+- Money is USD, formatted like $1,234.50. "owed"/"payouts" = seller_payout totals; "sales" = sale_price totals.
+- payout_status meanings (use the plain meaning, not the raw code): needs_commission = commission not set, pending_shipping = awaiting shipment, in_transit = shipped, delivered = delivered, available = ready to pay, paid = paid, needs_attention = data issue.
+- If a by_status breakdown is given, you may note where most items sit (e.g. "mostly awaiting shipment").
+- One sentence, no markdown, no preamble, 30 words max. If nothing matched, say so plainly.`;
+
+async function summarizeResults(query, filter, results) {
+  const facts = {
+    query,
+    matched: {
+      sellers: results.counts?.sellers ?? results.sellers.length,
+      transactions: results.counts?.transactions ?? results.transactions.length,
+      listings: results.counts?.listings ?? results.listings.length,
+    },
+    summary: results.summary || null,
+    seller_filter: filter.seller_filter || null,
+    transaction_filter: filter.transaction_filter || null,
+    listing_filter: filter.listing_filter || null,
+  };
+  const nothing = !facts.matched.sellers && !facts.matched.transactions &&
+                  !facts.matched.listings && !facts.summary;
+  if (nothing) return null;
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 120,
+    system: [{ type: 'text', text: ANSWER_SYSTEM }],
+    messages: [{
+      role: 'user',
+      content: `Question: "${query}"\n\nResults (use ONLY these numbers):\n${JSON.stringify(facts)}`,
+    }],
+  });
+  return (msg.content || []).find(b => b.type === 'text')?.text?.trim() || null;
+}
+
 function requireAdmin(req, res) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return false;
@@ -231,9 +273,19 @@ export default async function handler(req, res) {
 
   try {
     const results = await executeSearch(filterJson);
+
+    // Natural-language answer grounded in the actual results (non-blocking).
+    let answer = null;
+    try {
+      answer = await summarizeResults(query.trim(), filterJson, results);
+    } catch (err) {
+      console.error('Answer generation error (non-fatal):', err);
+    }
+
     return res.status(200).json({
       success: true,
       results,
+      answer,
       interpretation: filterJson.interpretation || query,
       filter: filterJson
     });
@@ -398,16 +450,19 @@ async function executeSearch(filter) {
 
     // Totals over ALL matching rows (not just the displayed page) for "how much / how many".
     if (wantsTotals) {
-      let sq = supabase.from('transactions').select('sale_price, seller_payout, discount_amount');
+      let sq = supabase.from('transactions').select('sale_price, seller_payout, discount_amount, payout_status');
       sq = applyTxFilters(sq, tf, sellerIds);
       const { data: allRows } = await sq.limit(10000);
       const rows = allRows || [];
+      const by_status = {};
+      rows.forEach(r => { const k = r.payout_status || 'unknown'; by_status[k] = (by_status[k] || 0) + 1; });
       results.summary = {
         scope: 'transactions',
         count: rows.length,
         total_sale_price: round2(sum(rows, 'sale_price')),
         total_payout: round2(sum(rows, 'seller_payout')),
         total_discount: round2(sum(rows, 'discount_amount')),
+        by_status, // counts per payout_status, for a natural-language breakdown
       };
       results.counts.transactions = rows.length; // true match count, not the page size
     }
