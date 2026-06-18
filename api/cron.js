@@ -25,10 +25,12 @@ export default async function handler(req, res) {
       return (await import('../lib/cron/shipping-reminders.js')).default(req, res);
     case 'process-payouts':
       return (await import('../lib/cron/process-payouts.js')).default(req, res);
+    case 'ownership-drift':
+      return (await import('../lib/cron/ownership-drift.js')).default(req, res);
     default:
       return res.status(400).json({
         error: 'Missing or invalid job parameter',
-        valid: ['health-check', 'shipping-reminders', 'process-payouts']
+        valid: ['health-check', 'shipping-reminders', 'process-payouts', 'ownership-drift']
       });
   }
 }

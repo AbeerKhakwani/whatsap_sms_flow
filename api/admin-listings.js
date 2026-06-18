@@ -10,6 +10,7 @@ import { cors } from '../lib/cors.js';
 import { fetchMetafields, getSellerEmail, getSellerId, getMetafieldValue, extractPricing, upsertMetafield } from '../lib/shopify-metafields.js';
 import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
 import { addProductToSeller } from '../lib/sellers.js';
+import { getAllSellerMetafields } from '../lib/shopify-graphql.js';
 import { scrapePage } from '../lib/scraper.js';
 import { withCache, cacheBust } from '../lib/cache.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
@@ -2234,59 +2235,43 @@ export default async function handler(req, res) {
 
     // ── SYNC-SELLER-LISTINGS ─ additively rebuild shopify_product_ids ──
     if (action === 'sync-seller-listings' && req.method === 'POST') {
-      const { sellerId, sellerEmail } = req.body;
+      const { sellerId } = req.body;
       if (!sellerId) return res.status(400).json({ error: 'sellerId required' });
 
-      const sources = { existing: 0, transactions: 0, listings_table: 0 };
-
-      // ── Always start from the existing array — sync can only ADD, never shrink ──
-      const { data: sellerRow } = await supabase
+      const { data: seller } = await supabase
         .from('sellers')
-        .select('shopify_product_ids')
+        .select('id, email, shopify_product_ids')
         .eq('id', sellerId)
         .single();
+      if (!seller) return res.status(404).json({ error: 'Seller not found' });
 
-      const existingIds = (sellerRow?.shopify_product_ids || []).map(id => id.toString());
-      sources.existing = existingIds.length;
+      // Rebuild this seller's array from Shopify metafields (the authoritative owner record).
+      // This SELF-HEALS — it can shrink as well as grow, so a seller can never accumulate
+      // products that aren't really theirs (the old union-only sync could only add).
+      const sid = (seller.id || '').trim();
+      const semail = (seller.email || '').trim().toLowerCase();
+      const products = await getAllSellerMetafields();
+      const owned = products
+        .filter(p => {
+          const mid = (p.sellerId || '').trim();
+          const me = (p.sellerEmail || '').trim().toLowerCase();
+          return (mid && mid === sid) || (me && me === semail);
+        })
+        .map(p => String(p.id));
 
-      // ── Supabase transactions (sold items) ──
-      const { data: txRows } = await supabase
-        .from('transactions')
-        .select('product_id')
-        .eq('seller_id', sellerId)
-        .not('product_id', 'is', null);
+      const before = (seller.shopify_product_ids || []).length;
+      await supabase.from('sellers').update({ shopify_product_ids: owned }).eq('id', sellerId);
 
-      const idsFromTx = (txRows || []).map(r => r.product_id.toString());
-      sources.transactions = idsFromTx.length;
-
-      // ── Supabase listings table (active/pending items) ──
-      const { data: listingRows } = await supabase
-        .from('listings')
-        .select('shopify_product_id')
-        .eq('seller_id', sellerId)
-        .not('shopify_product_id', 'is', null);
-
-      const idsFromListings = (listingRows || []).map(r => r.shopify_product_id.toString());
-      sources.listings_table = idsFromListings.length;
-
-      // ── Merge: union of all sources, never remove existing ──
-      const merged = [...new Set([...existingIds, ...idsFromTx, ...idsFromListings])];
-
-      if (merged.length === existingIds.length && idsFromTx.length === 0 && idsFromListings.length === 0) {
-        return res.status(200).json({ success: true, productIds: merged, sources, message: 'Nothing new found — array unchanged' });
-      }
-
-      await supabase
-        .from('sellers')
-        .update({ shopify_product_ids: merged })
-        .eq('id', sellerId);
-
-      if (sellerEmail) {
-        await cacheBust(`listings:seller:${sellerEmail.toLowerCase()}`);
-      }
+      if (seller.email) await cacheBust(`listings:seller:${seller.email.toLowerCase()}`);
       await cacheBust(CACHE_ALL);
 
-      return res.status(200).json({ success: true, productIds: merged, sources });
+      return res.status(200).json({
+        success: true,
+        productIds: owned,
+        source: 'shopify_metafields',
+        before,
+        after: owned.length,
+      });
     }
 
     return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, sync-fulfillments, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings' });
