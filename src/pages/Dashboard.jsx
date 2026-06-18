@@ -425,11 +425,12 @@ export default function Dashboard() {
           <p className="text-xs text-stone-400 uppercase tracking-wider mb-2">Needs you</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {stats.pending > 0 && (
-              <a href="#pending-approval" className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100 active:scale-[0.99] transition">
+              <Link to="/admin/review" className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100 hover:bg-amber-100 active:scale-[0.99] transition">
                 <Clock className="w-6 h-6 text-amber-600 flex-shrink-0" />
-                <span className="flex-1 text-sm text-amber-800">Listings to approve</span>
+                <span className="flex-1 text-sm text-amber-800">Review listings</span>
                 <span className="text-lg font-semibold text-amber-800">{stats.pending}</span>
-              </a>
+                <ArrowRight className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              </Link>
             )}
             {payouts.length > 0 && (
               <Link to="/admin/transactions" className="flex items-center gap-3 p-4 rounded-xl bg-green-50 border border-green-100 hover:bg-green-100 active:scale-[0.99] transition">

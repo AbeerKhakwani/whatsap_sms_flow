@@ -137,6 +137,23 @@ export default async function handler(req, res) {
         };
       })));
 
+      // Flag each listing's seller as new (never sold) vs returning, for the review queue.
+      // Sales (transactions) are a clean signal independent of the in-flight ownership refactor.
+      const reviewSellerIds = [...new Set(listingsWithSeller.map(l => l.seller?.id).filter(Boolean))];
+      if (reviewSellerIds.length) {
+        const { data: txRows } = await supabase
+          .from('transactions').select('seller_id').in('seller_id', reviewSellerIds);
+        const salesBySeller = {};
+        (txRows || []).forEach(t => { if (t.seller_id) salesBySeller[t.seller_id] = (salesBySeller[t.seller_id] || 0) + 1; });
+        for (const l of listingsWithSeller) {
+          if (l.seller) {
+            const n = salesBySeller[l.seller.id] || 0;
+            l.seller.salesCount = n;
+            l.seller.isNew = n === 0; // never sold before → new seller (refine later to include "approved before")
+          }
+        }
+      }
+
       return res.status(200).json({
         success: true,
         listings: listingsWithSeller,

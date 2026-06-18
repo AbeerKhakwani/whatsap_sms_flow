@@ -20,6 +20,7 @@ const Scripts = lazy(() => import('./pages/Scripts'));
 const Settings = lazy(() => import('./pages/Settings'));
 const ListingsManager = lazy(() => import('./pages/ListingsManager'));
 const ListingDetail = lazy(() => import('./pages/ListingDetail'));
+const ReviewQueue = lazy(() => import('./pages/ReviewQueue'));
 const ListingCleanup = lazy(() => import('./pages/ListingCleanup'));
 const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
 
@@ -81,6 +82,7 @@ export default function App() {
             <Layout>
               <Routes>
                 <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/review" element={<ReviewQueue />} />
                 <Route path="/sellers" element={<Sellers />} />
                 <Route path="/sellers/:id" element={<SellerDetail />} />
                 <Route path="/listings" element={<ListingsManager />} />
