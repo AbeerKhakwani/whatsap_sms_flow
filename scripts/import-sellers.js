@@ -8,6 +8,21 @@ import { parse } from 'csv-parse/sync';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
+// ⚠️ DEPRECATED & UNSAFE — DO NOT RUN.
+// This legacy importer writes sellers.shopify_product_ids WITHOUT writing the Shopify
+// seller metafields (seller.id / seller.email). Metafields are the source of truth, so
+// arrays written here drift immediately — this is the import path that ballooned one
+// seller's array to 88% of all products (the "Annie 406" bug, Jun 2026).
+// Canonical importer: scripts/import-sellers-sync.js (writes array + metafields together).
+if (!process.argv.includes('--i-understand-this-is-unsafe')) {
+  console.error(
+    '\n⛔  scripts/import-sellers.js is DEPRECATED and UNSAFE (writes arrays without Shopify metafields → ownership drift).' +
+    '\n   Use scripts/import-sellers-sync.js instead.' +
+    '\n   Override (not recommended): node scripts/import-sellers.js --i-understand-this-is-unsafe\n'
+  );
+  process.exit(1);
+}
+
 // Load env from project root
 dotenv.config({ path: path.join(process.cwd(), '.env.production') });
 dotenv.config({ path: path.join(process.cwd(), '.env.local') });
