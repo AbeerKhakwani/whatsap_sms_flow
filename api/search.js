@@ -106,7 +106,24 @@ export default async function handler(req, res) {
   if (cors(req, res, 'POST, OPTIONS')) return;
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!requireAdmin(req, res)) return res.status(401).json({ error: 'Unauthorized' });
+  if (!requireAdmin(req, res)) {
+    // Distinct, actionable message — a stale 24h token lands here and used to read
+    // as a bare "Unauthorized", indistinguishable from a real auth bug.
+    return res.status(401).json({
+      error: 'Your admin session has expired or you are not signed in. Sign out, sign back in, and try the search again.',
+      code: 'auth',
+    });
+  }
+
+  // Surface a missing API key clearly — otherwise the Claude call throws and the
+  // user just sees a generic "Failed to parse query" with no idea it's a config gap.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error('ANTHROPIC_API_KEY is not set — /api/search cannot reach Claude.');
+    return res.status(500).json({
+      error: 'Search is not configured yet (ANTHROPIC_API_KEY is missing on the server). Add it in Vercel → Settings → Environment Variables and redeploy.',
+      code: 'no_api_key',
+    });
+  }
 
   const { query } = req.body;
   if (!query || typeof query !== 'string' || query.trim().length < 2) {
@@ -135,13 +152,15 @@ export default async function handler(req, res) {
       ]
     });
 
-    const text = message.content[0]?.text || '';
+    // Pick the first text block rather than assuming content[0] is text.
+    const text = (message.content || []).find(b => b.type === 'text')?.text || '';
     // Strip any markdown fences Claude might add
     const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    if (!cleaned) throw new Error('Claude returned an empty response');
     filterJson = JSON.parse(cleaned);
   } catch (err) {
     console.error('Claude parse error:', err);
-    return res.status(500).json({ error: 'Failed to parse query', details: err.message });
+    return res.status(500).json({ error: 'Could not understand that search. Try rephrasing it.', details: err.message });
   }
 
   try {
