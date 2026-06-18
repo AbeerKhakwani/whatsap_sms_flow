@@ -112,7 +112,7 @@ export default function SearchPalette({ open, onClose }) {
     }
   }
 
-  function useExample(q) {
+  function runExample(q) {
     setQuery(q);
     runSearch(q);
   }
@@ -154,7 +154,7 @@ export default function SearchPalette({ open, onClose }) {
             className="flex-1 text-sm text-stone-800 placeholder:text-stone-400 outline-none bg-transparent"
           />
           {query && (
-            <button onClick={() => { setQuery(''); setResults(null); setError(''); }} className="text-stone-400 hover:text-stone-600">
+            <button onClick={() => { setQuery(''); setResults(null); setError(''); setInterpretation(''); setAnswer(''); }} className="text-stone-400 hover:text-stone-600">
               <X className="w-4 h-4" />
             </button>
           )}
@@ -372,7 +372,7 @@ export default function SearchPalette({ open, onClose }) {
                 {EXAMPLE_QUERIES.map((q) => (
                   <button
                     key={q}
-                    onClick={() => useExample(q)}
+                    onClick={() => runExample(q)}
                     className="text-xs bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1.5 rounded-full transition-colors"
                   >
                     {q}

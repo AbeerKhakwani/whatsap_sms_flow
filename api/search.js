@@ -327,27 +327,44 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const sum = (rows, key) => rows.reduce((a, r) => a + (Number(r[key]) || 0), 0);
 
 async function executeSearch(filter) {
-  const limit = Math.min(filter.limit || 20, 50);
+  const limit = Math.min(Number(filter.limit) || 20, 50);
   const results = { sellers: [], transactions: [], listings: [], summary: null, counts: {} };
 
   const intent = filter.intent;
-  const needsSellers = ['search_sellers', 'search_both', 'count_only'].includes(intent);
-  const needsTransactions = ['search_transactions', 'search_both', 'count_only', 'summarize'].includes(intent);
+  const sf = filter.seller_filter || {};
+  const tf = filter.transaction_filter || {};
+  const lf = filter.listing_filter || {};
+
+  // Coerce aggregate thresholds to finite numbers (ignore absent / non-numeric LLM output).
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+  const minListings = num(sf.min_listings), maxListings = num(sf.max_listings);
+  const minSales = num(sf.min_sales), maxSales = num(sf.max_sales);
+  const minSalesTotal = num(sf.min_sales_total), maxSalesTotal = num(sf.max_sales_total);
+  const listingAgg = minListings != null || maxListings != null;
+  const salesAgg = minSales != null || maxSales != null || minSalesTotal != null || maxSalesTotal != null;
+
+  const sellerNameTerm = sf.name || tf.seller_name;
+  const hasSellerSignal = !!(sellerNameTerm || sf.email || sf.no_payment_method || sf.has_payment_method || listingAgg || salesAgg);
+  const TX_KEYS = ['product_title', 'order_name', 'customer_email', 'payout_status', 'shipping_status',
+    'listing_type', 'has_discount', 'commission_rate_null', 'seller_name', 'date_from', 'date_to'];
+  const hasTxSignal = TX_KEYS.some(k => {
+    const v = tf[k];
+    return Array.isArray(v) ? v.length > 0 : (v != null && v !== '' && v !== false);
+  });
+
+  // count_only is entity-ambiguous ("how many ___?"): route it by which filter has signal so a
+  // seller-only count doesn't also dump an unrelated transaction summary. The specific intents
+  // (search_sellers/transactions/listings, summarize) are unambiguous.
+  const needsSellers = ['search_sellers', 'search_both'].includes(intent) || (intent === 'count_only' && hasSellerSignal);
+  const needsTransactions = ['search_transactions', 'search_both', 'summarize'].includes(intent) ||
+    (intent === 'count_only' && (hasTxSignal || !hasSellerSignal));
   const needsListings = intent === 'search_listings';
   const wantsTotals = intent === 'summarize' || intent === 'count_only';
 
   // ── Seller search ──────────────────────────────────────────────────────────
-  const sf = filter.seller_filter || {};
-  const sellerNameTerm = sf.name || filter.transaction_filter?.seller_name;
-  const listingAgg = sf.min_listings != null || sf.max_listings != null;
-  const salesAgg = sf.min_sales != null || sf.max_sales != null ||
-                   sf.min_sales_total != null || sf.max_sales_total != null;
   // Run when there's any seller criterion, OR the query is explicitly about sellers
   // (e.g. "all sellers", "sellers with only 1 listing", "sold 3+ items").
-  const runSellerSearch = needsSellers && (
-    sellerNameTerm || sf.email || sf.no_payment_method || sf.has_payment_method ||
-    listingAgg || salesAgg || filter.intent === 'search_sellers'
-  );
+  const runSellerSearch = needsSellers && (hasSellerSignal || intent === 'search_sellers');
 
   if (runSellerSearch) {
     let q = supabase
@@ -380,14 +397,14 @@ async function executeSearch(filter) {
         s._sales_count = e.count;
         s._sales_total = round2(e.total);
       });
-      if (sf.min_sales != null) data = data.filter(s => s._sales_count >= sf.min_sales);
-      if (sf.max_sales != null) data = data.filter(s => s._sales_count <= sf.max_sales);
-      if (sf.min_sales_total != null) data = data.filter(s => s._sales_total >= sf.min_sales_total);
-      if (sf.max_sales_total != null) data = data.filter(s => s._sales_total <= sf.max_sales_total);
+      if (minSales != null) data = data.filter(s => s._sales_count >= minSales);
+      if (maxSales != null) data = data.filter(s => s._sales_count <= maxSales);
+      if (minSalesTotal != null) data = data.filter(s => s._sales_total >= minSalesTotal);
+      if (maxSalesTotal != null) data = data.filter(s => s._sales_total <= maxSalesTotal);
     }
 
-    if (sf.min_listings != null) data = data.filter(s => s._listing_count >= sf.min_listings);
-    if (sf.max_listings != null) data = data.filter(s => s._listing_count <= sf.max_listings);
+    if (minListings != null) data = data.filter(s => s._listing_count >= minListings);
+    if (maxListings != null) data = data.filter(s => s._listing_count <= maxListings);
 
     // Rank by whatever aggregate the query is about; otherwise alphabetical.
     if (salesAgg) {
@@ -406,7 +423,6 @@ async function executeSearch(filter) {
 
   // ── Transaction search ─────────────────────────────────────────────────────
   if (needsTransactions) {
-    const tf = filter.transaction_filter || {};
     let sellerIds = null;
 
     // Resolve seller name → IDs first (for joining)
@@ -470,7 +486,6 @@ async function executeSearch(filter) {
 
   // ── Listings search (the submission pipeline: drafts + pending approvals) ────
   if (needsListings) {
-    const lf = filter.listing_filter || {};
     let sellerIds = null;
     if (lf.seller_name) {
       const { data: ms } = await supabase
