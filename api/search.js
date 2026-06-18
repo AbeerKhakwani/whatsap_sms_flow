@@ -31,6 +31,11 @@ A seller has NO payment method on file when there is no usable payout destinatio
 none of payment_handle, paypal_email, or payout_method.account is set. These are the
 sellers who cannot be paid yet.
 
+Per-seller activity you can filter and rank by:
+  - listing count = how many items the seller currently has on the store
+  - sales count   = how many items the seller has SOLD (their transactions)
+  - sales total   = total dollars the seller has sold
+
 Table: transactions
   - id (uuid)
   - seller_id (uuid, FK → sellers)
@@ -86,7 +91,13 @@ RETURN FORMAT (valid JSON only, no markdown, no explanation outside JSON):
     "name": "partial name to match (optional)",
     "email": "partial email (optional)",
     "no_payment_method": true,
-    "has_payment_method": true
+    "has_payment_method": true,
+    "min_listings": "number — sellers with at least N items on the store (optional)",
+    "max_listings": "number — sellers with at most N items (use 0 for 'no listings')",
+    "min_sales": "number — sellers who have SOLD at least N items (optional)",
+    "max_sales": "number — at most N sold (use 0 for 'never sold')",
+    "min_sales_total": "number — total sales >= $N (optional)",
+    "max_sales_total": "number — total sales <= $N (optional)"
   },
   "transaction_filter": {
     "product_title": "partial match (optional)",
@@ -134,6 +145,11 @@ Examples:
   "sellers without a payment method" → seller_filter: { no_payment_method: true }, intent: search_sellers
   "sellers with payout info on file" → seller_filter: { has_payment_method: true }, intent: search_sellers
   "all sellers" / "list every seller" → intent: search_sellers (no filter)
+  "sellers with only 1 listing" → seller_filter: { min_listings: 1, max_listings: 1 }, intent: search_sellers
+  "sellers with no listings yet" → seller_filter: { max_listings: 0 }, intent: search_sellers
+  "sellers who have sold 3 or more items" → seller_filter: { min_sales: 3 }, intent: search_sellers
+  "sellers who haven't sold anything" → seller_filter: { max_sales: 0 }, intent: search_sellers
+  "sellers with over $1000 in sales" / "top sellers" → seller_filter: { min_sales_total: 1000 }, intent: search_sellers
   "pending approvals" → listing_filter: { status: ["pending_approval"] }, intent: search_listings
   "approvals waiting more than 7 days" → listing_filter: { status: ["pending_approval"], older_than_days: 7 }, intent: search_listings
   "draft listings from Amna" → listing_filter: { status: ["draft"], seller_name: "Amna" }, intent: search_listings
@@ -271,32 +287,69 @@ async function executeSearch(filter) {
   // ── Seller search ──────────────────────────────────────────────────────────
   const sf = filter.seller_filter || {};
   const sellerNameTerm = sf.name || filter.transaction_filter?.seller_name;
+  const listingAgg = sf.min_listings != null || sf.max_listings != null;
+  const salesAgg = sf.min_sales != null || sf.max_sales != null ||
+                   sf.min_sales_total != null || sf.max_sales_total != null;
   // Run when there's any seller criterion, OR the query is explicitly about sellers
-  // (e.g. "all sellers", "sellers without a payment method") — no name term required.
+  // (e.g. "all sellers", "sellers with only 1 listing", "sold 3+ items").
   const runSellerSearch = needsSellers && (
     sellerNameTerm || sf.email || sf.no_payment_method || sf.has_payment_method ||
-    filter.intent === 'search_sellers'
+    listingAgg || salesAgg || filter.intent === 'search_sellers'
   );
 
   if (runSellerSearch) {
     let q = supabase
       .from('sellers')
-      .select('id, name, email, phone, paypal_email, payment_handle, payout_method, created_at');
+      .select('id, name, email, phone, paypal_email, payment_handle, payout_method, shopify_product_ids, created_at');
 
     if (sellerNameTerm) q = q.ilike('name', `%${sellerNameTerm}%`);
     if (sf.email) q = q.ilike('email', `%${sf.email}%`);
-
-    // Fetch generously, then apply the payment-method filter in code: payout_method is
-    // dual-shaped jsonb, so "has a destination" can't be expressed cleanly in one query.
-    q = q.order('name').limit(500);
-    let { data } = await q;
+    let { data } = await q.limit(1000);
     data = data || [];
 
+    // Payment-method filter (payout_method is dual-shaped jsonb → filter in code).
     if (sf.no_payment_method) data = data.filter(s => !sellerPayoutHandle(s));
     if (sf.has_payment_method) data = data.filter(s => !!sellerPayoutHandle(s));
 
+    // Listing count = items the seller has on the store (free — it's an array column).
+    data.forEach(s => { s._listing_count = Array.isArray(s.shopify_product_ids) ? s.shopify_product_ids.length : 0; });
+
+    // Sales aggregates: count + total $ per seller, computed from transactions.
+    if (salesAgg) {
+      const { data: txs } = await supabase.from('transactions').select('seller_id, sale_price').limit(10000);
+      const byId = {};
+      (txs || []).forEach(t => {
+        if (!t.seller_id) return;
+        const e = byId[t.seller_id] || (byId[t.seller_id] = { count: 0, total: 0 });
+        e.count += 1; e.total += Number(t.sale_price) || 0;
+      });
+      data.forEach(s => {
+        const e = byId[s.id] || { count: 0, total: 0 };
+        s._sales_count = e.count;
+        s._sales_total = round2(e.total);
+      });
+      if (sf.min_sales != null) data = data.filter(s => s._sales_count >= sf.min_sales);
+      if (sf.max_sales != null) data = data.filter(s => s._sales_count <= sf.max_sales);
+      if (sf.min_sales_total != null) data = data.filter(s => s._sales_total >= sf.min_sales_total);
+      if (sf.max_sales_total != null) data = data.filter(s => s._sales_total <= sf.max_sales_total);
+    }
+
+    if (sf.min_listings != null) data = data.filter(s => s._listing_count >= sf.min_listings);
+    if (sf.max_listings != null) data = data.filter(s => s._listing_count <= sf.max_listings);
+
+    // Rank by whatever aggregate the query is about; otherwise alphabetical.
+    if (salesAgg) {
+      data.sort((a, b) => (b._sales_count - a._sales_count) || (b._sales_total - a._sales_total));
+      data.forEach(s => { s._show = 'sales'; });
+    } else if (listingAgg) {
+      data.sort((a, b) => b._listing_count - a._listing_count);
+      data.forEach(s => { s._show = 'listings'; });
+    } else {
+      data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+
     results.counts.sellers = data.length;     // true match count
-    results.sellers = data.slice(0, 200);     // show all (≤134 sellers total)
+    results.sellers = data.slice(0, 200);
   }
 
   // ── Transaction search ─────────────────────────────────────────────────────

@@ -231,7 +231,18 @@ export default function SearchPalette({ open, onClose }) {
                         <p className="text-sm font-medium text-stone-800 truncate">{seller.name}</p>
                         <p className="text-xs text-stone-400 truncate">{seller.email}</p>
                       </div>
-                      <span className="text-xs text-stone-400">View →</span>
+                      {seller._show === 'sales' ? (
+                        <div className="flex flex-col items-end flex-shrink-0">
+                          <span className="text-sm font-semibold text-stone-700">{seller._sales_count} sold</span>
+                          {seller._sales_total > 0 && <span className="text-[10px] text-stone-400">{money(seller._sales_total)}</span>}
+                        </div>
+                      ) : seller._show === 'listings' ? (
+                        <span className="text-sm font-semibold text-stone-700 flex-shrink-0">
+                          {seller._listing_count} {seller._listing_count === 1 ? 'listing' : 'listings'}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-stone-400 flex-shrink-0">View →</span>
+                      )}
                     </button>
                   ))}
                 </section>
