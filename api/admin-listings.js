@@ -13,6 +13,7 @@ import { addProductToSeller } from '../lib/sellers.js';
 import { getAllSellerMetafields } from '../lib/shopify-graphql.js';
 import { scrapePage } from '../lib/scraper.js';
 import { withCache, cacheBust } from '../lib/cache.js';
+import { toTagArray } from '../lib/tags.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
 import { payViaProvider, releasePayout } from '../lib/payout-service.js';
 import { runPayoutSync } from '../lib/payout-sync.js';
@@ -101,7 +102,7 @@ export default async function handler(req, res) {
       // Fetch metafields for all products to get seller info (cache 2 min)
       const listingsWithSeller = await withCache(CACHE_PENDING, 120, async () => Promise.all(products.map(async (product) => {
         const variant = product.variants?.[0] || {};
-        const tags = product.tags?.split(', ') || [];
+        const tags = toTagArray(product.tags);
 
         // Fetch metafields to get seller email + pricing
         const metafields = await fetchMetafields(product.id);
@@ -216,7 +217,7 @@ export default async function handler(req, res) {
           list_price: parseFloat(variant.price) || 0,
           commission_rate: commissionRate,
           seller_payout: sellerPayout,
-          tags: product.tags ? product.tags.split(', ').map(t => t.trim()).filter(Boolean) : [],
+          tags: toTagArray(product.tags),
           images: (product.images || []).map(img => ({ id: img.id, src: img.src })),
           variant_id: variant.id,
           shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
@@ -1813,7 +1814,7 @@ export default async function handler(req, res) {
               title: p.title,
               designer: p.vendor || '',
               handle: p.handle,
-              tags: p.tags,
+              tags: toTagArray(p.tags),
               price: parseFloat(p.variants?.[0]?.price) || 0,
               image: p.images?.[0]?.src || null,
               isSold: (p.variants?.[0]?.inventory_quantity ?? 1) === 0,
@@ -1930,7 +1931,7 @@ export default async function handler(req, res) {
         title: product.title,
         designer: product.vendor || '',
         handle: product.handle,
-        tags: product.tags,
+        tags: toTagArray(product.tags),
         price: listingPrice,
         image: product.images?.[0]?.src || null,
         isSold: (product.variants?.[0]?.inventory_quantity ?? 1) === 0,
@@ -2308,7 +2309,7 @@ export default async function handler(req, res) {
       const tagStr = [...new Set(list)].join(', ');
       const updated = await updateProduct(productId, { tags: tagStr });
       await cacheBust(CACHE_ALL);
-      return res.status(200).json({ success: true, tags: updated.tags ?? tagStr });
+      return res.status(200).json({ success: true, tags: toTagArray(updated.tags ?? tagStr) });
     }
 
     return res.status(400).json({ error: 'Invalid action. Use: pending, approve, reject, payouts, transactions, mark-paid, bulk-mark-paid, export-payouts, shipping-alerts, sellers, create, simulate-sale, test-transaction, test-notification, backfill-orders, sync-fulfillments, scrape-url, activity, audit-listings, fix-listing, sync-seller-listings, update-tags' });

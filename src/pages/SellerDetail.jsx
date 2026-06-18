@@ -6,6 +6,7 @@ import {
   RotateCcw, Image as ImageIcon, ArrowRightLeft, Search, User, MessageSquare, XCircle, AlertCircle
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
+import { toTagArray } from '../../lib/tags.js';
 import BuyerAcceptedBadge from '../components/BuyerAcceptedBadge';
 
 const supabase = createClient(
@@ -231,7 +232,7 @@ export default function SellerDetail() {
       if (data.success) {
         setListings(prev => prev.map(l =>
           l.id === revisionProduct.id
-            ? { ...l, tags: [...(l.tags?.split(', ').filter(t => t !== 'pending-approval' && t !== 'seller-revised') || []), 'needs-revision'].join(', ') }
+            ? { ...l, tags: [...toTagArray(l.tags).filter(t => t !== 'pending-approval' && t !== 'seller-revised'), 'needs-revision'].join(', ') }
             : l
         ));
         setRevisionProduct(null);
@@ -458,7 +459,7 @@ export default function SellerDetail() {
 
   // StatusPill for listings
   function StatusPill({ listing }) {
-    const tagList = listing.tags?.split(', ') || [];
+    const tagList = toTagArray(listing.tags);
     let label, color, bg;
     if (listing.isSold || listing.status === 'archived') { label = 'Sold'; color = '#2563EB'; bg = '#EFF6FF'; }
     else if (tagList.includes('needs-revision'))         { label = 'Revision'; color = CRIMSON; bg = '#FFF0F1'; }
@@ -779,7 +780,7 @@ export default function SellerDetail() {
                     <StatusPill listing={listing} />
                     {/* Source Badge */}
                     {listing.tags && (() => {
-                      const tagList = listing.tags?.split(', ') || [];
+                      const tagList = toTagArray(listing.tags);
                       const sourceTag = tagList.find(t => t.startsWith('source:'));
                       if (!sourceTag) return null;
                       const source = sourceTag.replace('source:', '');
@@ -830,13 +831,13 @@ export default function SellerDetail() {
                   </div>
 
                   {/* Revision status banners */}
-                  {listing.tags?.split(', ').includes('needs-revision') && (
+                  {toTagArray(listing.tags).includes('needs-revision') && (
                     <div className="mt-2 px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wide text-center"
                       style={{ background: '#FFF0F1', color: CRIMSON, border: `1px solid ${CRIMSON}30` }}>
                       ⏳ Awaiting seller update
                     </div>
                   )}
-                  {listing.tags?.split(', ').includes('seller-revised') && (
+                  {toTagArray(listing.tags).includes('seller-revised') && (
                     <div className="mt-2 px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wide text-center"
                       style={{ background: '#F0F9FF', color: '#0284C7', border: '1px solid #BAE6FD' }}>
                       ✓ Seller revised — re-review
@@ -844,7 +845,7 @@ export default function SellerDetail() {
                   )}
 
                   {/* Request Revision — amber, full-width, prominent */}
-                  {!listing.tags?.split(', ').includes('needs-revision') && (
+                  {!toTagArray(listing.tags).includes('needs-revision') && (
                     <button
                       onClick={() => { setRevisionProduct({ id: listing.id, title: listing.title }); setRevisionFields({}); setRevisionNote(''); }}
                       className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors"

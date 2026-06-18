@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle, Search, Loader2, ExternalLink, Edit2, X, AlertCircle, Send, Eye, MessageSquare, Mail, ChevronRight, ChevronLeft, Tag } from 'lucide-react';
 import { viewAsSeller } from '../lib/impersonation';
+import { toTagArray, toTagString } from '../../lib/tags.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const PORTAL_URL = 'https://sell.thephirstory.com';
@@ -333,7 +334,7 @@ function RevisionModal({ listing, onClose, onSent }) {
 
 // ─── Status badge ───────────────────────────────────────────────────────────
 function StatusBadge({ tags }) {
-  const tagList = (tags || '').split(', ').map(t => t.trim());
+  const tagList = toTagArray(tags);
   if (tagList.includes('needs-revision'))  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Revision</span>;
   if (tagList.includes('seller-revised'))  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-700">Re-review</span>;
   if (tagList.includes('delisted'))        return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-500">Delisted</span>;
@@ -343,7 +344,7 @@ function StatusBadge({ tags }) {
 
 // ─── Listing card ───────────────────────────────────────────────────────────
 function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
-  const tagList = (listing.tags || '').split(', ').map(t => t.trim());
+  const tagList = toTagArray(listing.tags);
   const isConcierge = tagList.includes('concierge');
   const [editing, setEditing] = useState(false);
   const [seller, setSeller] = useState(null);
@@ -352,7 +353,7 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
   const [tagEditing, setTagEditing] = useState(false);
-  const [tagsVal, setTagsVal] = useState(listing.tags || '');
+  const [tagsVal, setTagsVal] = useState(toTagString(listing.tags));
   const [tagSaving, setTagSaving] = useState(false);
 
   async function saveTags() {
@@ -367,7 +368,7 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
       const d = await r.json();
       if (!d.success) throw new Error(d.error || 'Failed to update tags');
       setTagEditing(false);
-      onSaved({ ...listing, tags: d.tags });
+      onSaved({ ...listing, tags: toTagArray(d.tags) });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -570,7 +571,7 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
                   <button onClick={saveTags} disabled={tagSaving} className="flex-1 py-1 bg-stone-900 text-white text-xs rounded-lg disabled:opacity-40 flex items-center justify-center gap-1">
                     {tagSaving ? <Loader2 size={10} className="animate-spin" /> : 'Save tags'}
                   </button>
-                  <button onClick={() => { setTagEditing(false); setTagsVal(listing.tags || ''); setError(null); }} className="px-2 py-1 text-stone-400 hover:text-stone-700 text-xs">
+                  <button onClick={() => { setTagEditing(false); setTagsVal(toTagString(listing.tags)); setError(null); }} className="px-2 py-1 text-stone-400 hover:text-stone-700 text-xs">
                     Cancel
                   </button>
                 </div>
@@ -578,7 +579,7 @@ function ListingCard({ listing, onSaved, onRevise, onToggleConcierge }) {
               </div>
             ) : (
               <button
-                onClick={() => { setTagEditing(true); setTagsVal(listing.tags || ''); setError(null); }}
+                onClick={() => { setTagEditing(true); setTagsVal(toTagString(listing.tags)); setError(null); }}
                 title="Edit this listing's Shopify tags"
                 className="w-full flex items-center justify-center gap-1 py-1.5 text-xs mt-1.5 rounded-xl border border-stone-200 text-stone-500 bg-white hover:bg-stone-50 transition-colors"
               >
@@ -651,19 +652,19 @@ export default function ListingsManager() {
   function handleRevisionSent(productId) {
     setListings(prev => prev.map(l => {
       if (l.id !== productId) return l;
-      const tagList = (l.tags || '').split(', ').filter(t => t && t !== 'pending-approval' && t !== 'seller-revised');
-      return { ...l, tags: [...tagList, 'needs-revision'].join(', ') };
+      const tagList = toTagArray(l.tags).filter(t => t !== 'pending-approval' && t !== 'seller-revised');
+      return { ...l, tags: [...tagList, 'needs-revision'] };
     }));
   }
 
   async function handleToggleConcierge(listing) {
-    const tagList = (listing.tags || '').split(', ').map(t => t.trim()).filter(Boolean);
+    const tagList = toTagArray(listing.tags);
     const wasConcierge = tagList.includes('concierge');
     const nextTags = wasConcierge
       ? tagList.filter(t => t !== 'concierge')
       : [...tagList, 'concierge'];
     // Optimistic
-    setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: nextTags.join(', ') } : l));
+    setListings(prev => prev.map(l => l.id === listing.id ? { ...l, tags: nextTags } : l));
     try {
       const r = await fetch(`${API_URL}/api/admin-listings?action=toggle-concierge`, {
         method: 'POST',
@@ -683,14 +684,14 @@ export default function ListingsManager() {
     { id: 'all',      label: 'All',                     count: stats.total },
     { id: 'missing',  label: 'Missing seller',           count: stats.missing },
     { id: 'assigned', label: 'Assigned',                 count: stats.total - stats.missing },
-    { id: 'revision', label: 'Needs revision',           count: listings.filter(l => l.tags?.includes('needs-revision')).length },
+    { id: 'revision', label: 'Needs revision',           count: listings.filter(l => toTagArray(l.tags).includes('needs-revision')).length },
   ];
 
   const filtered = listings
     .filter(l => {
       if (filter === 'missing')  return !l.hasSeller;
       if (filter === 'assigned') return l.hasSeller;
-      if (filter === 'revision') return l.tags?.includes('needs-revision') || l.tags?.includes('seller-revised');
+      if (filter === 'revision') return toTagArray(l.tags).includes('needs-revision') || toTagArray(l.tags).includes('seller-revised');
       return true;
     })
     .filter(l => !search || l.title.toLowerCase().includes(search.toLowerCase()) || l.designer?.toLowerCase().includes(search.toLowerCase()));
