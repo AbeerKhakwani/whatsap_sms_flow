@@ -1,8 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, Loader2, DollarSign, Users, Package, AlertCircle, Sparkles } from 'lucide-react';
+import { Search, X, Loader2, DollarSign, Users, Package, AlertCircle, Sparkles, Layers, Clock } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
+
+const LISTING_STATUS_LABEL = { pending_approval: 'Pending', draft: 'Draft' };
+const LISTING_STATUS_COLOR = {
+  pending_approval: 'bg-amber-100 text-amber-700',
+  draft: 'bg-stone-100 text-stone-600',
+};
+
+const money = (n) =>
+  '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const daysAgo = (iso) => {
+  if (!iso) return null;
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  return d <= 0 ? 'today' : `${d}d`;
+};
 
 const PAYOUT_STATUS_LABEL = {
   pending_shipping: 'Awaiting Ship',
@@ -25,12 +40,12 @@ const PAYOUT_STATUS_COLOR = {
 };
 
 const EXAMPLE_QUERIES = [
-  'Find all transactions for Amna',
-  'How many listings from Suffuse',
-  'Pending commission items',
+  'What do I owe sellers right now',
+  'Total sales this month',
+  'Pending approvals over 7 days',
+  'Sellers without a payment method',
   'Concierge orders this month',
-  'Orders with discounts',
-  'Sellers ready for payout',
+  'Find all transactions for Amna',
 ];
 
 export default function SearchPalette({ open, onClose }) {
@@ -98,8 +113,12 @@ export default function SearchPalette({ open, onClose }) {
     runSearch(q);
   }
 
+  // Prefer server-reported counts (accurate for summaries that match more than the page),
+  // fall back to the displayed array length.
   const totalResults = results
-    ? (results.sellers?.length || 0) + (results.transactions?.length || 0)
+    ? (results.counts?.sellers ?? results.sellers?.length ?? 0)
+      + (results.counts?.transactions ?? results.transactions?.length ?? 0)
+      + (results.counts?.listings ?? results.listings?.length ?? 0)
     : 0;
 
   if (!open) return null;
@@ -159,6 +178,30 @@ export default function SearchPalette({ open, onClose }) {
               <span className="ml-auto text-stone-400">
                 {totalResults} result{totalResults !== 1 ? 's' : ''}
               </span>
+            </div>
+          )}
+
+          {/* Summary card (totals) */}
+          {results?.summary && !loading && (
+            <div className="px-4 py-4 border-b border-stone-100 bg-stone-50/60">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-stone-400">Items</p>
+                  <p className="text-lg font-semibold text-stone-800">{results.summary.count}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-stone-400">Total sales</p>
+                  <p className="text-lg font-semibold text-stone-800">{money(results.summary.total_sale_price)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-stone-400">Seller payouts</p>
+                  <p className="text-lg font-semibold text-emerald-700">{money(results.summary.total_payout)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-stone-400">Discounts</p>
+                  <p className="text-lg font-semibold text-stone-800">{money(results.summary.total_discount)}</p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -242,8 +285,59 @@ export default function SearchPalette({ open, onClose }) {
                 </section>
               )}
 
+              {/* Listings */}
+              {results.listings?.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 px-4 py-2 bg-stone-50">
+                    <Layers className="w-3.5 h-3.5 text-stone-400" />
+                    <span className="text-[11px] font-semibold text-stone-500 uppercase tracking-wider">
+                      Listings ({results.listings.length})
+                    </span>
+                  </div>
+                  {results.listings.map((l) => (
+                    <button
+                      key={l.id}
+                      onClick={() => { navigate(l.status === 'pending_approval' ? '/admin/dashboard' : '/admin/listings'); onClose(); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 text-left transition-colors"
+                    >
+                      {l.photo_urls?.[0]
+                        ? <img src={l.photo_urls[0]} alt="" className="w-10 h-10 rounded-lg object-cover flex-shrink-0 bg-stone-100" />
+                        : <div className="w-10 h-10 rounded-lg bg-stone-100 flex items-center justify-center flex-shrink-0">
+                            <Package className="w-4 h-4 text-stone-400" />
+                          </div>
+                      }
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium text-stone-800 truncate">{l.designer || l.item_type || 'Untitled listing'}</p>
+                          {l.status && (
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${LISTING_STATUS_COLOR[l.status] || 'bg-stone-100 text-stone-600'}`}>
+                              {LISTING_STATUS_LABEL[l.status] || l.status}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5 text-xs text-stone-400">
+                          {l.designer && l.item_type && <span className="truncate">{l.item_type}</span>}
+                          {l.size && <span>· {l.size}</span>}
+                          {l.sellers?.name && <span className="truncate">· {l.sellers.name}</span>}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {l.asking_price_usd != null && (
+                          <span className="text-sm font-semibold text-stone-700">{money(l.asking_price_usd)}</span>
+                        )}
+                        {l.status === 'pending_approval' && daysAgo(l.created_at) && (
+                          <span className="text-[10px] text-stone-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> {daysAgo(l.created_at)}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </section>
+              )}
+
               {/* Empty state */}
-              {totalResults === 0 && !loading && (
+              {totalResults === 0 && !loading && !results.summary && (
                 <div className="py-12 text-center">
                   <Search className="w-8 h-8 text-stone-300 mx-auto mb-2" />
                   <p className="text-stone-400 text-sm">No results found</p>
