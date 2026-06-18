@@ -165,21 +165,24 @@ async function reconcileOwnership(req, res) {
     .select('id, email, shopify_product_ids');
   if (sErr) throw new Error(`Read sellers failed: ${sErr.message}`);
 
-  const byId = new Map(sellers.map(s => [s.id, s]));
-  const byEmail = new Map(sellers.map(s => [(s.email || '').toLowerCase(), s]));
+  const byId = new Map(sellers.map(s => [(s.id || '').trim(), s]));
+  const byEmail = new Map(sellers.map(s => [(s.email || '').trim().toLowerCase(), s]));
 
   // 3. Resolve each product's true owner → desired arrays (sellerId -> Set of product IDs).
+  //    Metafield values can carry stray whitespace — trim before matching.
   const desired = new Map();
   let orphans = 0, unknown = 0;
   const orphanSample = [], unknownSample = [];
 
   for (const p of products) {
+    const mfId = (p.sellerId || '').trim();
+    const mfEmail = (p.sellerEmail || '').trim().toLowerCase();
     let owner = null;
-    if (p.sellerId && byId.has(p.sellerId)) owner = byId.get(p.sellerId);
-    else if (p.sellerEmail && byEmail.has(p.sellerEmail.toLowerCase())) owner = byEmail.get(p.sellerEmail.toLowerCase());
+    if (mfId && byId.has(mfId)) owner = byId.get(mfId);
+    else if (mfEmail && byEmail.has(mfEmail)) owner = byEmail.get(mfEmail);
 
     if (!owner) {
-      if (!p.sellerId && !p.sellerEmail) {
+      if (!mfId && !mfEmail) {
         orphans++;
         if (orphanSample.length < 12) orphanSample.push(p.id);
       } else {
