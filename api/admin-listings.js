@@ -119,6 +119,8 @@ export default async function handler(req, res) {
           const rf = getMetafieldValue(metafields, 'custom', 'revision_fields');
           revisionFields = rf ? JSON.parse(rf) : null;
         } catch { revisionFields = null; }
+        const revisionRequestedByName = getMetafieldValue(metafields, 'custom', 'revision_requested_by_name')
+          || getMetafieldValue(metafields, 'custom', 'revision_requested_by_email') || null;
 
         // More detail for the review card so admins don't have to click through.
         const material = getMetafieldValue(metafields, 'custom', 'material') || '';
@@ -149,6 +151,7 @@ export default async function handler(req, res) {
           revisionNote,
           revisionRequestedAt,
           revisionFields,
+          revisionRequestedByName,
           seller: seller ? {
             id: seller.id,
             name: seller.name,
@@ -529,7 +532,7 @@ export default async function handler(req, res) {
 
     // REQUEST REVISION — keep draft alive, tag as needs-revision, notify seller
     if (action === 'request-revision' && req.method === 'POST') {
-      const { shopifyProductId, note, fields, skipNotification } = req.body;
+      const { shopifyProductId, note, fields, skipNotification, adminEmail } = req.body;
 
       if (!shopifyProductId || !note) {
         return res.status(400).json({ error: 'shopifyProductId and note required' });
@@ -552,6 +555,12 @@ export default async function handler(req, res) {
       await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_note', note, 'multi_line_text_field');
       await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_requested_at', new Date().toISOString(), 'single_line_text_field');
       if (fields?.length) await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_fields', JSON.stringify(fields), 'json');
+      // Record WHO asked (2-person team needs to know which of them requested it).
+      if (adminEmail) {
+        const requestedByName = await getAdminName(adminEmail);
+        await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_requested_by_email', adminEmail, 'single_line_text_field');
+        if (requestedByName) await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_requested_by_name', requestedByName, 'single_line_text_field');
+      }
       if (sellerEmail) await cacheBust(`listings:seller:${sellerEmail}`);
 
       const seller = await resolveSellerFromProduct(sellerEmail, sellerId, shopifyProductId, 'id, name, email, phone');

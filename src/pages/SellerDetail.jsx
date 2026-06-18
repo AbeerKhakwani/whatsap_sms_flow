@@ -226,7 +226,7 @@ export default function SellerDetail() {
       const res = await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopifyProductId: revisionProduct.id, note: builtNote, fields: selectedFields })
+        body: JSON.stringify({ shopifyProductId: revisionProduct.id, note: builtNote, fields: selectedFields, adminEmail: localStorage.getItem('admin_email') || undefined })
       });
       const data = await res.json();
       if (data.success) {

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Check, X, Pencil, ArrowLeft, ArrowRight, Loader2, Image as ImageIcon,
-  Sparkles, Globe, MessageCircle, User, RotateCcw, PartyPopper, Maximize2
+  Sparkles, Globe, MessageCircle, User, RotateCcw, PartyPopper, Maximize2, Plus
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 
@@ -72,6 +72,176 @@ function Detail({ label, value }) {
   );
 }
 
+const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', 'Unstitched'];
+const CONDITIONS = ['New with tags', 'Like new', 'Excellent', 'Good', 'Fair'];
+
+// In-place editor for the focused review card. Reuses the same endpoints as the full
+// editor page (update-listing + product-image), so the standalone page stays untouched.
+function InlineEditor({ listing, onSaved, onCancel }) {
+  const [form, setForm] = useState({
+    designer: listing.designer || '',
+    item_type: listing.item_type || '',
+    size: listing.size || '',
+    color: listing.color || '',
+    condition: listing.condition || '',
+    material: listing.material || '',
+    chest: listing.chest || '',
+    hip: listing.hip || '',
+    asking_price: listing.asking_price_usd ?? '',
+    original_price: listing.original_price ?? '',
+    commission_rate: listing.commission_rate ?? '',
+    description: listing.description || '',
+    tags: listing.tags || [],
+  });
+  const [images, setImages] = useState(listing.images || []); // [{id, src}]
+  const [saving, setSaving] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const fileRef = useRef(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` };
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin-listings?action=update-listing`, {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify({ id: listing.id, ...form }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'Save failed');
+      const ask = Math.round((parseFloat(form.asking_price) || 0) * 100) / 100;
+      const measurements = [form.chest && `Chest: ${form.chest}"`, form.hip && `Hip: ${form.hip}"`].filter(Boolean).join(' | ');
+      onSaved({
+        designer: form.designer,
+        product_name: [form.designer, form.item_type].filter(Boolean).join(' - '),
+        size: form.size,
+        condition: form.condition,
+        material: form.material,
+        measurements,
+        description: form.description,
+        asking_price_usd: ask,
+        list_price: d.list_price,
+        seller_payout: d.seller_payout,
+        tags: form.tags,
+        images: images.map(im => im.src),
+      });
+    } catch (e) { setErr(e.message); }
+    setSaving(false);
+  }
+
+  async function addPhoto(file) {
+    if (!file) return;
+    setPhotoBusy(true); setErr(null);
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(',')[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      const res = await fetch(`${API_URL}/api/product-image?action=add`, {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify({ productId: listing.id, base64, filename: file.name }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'Upload failed');
+      setImages(prev => [...prev, { id: d.imageId, src: d.imageUrl }]);
+    } catch (e) { setErr(e.message); }
+    setPhotoBusy(false);
+  }
+
+  async function removePhoto(imageId) {
+    setPhotoBusy(true); setErr(null);
+    try {
+      const res = await fetch(`${API_URL}/api/product-image?action=delete`, {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify({ productId: listing.id, imageId }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'Delete failed');
+      setImages(prev => prev.filter(im => im.id !== imageId));
+    } catch (e) { setErr(e.message); }
+    setPhotoBusy(false);
+  }
+
+  const inp = 'w-full text-sm border border-stone-200 rounded-lg px-3 py-2 outline-none focus:border-stone-400';
+  const lbl = 'text-[11px] uppercase tracking-wide text-stone-400 mb-1 block';
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <span className={lbl}>Photos</span>
+        <div className="flex gap-2 flex-wrap">
+          {images.map(im => (
+            <div key={im.id} className="relative w-16 h-16">
+              <img src={getThumbnail(im.src)} alt="" className="w-16 h-16 object-cover rounded-lg border border-stone-200" />
+              <button onClick={() => removePhoto(im.id)} disabled={photoBusy} aria-label="Remove photo"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center"><X className="w-3 h-3" /></button>
+            </div>
+          ))}
+          <button onClick={() => fileRef.current?.click()} disabled={photoBusy} aria-label="Add photo"
+            className="w-16 h-16 rounded-lg border-2 border-dashed border-stone-300 flex items-center justify-center text-stone-400 hover:border-stone-400">
+            {photoBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-5 h-5" />}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden"
+            onChange={e => { addPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div><span className={lbl}>Designer</span><input className={inp} value={form.designer} onChange={e => set('designer', e.target.value)} /></div>
+        <div><span className={lbl}>Item type</span><input className={inp} value={form.item_type} onChange={e => set('item_type', e.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <span className={lbl}>Size</span>
+          <select className={inp} value={form.size} onChange={e => set('size', e.target.value)}>
+            <option value="">—</option>
+            {SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            {form.size && !SIZES.includes(form.size) && <option value={form.size}>{form.size}</option>}
+          </select>
+        </div>
+        <div>
+          <span className={lbl}>Condition</span>
+          <select className={inp} value={form.condition} onChange={e => set('condition', e.target.value)}>
+            <option value="">—</option>
+            {CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            {form.condition && !CONDITIONS.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
+          </select>
+        </div>
+        <div><span className={lbl}>Color</span><input className={inp} value={form.color} onChange={e => set('color', e.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div><span className={lbl}>Material</span><input className={inp} value={form.material} onChange={e => set('material', e.target.value)} /></div>
+        <div><span className={lbl}>Chest (&quot;)</span><input className={inp} value={form.chest} onChange={e => set('chest', e.target.value)} /></div>
+        <div><span className={lbl}>Hip (&quot;)</span><input className={inp} value={form.hip} onChange={e => set('hip', e.target.value)} /></div>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div><span className={lbl}>Asking ($)</span><input type="number" className={inp} value={form.asking_price} onChange={e => set('asking_price', e.target.value)} /></div>
+        <div><span className={lbl}>Original ($)</span><input type="number" className={inp} value={form.original_price} onChange={e => set('original_price', e.target.value)} /></div>
+        <div><span className={lbl}>Commission (%)</span><input type="number" className={inp} value={form.commission_rate} onChange={e => set('commission_rate', e.target.value)} /></div>
+      </div>
+      <div><span className={lbl}>Description</span><textarea rows={4} className={inp} value={form.description} onChange={e => set('description', e.target.value)} /></div>
+      <div>
+        <span className={lbl}>Tags</span>
+        <input className={inp} value={form.tags.join(', ')} placeholder="tag1, tag2, …"
+          onChange={e => set('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean))} />
+      </div>
+
+      {err && <p className="text-xs text-red-600">{err}</p>}
+
+      <div className="flex gap-2 pt-1">
+        <button onClick={onCancel} disabled={saving} className="flex-1 py-2.5 text-sm rounded-xl border border-stone-200 text-stone-600">Cancel</button>
+        <button onClick={save} disabled={saving}
+          className="flex-1 py-2.5 text-sm rounded-xl bg-stone-900 text-white font-medium flex items-center justify-center gap-1.5 disabled:opacity-40">
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Save changes
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewQueue() {
   const navigate = useNavigate();
   const [queue, setQueue] = useState([]);
@@ -82,8 +252,35 @@ export default function ReviewQueue() {
   const [busy, setBusy] = useState(false);
   const pending = useRef(null);                      // { listing, timer }
   const touchX = useRef(null);
+  const [editListing, setEditListing] = useState(null); // full listing (action=listing) being edited
+  const [editLoading, setEditLoading] = useState(false);
 
   const current = queue[0] || null;
+  // Edit mode is derived: on only while the loaded listing matches the focused card,
+  // so moving to a new item (approve/skip) drops out of edit mode automatically.
+  const editing = !!editListing && editListing.id === current?.id;
+
+  // Open the in-place editor: fetch the full listing (pending payload lacks color,
+  // original_price, chest/hip, image IDs).
+  const openEditor = useCallback(async (listing) => {
+    if (!listing) return;
+    setEditLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin-listings?action=listing&id=${listing.id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
+      });
+      const d = await res.json();
+      if (d.success) setEditListing(d.listing);
+      else alert('Could not load listing: ' + (d.error || 'unknown error'));
+    } catch (e) { alert('Could not load listing: ' + e.message); }
+    setEditLoading(false);
+  }, []);
+
+  // Merge saved fields back into the queued card so it reflects the edit without a refetch.
+  const onEditorSaved = useCallback((merged, listingId) => {
+    setQueue(q => q.map(l => l.id === listingId ? { ...l, ...merged } : l));
+    setEditListing(null);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -176,7 +373,7 @@ export default function ReviewQueue() {
       await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
-        body: JSON.stringify({ shopifyProductId: listing.id, note: note.trim() }),
+        body: JSON.stringify({ shopifyProductId: listing.id, note: note.trim(), adminEmail: localStorage.getItem('admin_email') || undefined }),
       });
       setQueue(q => q.filter(l => l.id !== listing.id));
       setDoneToday(n => n + 1);
@@ -188,7 +385,7 @@ export default function ReviewQueue() {
   // Keyboard shortcuts (desktop). Disabled while a sheet is open (so typing works).
   useEffect(() => {
     function onKey(e) {
-      if (sheet || !current) return;
+      if (sheet || !current || editing) return;
       if (document.querySelector('[data-lightbox]')) return; // image zoom open — let it own the keys
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toLowerCase();
@@ -199,7 +396,7 @@ export default function ReviewQueue() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, sheet, approve, skip]);
+  }, [current, sheet, editing, approve, skip]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 animate-spin text-stone-400" /></div>;
@@ -282,8 +479,8 @@ export default function ReviewQueue() {
               else if (dx < -70) skip(current);
             }}
           >
-            {/* Photos */}
-            <PhotoGallery key={current.id} images={current.images} alt={current.product_name} />
+            {/* Photos (read mode; the editor manages its own photo strip) */}
+            {!editing && <PhotoGallery key={current.id} images={current.images} alt={current.product_name} />}
 
             <div className="p-4">
               <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -300,16 +497,15 @@ export default function ReviewQueue() {
                 <StateBadge listing={current} />
               </div>
 
-              <div className="flex gap-2 flex-wrap mt-3">
-                <span className="text-sm font-semibold px-3 py-1 rounded-lg bg-stone-50 text-stone-800">${current.asking_price_usd || 0}</span>
-                {current.size && <span className="text-sm px-3 py-1 rounded-lg bg-stone-50 text-stone-600">{current.size}</span>}
-                {current.condition && <span className="text-sm px-3 py-1 rounded-lg bg-stone-50 text-stone-600">{current.condition}</span>}
-              </div>
-
-              {/* What the seller was asked to fix — only on re-reviews */}
+              {/* What the seller was asked to fix — pinned on top, both view & edit modes */}
               {isReReview(current) && (
                 <div className="mt-4 rounded-xl bg-sky-50 border border-sky-100 p-3">
-                  <p className="text-xs font-semibold text-sky-800 flex items-center gap-1.5"><RotateCcw className="w-3.5 h-3.5" /> Seller revised this — you&apos;d asked them to fix:</p>
+                  <p className="text-xs font-semibold text-sky-800 flex items-center gap-1.5">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {current.revisionRequestedByName
+                      ? `Seller revised this — ${current.revisionRequestedByName} asked them to fix:`
+                      : "Seller revised this — you'd asked them to fix:"}
+                  </p>
                   <p className="text-sm text-sky-900 mt-1">{current.revisionNote || 'No note was saved with the original request.'}</p>
                   {current.revisionFields?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
@@ -321,28 +517,47 @@ export default function ReviewQueue() {
                 </div>
               )}
 
-              {/* Inline detail — no click-through needed */}
-              {(current.description || current.measurements || current.material) && (
-                <div className="mt-4 border-t border-stone-100 pt-4 space-y-3">
-                  {current.description && (
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Description</p>
-                      <p className="text-sm text-stone-700 whitespace-pre-wrap">{current.description}</p>
+              {editing ? (
+                <div className="mt-4">
+                  <InlineEditor
+                    listing={editListing}
+                    onSaved={(merged) => onEditorSaved(merged, editListing.id)}
+                    onCancel={() => setEditListing(null)}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-2 flex-wrap mt-3">
+                    <span className="text-sm font-semibold px-3 py-1 rounded-lg bg-stone-50 text-stone-800">${Math.round((current.asking_price_usd || 0) * 100) / 100}</span>
+                    {current.size && <span className="text-sm px-3 py-1 rounded-lg bg-stone-50 text-stone-600">{current.size}</span>}
+                    {current.condition && <span className="text-sm px-3 py-1 rounded-lg bg-stone-50 text-stone-600">{current.condition}</span>}
+                  </div>
+
+                  {/* Inline detail — no click-through needed */}
+                  {(current.description || current.measurements || current.material) && (
+                    <div className="mt-4 border-t border-stone-100 pt-4 space-y-3">
+                      {current.description && (
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-stone-400 mb-1">Description</p>
+                          <p className="text-sm text-stone-700 whitespace-pre-wrap">{current.description}</p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                        <Detail label="Measurements" value={current.measurements} />
+                        <Detail label="Material" value={current.material} />
+                        <Detail label="Lists at" value={`$${Math.round((current.list_price || current.asking_price_usd || 0) * 100) / 100} (incl. fee)`} />
+                        <Detail label="Payout if sold" value={current.seller_payout != null ? `$${Number(current.seller_payout).toFixed(2)}` : null} />
+                        <Detail label="Commission" value={current.commission_rate != null ? `${current.commission_rate}%` : null} />
+                      </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                    <Detail label="Measurements" value={current.measurements} />
-                    <Detail label="Material" value={current.material} />
-                    <Detail label="Lists at" value={`$${current.list_price || current.asking_price_usd || 0} (incl. fee)`} />
-                    <Detail label="Payout if sold" value={current.seller_payout != null ? `$${Number(current.seller_payout).toFixed(2)}` : null} />
-                    <Detail label="Commission" value={current.commission_rate != null ? `${current.commission_rate}%` : null} />
-                  </div>
-                </div>
-              )}
 
-              <Link to={`/admin/listings/${current.id}`} className="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-800 mt-4">
-                <Pencil className="w-3.5 h-3.5" /> Open full editor
-              </Link>
+                  <button onClick={() => openEditor(current)} disabled={editLoading}
+                    className="inline-flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-800 mt-4 disabled:opacity-50">
+                    {editLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Pencil className="w-3.5 h-3.5" />} Edit details here
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

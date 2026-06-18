@@ -142,7 +142,7 @@ function RevisionModal({ listing, onClose, onSent }) {
       const r = await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
-        body: JSON.stringify({ shopifyProductId: listing.id, note, fields: selectedFields })
+        body: JSON.stringify({ shopifyProductId: listing.id, note, fields: selectedFields, adminEmail: localStorage.getItem('admin_email') || undefined })
       });
       const d = await r.json();
       if (d.success) {
