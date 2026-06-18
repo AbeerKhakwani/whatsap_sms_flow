@@ -738,10 +738,16 @@ export default async function handler(req, res) {
           notify:   !skipNotification,
         });
 
-        // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
+        // Slack heads-up — seller name + item + amount.
         const payerName = await getAdminName(adminEmail);
         const amount = Number(transaction?.seller_payout ?? tx.seller_payout ?? 0).toFixed(2);
-        await notifySlack(`💸 Payout sent: "${transaction?.product_title || tx.product_title}" — $${amount}${payerName ? ` · by ${payerName}` : ''}`);
+        let sellerName = null;
+        if (tx.seller_id) {
+          const { data: s } = await supabase.from('sellers').select('name').eq('id', tx.seller_id).maybeSingle();
+          sellerName = s?.name || null;
+        }
+        const paidTitle = transaction?.product_title || tx.product_title;
+        await notifySlack(`💸 Payout sent${sellerName ? ` to ${sellerName}` : ''} — $${amount} for "${paidTitle}"${payerName ? ` · by ${payerName}` : ''}`);
 
         return res.status(200).json({ success: true, transaction, notificationSent });
       } catch (e) {
@@ -1120,13 +1126,23 @@ export default async function handler(req, res) {
         }
       }
 
-      // Slack heads-up (#dashboard) — no-op until SLACK_WEBHOOK_URL is configured.
+      // Slack heads-up — grouped by seller, with names, items, and per-seller subtotals.
       const payerName = await getAdminName(adminEmail);
       const grandTotal = validTxs.reduce((sum, t) => sum + (t.seller_payout || 0), 0);
-      const label = validTxs.length === 1
-        ? `"${validTxs[0].product_title}" — $${grandTotal.toFixed(2)}`
-        : `${validTxs.length} payouts, $${grandTotal.toFixed(2)} total`;
-      await notifySlack(`💸 Payout sent: ${label}${payerName ? ` · by ${payerName}` : ''}`);
+      const grouped = {};
+      for (const t of validTxs) (grouped[t.seller_id] ||= []).push(t);
+      const groupedSellerIds = Object.keys(grouped).filter(Boolean);
+      const { data: sellerNameRows } = groupedSellerIds.length
+        ? await supabase.from('sellers').select('id, name').in('id', groupedSellerIds)
+        : { data: [] };
+      const nameById = Object.fromEntries((sellerNameRows || []).map(s => [s.id, s.name]));
+      const lines = Object.entries(grouped).map(([sid, txs]) => {
+        const subtotal = txs.reduce((s, t) => s + (t.seller_payout || 0), 0);
+        const items = txs.map(t => t.product_title).filter(Boolean).join(', ');
+        return `• ${nameById[sid] || 'Unknown seller'} — $${subtotal.toFixed(2)}${items ? ` (${items})` : ''}`;
+      });
+      const header = `💸 Payout sent — $${grandTotal.toFixed(2)} total${payerName ? ` · by ${payerName}` : ''}`;
+      await notifySlack([header, ...lines].join('\n'));
 
       return res.status(200).json({
         success: true,
