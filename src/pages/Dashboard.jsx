@@ -1,20 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Mic, MicOff, Camera, Trash2, RotateCcw, ArrowRight, Pencil } from 'lucide-react';
+import { Check, X, Clock, DollarSign, Shirt, Sparkles, Image, Banknote, Plus, Loader2, Search, Mic, MicOff, Camera, ArrowRight } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { useImageUpload } from '../hooks/useImageUpload';
-
-const REJECTION_REASONS = [
-  { value: 'poor_photos', label: 'Poor Photo Quality' },
-  { value: 'missing_info', label: 'Missing Information' },
-  { value: 'wrong_designer', label: 'Not Pakistani Designer' },
-  { value: 'condition_issues', label: 'Condition Issues' },
-  { value: 'pricing_too_high', label: 'Pricing Too High' },
-  { value: 'duplicate', label: 'Duplicate Listing' },
-  { value: 'not_resale', label: 'Not Eligible for Resale' },
-  { value: 'other', label: 'Other' }
-];
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -22,16 +11,7 @@ export default function Dashboard() {
   const [payouts, setPayouts] = useState([]);
   const [totalPending, setTotalPending] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null);
-  const [approving, setApproving] = useState(null);
   const [stats, setStats] = useState({ pending: 0, approved: 0, sold: 0 });
-  const [rejectModal, setRejectModal] = useState({ open: false, listing: null });
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectNote, setRejectNote] = useState('');
-  const [approveModal, setApproveModal] = useState({ open: false, listing: null });
-  const [revisionModal, setRevisionModal] = useState({ open: false, listing: null });
-  const [revisionNote, setRevisionNote] = useState('');
-  const [submittingRevision, setSubmittingRevision] = useState(false);
 
   // Admin Create Listing state
   const [createModal, setCreateModal] = useState(false);
@@ -49,6 +29,7 @@ export default function Dashboard() {
   const [adminScrapeUrl, setAdminScrapeUrl] = useState('');
   const [adminScraping, setAdminScraping] = useState(false);
   const [voiceError, setVoiceError] = useState('');
+  const [togglingConcierge, setTogglingConcierge] = useState(null);
 
   // Voice recording hook for admin create
   const voice = useVoiceRecording({
@@ -106,15 +87,6 @@ export default function Dashboard() {
     setLoading(false);
   }
 
-  function openApproveModal(listing) {
-    setApproveModal({ open: true, listing });
-  }
-
-  function closeApproveModal() {
-    setApproveModal({ open: false, listing: null });
-  }
-
-  const [togglingConcierge, setTogglingConcierge] = useState(null);
   async function toggleConcierge(listing, event) {
     event.stopPropagation();
     if (togglingConcierge) return;
@@ -143,36 +115,6 @@ export default function Dashboard() {
       alert(`Failed: ${err.message}`);
     }
     setTogglingConcierge(null);
-  }
-
-  async function confirmApproval() {
-    const { listing } = approveModal;
-
-    setApproving(listing.id);
-    try {
-      const response = await fetch('/api/admin-listings?action=approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shopifyProductId: listing.shopify_product_id,
-          adminEmail: localStorage.getItem('admin_email') || undefined
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setListings(prev => prev.filter(l => l.id !== listing.id));
-        setStats(prev => ({ ...prev, pending: prev.pending - 1, approved: prev.approved + 1 }));
-        setExpandedId(null);
-        closeApproveModal();
-      } else {
-        alert(`Error: ${data.error || 'Failed to approve'}`);
-      }
-    } catch (error) {
-      alert(`Error: ${error.message}`);
-    }
-    setApproving(null);
   }
 
   // Admin listing helpers
@@ -289,119 +231,6 @@ export default function Dashboard() {
       setCreateError(err.message);
     }
     setCreatingListing(false);
-  }
-
-  function openRejectModal(listing) {
-    setRejectModal({ open: true, listing });
-    setRejectReason('');
-    setRejectNote('');
-  }
-
-  function closeRejectModal() {
-    setRejectModal({ open: false, listing: null });
-    setRejectReason('');
-    setRejectNote('');
-  }
-
-  function openRevisionModal(listing) {
-    setRevisionModal({ open: true, listing });
-    setRevisionNote('');
-  }
-
-  function closeRevisionModal() {
-    setRevisionModal({ open: false, listing: null });
-    setRevisionNote('');
-  }
-
-  async function submitRevision() {
-    const { listing } = revisionModal;
-    if (!revisionNote.trim()) return;
-
-    setSubmittingRevision(true);
-    try {
-      const response = await fetch('/api/admin-listings?action=request-revision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shopifyProductId: listing.id, note: revisionNote.trim() })
-      });
-      const data = await response.json();
-      if (data.success) {
-        setListings(prev => prev.map(l =>
-          l.id === listing.id ? { ...l, tags: [...(l.tags || []).filter(t => t !== 'pending-approval'), 'needs-revision'] } : l
-        ));
-        closeRevisionModal();
-      } else {
-        alert(`Error: ${data.error || 'Failed to request revision'}`);
-      }
-    } catch (err) {
-      alert(`Error: ${err.message}`);
-    }
-    setSubmittingRevision(false);
-  }
-
-  async function submitRejection() {
-    const { listing } = rejectModal;
-
-    if (!rejectReason) {
-      alert('Please select a rejection reason');
-      return;
-    }
-
-    setApproving(listing.id);
-    try {
-      const reasonLabel = REJECTION_REASONS.find(r => r.value === rejectReason)?.label || rejectReason;
-
-      const response = await fetch('/api/admin-listings?action=reject', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shopifyProductId: listing.shopify_product_id,
-          reason: reasonLabel,
-          note: rejectNote.trim() || null
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setListings(prev => prev.filter(l => l.id !== listing.id));
-        setStats(prev => ({ ...prev, pending: prev.pending - 1 }));
-        setExpandedId(null);
-        closeRejectModal();
-      } else {
-        alert(`Error: ${data.error || 'Failed to reject'}`);
-      }
-    } catch (error) {
-      alert(`Error: ${error.message}`);
-    }
-    setApproving(null);
-  }
-
-  async function simulateSale(listing) {
-    if (!confirm(`Simulate a sale for "${listing.product_name}"? This will create a test transaction and notify the seller.`)) return;
-    try {
-      const res = await fetch('/api/admin-listings?action=simulate-sale', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: listing.shopify_product_id,
-          sellerId: listing.seller?.id,
-          salePrice: listing.asking_price_usd
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(data.message);
-      } else {
-        alert(`Error: ${data.error}`);
-      }
-    } catch (err) {
-      alert(`Error: ${err.message}`);
-    }
-  }
-
-  function toggleExpand(id) {
-    setExpandedId(expandedId === id ? null : id);
   }
 
   if (loading) {
@@ -521,7 +350,7 @@ export default function Dashboard() {
                   </div>
                 )}
               <div className="hover:bg-gray-50 transition-colors">
-                {/* Collapsed Header */}
+                {/* Collapsed Header — opens its own review page */}
                 <div
                   className="p-4 cursor-pointer flex items-center gap-4"
                   onClick={() => navigate(`/admin/listings/${listing.id}`)}
@@ -590,177 +419,6 @@ export default function Dashboard() {
                   {/* Opens its own review page */}
                   <ArrowRight className="w-5 h-5 text-gray-300 flex-shrink-0" />
                 </div>
-
-                {/* Expanded Details */}
-                {expandedId === listing.id && (
-                  <div className="px-4 pb-4 space-y-4 bg-gray-50 border-t border-gray-100">
-                    {/* Seller Info */}
-                    {listing.seller && (
-                      <div className="pt-4">
-                        <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-                          <User className="w-4 h-4" />
-                          Seller
-                        </h4>
-                        <div className="bg-white p-3 rounded-lg shadow-sm space-y-1">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium text-gray-900">{listing.seller.name || 'Unknown'}</p>
-                              <p className="text-sm text-gray-600">{listing.seller.email}</p>
-                              {listing.seller.phone && !listing.seller.phone.startsWith('NOPHONE') && !listing.seller.phone.startsWith('RESET_') && (
-                                <p className="text-sm text-gray-600">{listing.seller.phone}</p>
-                              )}
-                            </div>
-                            {listing.seller_payout > 0 && (
-                              <div className="text-right">
-                                <p className="text-xs text-gray-500">Payout if sold</p>
-                                <p className="text-lg font-bold text-green-600">${listing.seller_payout.toFixed(2)}</p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Photo Gallery */}
-                    <div className={listing.seller ? '' : 'pt-4'}>
-                      <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-                        <Image className="w-4 h-4" />
-                        Photos ({listing.images?.length || 0})
-                      </h4>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {listing.images?.length > 0 ? listing.images.map((url, idx) => (
-                          <a
-                            key={idx}
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="aspect-square rounded-lg overflow-hidden bg-gray-200 hover:opacity-90 transition-opacity"
-                          >
-                            <img
-                              src={getThumbnail(url)}
-                              alt={`Photo ${idx + 1}`}
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                              onError={(e) => e.target.src = 'https://via.placeholder.com/200?text=Error'}
-                            />
-                          </a>
-                        )) : (
-                          <div className="aspect-square rounded-lg bg-gray-200 flex items-center justify-center text-gray-400">
-                            <Image className="w-8 h-8" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Details Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-white p-3 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-                          <Tag className="w-3 h-3" />
-                          Designer
-                        </div>
-                        <p className="font-medium text-gray-900">{listing.designer || 'Unknown'}</p>
-                      </div>
-
-                      <div className="bg-white p-3 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-                          <Shirt className="w-3 h-3" />
-                          Size
-                        </div>
-                        <p className="font-medium text-gray-900">{listing.size || 'Unknown'}</p>
-                      </div>
-
-                      <div className="bg-white p-3 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-                          <Sparkles className="w-3 h-3" />
-                          Condition
-                        </div>
-                        <p className="font-medium text-gray-900">{listing.condition || 'Unknown'}</p>
-                      </div>
-
-                      <div className="bg-white p-3 rounded-lg shadow-sm">
-                        <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
-                          <DollarSign className="w-3 h-3" />
-                          Seller Asking Price
-                        </div>
-                        <p className="font-medium text-green-600">${listing.asking_price_usd || 0}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">Lists at ${listing.asking_price_usd || 0} (+$10 fee)</p>
-                      </div>
-                    </div>
-
-                    {/* Tags */}
-                    {listing.tags && listing.tags.length > 0 && (
-                      <div className="bg-white p-3 rounded-lg shadow-sm">
-                        <div className="text-gray-500 text-xs mb-2">Tags</div>
-                        <div className="flex flex-wrap gap-1">
-                          {listing.tags.map((tag, idx) => (
-                            <span key={idx} className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Description */}
-                    <div className="bg-white p-3 rounded-lg shadow-sm">
-                      <div className="text-gray-500 text-xs mb-1">Description</div>
-                      <p className="text-gray-700 text-sm">{listing.description || 'No description'}</p>
-                    </div>
-
-                    {/* Shopify Link */}
-                    <div className="bg-blue-50 p-3 rounded-lg">
-                      <a
-                        href={listing.shopify_admin_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline text-sm flex items-center gap-1"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                        View/Edit in Shopify Admin
-                      </a>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex gap-3 pt-2">
-                      <button
-                        onClick={() => openApproveModal(listing)}
-                        disabled={approving === listing.id}
-                        className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 rounded-lg font-semibold hover:from-green-600 hover:to-emerald-600 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        <Check className="w-5 h-5" />
-                        {listing.tags?.includes('seller-revised') ? 'Re-review & Approve' : 'Review & Approve'}
-                      </button>
-
-                      <button
-                        onClick={() => openRevisionModal(listing)}
-                        disabled={approving === listing.id}
-                        className="px-4 bg-amber-100 text-amber-700 py-3 rounded-lg font-semibold hover:bg-amber-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                        title="Request seller to update something"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Revise
-                      </button>
-
-                      <button
-                        onClick={() => openRejectModal(listing)}
-                        disabled={approving === listing.id}
-                        className="px-4 bg-red-100 text-red-600 py-3 rounded-lg font-semibold hover:bg-red-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        <X className="w-5 h-5" />
-                        Reject
-                      </button>
-                    </div>
-                    {listing.seller?.id && (
-                      <button
-                        onClick={() => simulateSale(listing)}
-                        className="w-full mt-2 text-xs text-gray-500 hover:text-purple-600 py-1 transition-colors"
-                      >
-                        Simulate Sale (test shipping flow)
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
               </div>
               );
@@ -768,76 +426,6 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-
-      {/* Approval Modal */}
-      {approveModal.open && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                <Check className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Approve Listing</h3>
-                <p className="text-sm text-gray-500">{approveModal.listing?.product_name}</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="text-sm text-gray-600 space-y-1">
-                  <p><span className="font-medium">Seller:</span> {approveModal.listing?.seller_name || approveModal.listing?.seller_email || 'Unknown'}</p>
-                  <p><span className="font-medium">Price:</span> ${approveModal.listing?.price || '—'}</p>
-                  {approveModal.listing?.size && <p><span className="font-medium">Size:</span> {approveModal.listing.size}</p>}
-                </div>
-              </div>
-
-              <a
-                href={`https://${import.meta.env.VITE_SHOPIFY_STORE_URL}/admin/products/${approveModal.listing?.shopify_product_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
-              >
-                <ExternalLink className="w-4 h-4" />
-                Edit in Shopify before approving
-              </a>
-
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                <p className="text-xs text-green-800">
-                  This will make the listing live, add "New Arrivals" tag, and notify the seller via email and WhatsApp.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={closeApproveModal}
-                disabled={approving === approveModal.listing?.id}
-                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmApproval}
-                disabled={approving === approveModal.listing?.id}
-                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {approving === approveModal.listing?.id ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Approving...
-                  </>
-                ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    Approve & Make Live
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Create Listing Modal */}
       {createModal && (
@@ -1106,170 +694,6 @@ export default function Dashboard() {
                   <><Loader2 className="w-4 h-4 animate-spin" /> Creating...</>
                 ) : (
                   <><Plus className="w-4 h-4" /> Create Draft</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Revision Request Modal */}
-      {revisionModal.open && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                <RotateCcw className="w-5 h-5 text-amber-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Request Revision</h3>
-                <p className="text-sm text-gray-500">{revisionModal.listing?.product_name}</p>
-              </div>
-            </div>
-
-            {/* Quick chips */}
-            <div className="flex flex-wrap gap-2 mb-3">
-              {[
-                'Please update the price',
-                'Please update the designer name',
-                'Please submit a clearer photo of the tag',
-                'Please add more photos',
-              ].map(chip => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => setRevisionNote(chip)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                    revisionNote === chip
-                      ? 'bg-amber-100 border-amber-400 text-amber-800 font-medium'
-                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-amber-300'
-                  }`}
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-
-            <textarea
-              value={revisionNote}
-              onChange={(e) => setRevisionNote(e.target.value)}
-              placeholder="Or write a custom note for the seller..."
-              rows={3}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none text-sm"
-            />
-
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
-              <p className="text-xs text-amber-800">
-                The seller will receive a WhatsApp message and email with your note and a link to update their listing. The draft stays alive.
-              </p>
-            </div>
-
-            <div className="flex gap-3 mt-5">
-              <button
-                onClick={closeRevisionModal}
-                disabled={submittingRevision}
-                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitRevision}
-                disabled={submittingRevision || !revisionNote.trim()}
-                className="flex-1 px-4 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {submittingRevision ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="w-4 h-4" />
-                    Send Revision Request
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Rejection Modal */}
-      {rejectModal.open && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-red-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Reject Listing</h3>
-                <p className="text-sm text-gray-500">{rejectModal.listing?.product_name}</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Reason for rejection *
-                </label>
-                <select
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                >
-                  <option value="">Select a reason...</option>
-                  {REJECTION_REASONS.map(reason => (
-                    <option key={reason.value} value={reason.value}>
-                      {reason.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Additional note (optional)
-                </label>
-                <textarea
-                  value={rejectNote}
-                  onChange={(e) => setRejectNote(e.target.value)}
-                  placeholder="Add any specific feedback for the seller..."
-                  rows={3}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
-                />
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <p className="text-xs text-amber-800">
-                  The seller will receive an email and WhatsApp message with this rejection reason.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={closeRejectModal}
-                disabled={approving === rejectModal.listing?.id}
-                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitRejection}
-                disabled={approving === rejectModal.listing?.id || !rejectReason}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {approving === rejectModal.listing?.id ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Rejecting...
-                  </>
-                ) : (
-                  <>
-                    <X className="w-4 h-4" />
-                    Reject & Notify
-                  </>
                 )}
               </button>
             </div>
