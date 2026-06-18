@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Check, X, Clock, User, DollarSign, Tag, Shirt, Palette, Sparkles, Image, ExternalLink, Banknote, AlertCircle, CheckCircle, Plus, Loader2, Search, Mic, MicOff, Camera, Trash2, RotateCcw, ArrowRight, Pencil } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
@@ -17,6 +17,7 @@ const REJECTION_REASONS = [
 ];
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [listings, setListings] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [totalPending, setTotalPending] = useState(0);
@@ -467,13 +468,23 @@ export default function Dashboard() {
             <Clock className="w-4 h-4" />
             Pending Approval ({listings.length})
           </h2>
-          <button
-            onClick={() => setCreateModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Listing
-          </button>
+          <div className="flex items-center gap-2">
+            {listings.length > 0 && (
+              <Link
+                to="/admin/review"
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                Review all <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            )}
+            <button
+              onClick={() => setCreateModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Listing
+            </button>
+          </div>
         </div>
 
         {listings.length === 0 ? (
@@ -513,7 +524,7 @@ export default function Dashboard() {
                 {/* Collapsed Header */}
                 <div
                   className="p-4 cursor-pointer flex items-center gap-4"
-                  onClick={() => toggleExpand(listing.id)}
+                  onClick={() => navigate(`/admin/listings/${listing.id}`)}
                 >
                   {/* Thumbnail */}
                   <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 flex-shrink-0">
@@ -576,24 +587,8 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Open full edit page */}
-                  <Link
-                    to={`/admin/listings/${listing.id}`}
-                    onClick={(e) => e.stopPropagation()}
-                    title="Open full edit page"
-                    className="flex-shrink-0 p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </Link>
-
-                  {/* Expand Arrow */}
-                  <div className="flex-shrink-0">
-                    {expandedId === listing.id ? (
-                      <ChevronUp className="w-5 h-5 text-gray-400" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-400" />
-                    )}
-                  </div>
+                  {/* Opens its own review page */}
+                  <ArrowRight className="w-5 h-5 text-gray-300 flex-shrink-0" />
                 </div>
 
                 {/* Expanded Details */}
