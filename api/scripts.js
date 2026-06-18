@@ -173,6 +173,7 @@ async function reconcileOwnership(req, res) {
   const desired = new Map();
   let orphans = 0, unknown = 0;
   const orphanSample = [], unknownSample = [];
+  const orphanStatus = {}; // ACTIVE/ARCHIVED/DRAFT breakdown for orphans
 
   for (const p of products) {
     const mfId = (p.sellerId || '').trim();
@@ -184,6 +185,7 @@ async function reconcileOwnership(req, res) {
     if (!owner) {
       if (!mfId && !mfEmail) {
         orphans++;
+        orphanStatus[p.status] = (orphanStatus[p.status] || 0) + 1;
         if (orphanSample.length < 12) orphanSample.push(p.id);
       } else {
         unknown++;
@@ -207,7 +209,7 @@ async function reconcileOwnership(req, res) {
   changes.sort((a, b) => (b.added + b.removed) - (a.added + a.removed));
 
   log('');
-  log(`Orphan products (no seller metafield): ${orphans}${orphanSample.length ? `  e.g. [${orphanSample.join(', ')}]` : ''}`);
+  log(`Orphan products (no seller metafield): ${orphans}  [${Object.entries(orphanStatus).map(([k, v]) => `${k}:${v}`).join(' ')}]${orphanSample.length ? `  e.g. [${orphanSample.join(', ')}]` : ''}`);
   log(`Unknown-owner products (metafield seller not in DB): ${unknown}${unknownSample.length ? `  e.g. [${unknownSample.join(', ')}]` : ''}`);
   log(`Sellers needing array changes: ${changes.length}`);
   for (const c of changes.slice(0, 25)) {
