@@ -1,9 +1,13 @@
 {% comment %}
   CHEST SIZE FILTER — The Phir Story
 
-  A dual-handle range-slider section that filters products by chest size.
-  Chest size is parsed from the `custom.measurements` product metafield,
-  which stores strings like: "Chest: 38" | Hip: 40""
+  A dual-handle range-slider section that filters products by PIT-TO-PIT chest size
+  (lay flat, armpit to armpit). Parsed from the `custom.measurements` product
+  metafield, e.g. "Medium | Chest: 20" | Hip: 21"".
+
+  NOTE: some listings store full chest CIRCUMFERENCE (~34-56") instead of pit-to-pit
+  (~14-26"). The script normalizes both to pit-to-pit (values >= 28" are halved) so the
+  slider stays consistent. Cleanest long-term fix is to store one unit at the source.
 
   HOW TO USE:
   1. Copy this file to your theme's /sections/ folder as chest-size-filter.liquid
@@ -215,7 +219,7 @@
     <span id="cf-min-val-{{ section.id }}">{{ section.settings.min_size }}</span>
     &nbsp;—&nbsp;
     <span id="cf-max-val-{{ section.id }}">{{ section.settings.max_size }}</span>
-    <span style="font-size: 13px; font-weight: 400; color: #888;"> inches</span>
+    <span style="font-size: 13px; font-weight: 400; color: #888;"> in · pit-to-pit</span>
   </div>
 
   <div class="cf-slider-wrap">
@@ -317,10 +321,23 @@
   function extractChest(str) {
     if (!str) return null;
     // Match "Chest: 38", "Chest: 24.5", "chest: 38 in", "Chest 38\"", bare number
+    var raw = null;
     var m = str.match(/chest\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)/i);
-    if (m) return parseFloat(m[1]);
-    var bare = str.match(/^\s*(\d{1,3}(?:\.\d+)?)\s*$/);
-    return bare ? parseFloat(bare[1]) : null;
+    if (m) raw = parseFloat(m[1]);
+    else {
+      var bare = str.match(/^\s*(\d{1,3}(?:\.\d+)?)\s*$/);
+      if (bare) raw = parseFloat(bare[1]);
+    }
+    return normalizePitToPit(raw);
+  }
+
+  // Listings store chest two ways: pit-to-pit (lay-flat, armpit-to-armpit, ~14-26")
+  // and full circumference (~34-56"). Normalize everything to pit-to-pit so the slider
+  // is consistent: anything >= 28" is treated as full circumference and halved.
+  function normalizePitToPit(v) {
+    if (v === null || isNaN(v)) return null;
+    if (v >= 28) v = v / 2;
+    return Math.round(v * 2) / 2; // nearest 0.5"
   }
 
   function updateFill() {
@@ -359,7 +376,7 @@
           '<img src="' + p.image + '" alt="' + p.title.replace(/"/g, '&quot;') + '" loading="lazy">' +
           '<p class="cf-p-title">' + p.title + '</p>' +
           '<p class="cf-p-price">' + p.price + '</p>' +
-          '<p class="cf-p-chest">Chest ' + (p.chest % 1 === 0 ? p.chest : p.chest.toFixed(1)) + '"</p>';
+          '<p class="cf-p-chest">Pit-to-pit ' + (p.chest % 1 === 0 ? p.chest : p.chest.toFixed(1)) + '"</p>';
         frag.appendChild(card);
       });
       resultsEl.appendChild(frag);
@@ -403,25 +420,25 @@
       "type": "text",
       "id": "subheading",
       "label": "Subheading",
-      "default": "Slide to your chest size and discover pieces that fit perfectly"
+      "default": "Slide to your pit-to-pit measurement — measure a shirt that fits you, laid flat, armpit to armpit"
     },
     {
       "type": "range",
       "id": "min_size",
-      "label": "Minimum chest size (inches)",
-      "min": 28,
-      "max": 50,
+      "label": "Slider start — pit-to-pit (inches)",
+      "min": 10,
+      "max": 24,
       "step": 1,
-      "default": 32
+      "default": 14
     },
     {
       "type": "range",
       "id": "max_size",
-      "label": "Maximum chest size (inches)",
-      "min": 28,
-      "max": 56,
+      "label": "Slider end — pit-to-pit (inches)",
+      "min": 24,
+      "max": 40,
       "step": 1,
-      "default": 46
+      "default": 30
     },
     {
       "type": "collection",
