@@ -514,6 +514,12 @@ export default function ReviewQueue() {
                       ))}
                     </div>
                   )}
+                  {current.sellerReply && (
+                    <div className="mt-3 pt-3 border-t border-sky-200">
+                      <p className="text-xs font-semibold text-sky-800 flex items-center gap-1.5"><MessageCircle className="w-3.5 h-3.5" /> Their reply:</p>
+                      <p className="text-sm text-sky-900 mt-1 whitespace-pre-wrap">{current.sellerReply}</p>
+                    </div>
+                  )}
                 </div>
               )}
 

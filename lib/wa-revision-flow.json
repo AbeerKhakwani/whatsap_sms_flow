@@ -79,6 +79,13 @@
             "visible": "${data.show_measurements}"
           },
           {
+            "type": "TextArea",
+            "name": "reply",
+            "label": "Message to the team (optional)",
+            "helper-text": "Anything you want us to know about your update",
+            "required": false
+          },
+          {
             "type": "Footer",
             "label": "Submit Update",
             "on-click-action": {
@@ -91,7 +98,8 @@
                 "designer": "${form.designer}",
                 "title": "${form.title}",
                 "description": "${form.description}",
-                "measurements": "${form.measurements}"
+                "measurements": "${form.measurements}",
+                "reply": "${form.reply}"
               }
             }
           }

@@ -15,6 +15,7 @@ import crypto from 'crypto';
 import * as smsDb from '../lib/sms-db.js';
 import * as redisPhotos from '../lib/redis-photos.js';
 import * as shopifyGraphQL from '../lib/shopify-graphql.js';
+import { fetchMetafields, upsertMetafield } from '../lib/shopify-metafields.js';
 import { sendVerificationCode } from '../lib/email.js';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
@@ -1156,6 +1157,16 @@ async function handleRevisionFlowCompletion(phone, flowData, res) {
     const updateData = await updateRes.json();
     if (!updateData.success) throw new Error(updateData.error || 'Update failed');
     console.log('✅ Listing updated via seller API');
+
+    // Capture the seller's free-text reply (new WhatsApp Flow field) so the admin
+    // re-review panel can show what they said back.
+    if (flowData.reply?.trim()) {
+      try {
+        const mf = await fetchMetafields(productId);
+        await upsertMetafield(productId, mf, 'custom', 'seller_revision_reply', flowData.reply.trim(), 'multi_line_text_field');
+        await upsertMetafield(productId, mf, 'custom', 'seller_revision_reply_at', new Date().toISOString(), 'single_line_text_field');
+      } catch (e) { console.error('Could not store seller reply:', e.message); }
+    }
 
     // Upload any photos the seller submitted
     const photos = flowData.photos || [];

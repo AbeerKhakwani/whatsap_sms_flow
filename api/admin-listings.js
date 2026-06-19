@@ -121,6 +121,10 @@ export default async function handler(req, res) {
         } catch { revisionFields = null; }
         const revisionRequestedByName = getMetafieldValue(metafields, 'custom', 'revision_requested_by_name')
           || getMetafieldValue(metafields, 'custom', 'revision_requested_by_email') || null;
+        const sellerReplyRaw = getMetafieldValue(metafields, 'custom', 'seller_revision_reply') || null;
+        const sellerReplyAt = getMetafieldValue(metafields, 'custom', 'seller_revision_reply_at') || null;
+        // Only show a reply that came AFTER the latest revision request (ISO strings sort lexically) — avoids stale replies.
+        const sellerReply = (sellerReplyRaw && (!revisionRequestedAt || (sellerReplyAt && sellerReplyAt >= revisionRequestedAt))) ? sellerReplyRaw : null;
 
         // More detail for the review card so admins don't have to click through.
         const material = getMetafieldValue(metafields, 'custom', 'material') || '';
@@ -152,6 +156,7 @@ export default async function handler(req, res) {
           revisionRequestedAt,
           revisionFields,
           revisionRequestedByName,
+          sellerReply,
           seller: seller ? {
             id: seller.id,
             name: seller.name,
