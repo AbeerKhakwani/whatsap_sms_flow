@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Check, X, Pencil, ArrowLeft, ArrowRight, Loader2, Image as ImageIcon,
-  Sparkles, Globe, MessageCircle, User, RotateCcw, PartyPopper, Maximize2, Plus
+  Sparkles, Globe, MessageCircle, User, RotateCcw, PartyPopper, Maximize2, Plus, SkipForward
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 
@@ -10,6 +10,16 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 const UNDO_MS = 5000;
 
 const REJECT_REASONS = ['Photos too unclear', 'Price too high', 'Wrong/missing details', 'Not a fit for the store', 'Authenticity concern'];
+
+// Fields the seller can be asked to fix — keys match the backend show_* flags + Flow inputs.
+const REVISE_FIELDS = [
+  { key: 'photos', label: 'Photos' },
+  { key: 'price', label: 'Price' },
+  { key: 'description', label: 'Description' },
+  { key: 'measurements', label: 'Measurements' },
+  { key: 'title', label: 'Title' },
+  { key: 'designer', label: 'Designer' },
+];
 
 function sourceOf(tags) {
   // pending API returns tags as an array; tolerate a comma-string too.
@@ -244,6 +254,10 @@ function InlineEditor({ listing, onSaved, onCancel }) {
 
 export default function ReviewQueue() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // ?queue=new → approvals only · ?queue=rereview → re-reviews only · (none) → both
+  const rawMode = searchParams.get('queue');
+  const mode = rawMode === 'new' || rawMode === 'rereview' ? rawMode : null;
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [doneToday, setDoneToday] = useState(0);
@@ -295,12 +309,17 @@ export default function ReviewQueue() {
           const actionable = (data.listings || []).filter(l => !(l.tags || []).includes('needs-revision'));
           const revised = actionable.filter(l => (l.tags || []).includes('seller-revised'));
           const fresh = actionable.filter(l => !(l.tags || []).includes('seller-revised'));
-          setQueue([...revised, ...fresh]); // re-review first, then new submissions
+          // Scope to a single queue when asked, so "Approvals" shows only new items and
+          // "Re-reviews" shows only seller-fixed ones — no mixing.
+          const scoped = mode === 'rereview' ? revised
+                       : mode === 'new' ? fresh
+                       : [...revised, ...fresh]; // default: re-review first, then new
+          setQueue(scoped);
         }
       } catch { /* surfaced via empty state */ }
       setLoading(false);
     })();
-  }, []);
+  }, [mode]);
 
   // Fire the actual approve call (deferred so Undo never sends a premature email).
   const commitApprove = useCallback((listing) => {
@@ -364,7 +383,7 @@ export default function ReviewQueue() {
     setBusy(false);
   }
 
-  async function confirmRevise(note) {
+  async function confirmRevise({ mode, note, fields }) {
     const listing = sheet?.listing;
     if (!listing || !note?.trim()) return;
     setBusy(true);
@@ -373,7 +392,13 @@ export default function ReviewQueue() {
       await fetch(`${API_URL}/api/admin-listings?action=request-revision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
-        body: JSON.stringify({ shopifyProductId: listing.id, note: note.trim(), adminEmail: localStorage.getItem('admin_email') || undefined }),
+        body: JSON.stringify({
+          shopifyProductId: listing.id,
+          note: note.trim(),
+          mode,
+          fields: mode === 'fields' ? fields : [],
+          adminEmail: localStorage.getItem('admin_email') || undefined,
+        }),
       });
       setQueue(q => q.filter(l => l.id !== listing.id));
       setDoneToday(n => n + 1);
@@ -390,7 +415,7 @@ export default function ReviewQueue() {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toLowerCase();
       if (k === 'a' || e.key === 'ArrowRight') { e.preventDefault(); approve(current); }
-      else if (k === 'arrowleft' || e.key === 'ArrowLeft') { e.preventDefault(); skip(current); }
+      else if (k === 's' || k === 'arrowleft' || e.key === 'ArrowLeft') { e.preventDefault(); skip(current); }
       else if (k === 'e') { e.preventDefault(); setSheet({ type: 'revise', listing: current }); }
       else if (k === 'x') { e.preventDefault(); setSheet({ type: 'reject', listing: current }); }
     }
@@ -405,6 +430,7 @@ export default function ReviewQueue() {
   const left = queue.length;
   const total = doneToday + left;
   const pct = total ? Math.round((doneToday / total) * 100) : 100;
+  const scopeNoun = mode === 'rereview' ? 'to re-review' : mode === 'new' ? 'to approve' : 'to review';
 
   return (
     <div className="max-w-5xl mx-auto pb-28">
@@ -413,12 +439,12 @@ export default function ReviewQueue() {
         <button onClick={() => navigate('/admin/dashboard')} className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg" aria-label="Back to dashboard"><ArrowLeft className="w-5 h-5" /></button>
         <div className="flex-1">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-stone-900">{left} to review</span>
+            <span className="text-sm font-medium text-stone-900">{left} {scopeNoun}</span>
             <span className="text-xs text-green-600 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> {doneToday} done today</span>
           </div>
           <div className="h-1.5 bg-stone-100 rounded-full mt-1.5 overflow-hidden"><div className="h-full bg-green-500 transition-all" style={{ width: `${pct}%` }} /></div>
         </div>
-        <span className="hidden md:inline text-xs text-stone-400">A approve · E revise · X reject · ←/→</span>
+        <span className="hidden md:inline text-xs text-stone-400">A approve · S skip · E revise · X reject</span>
       </div>
 
       {!current ? (
@@ -577,6 +603,10 @@ export default function ReviewQueue() {
               className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-stone-200 text-red-600 text-sm hover:bg-red-50">
               <X className="w-4 h-4" /> Reject
             </button>
+            <button onClick={() => skip(current)} title="Decide later — moves to the back of the queue"
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-stone-200 text-stone-600 text-sm hover:bg-stone-50">
+              <SkipForward className="w-4 h-4" /> Skip
+            </button>
             <div className="flex-1" />
             <button onClick={() => setSheet({ type: 'revise', listing: current })}
               className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-stone-200 text-amber-700 text-sm hover:bg-amber-50">
@@ -720,15 +750,50 @@ function RejectForm({ busy, onCancel, onConfirm }) {
 }
 
 function ReviseForm({ busy, sellerName, onCancel, onConfirm }) {
+  const [mode, setMode] = useState('question');   // 'question' = ask · 'fields' = request edits
   const [note, setNote] = useState('');
+  const [fields, setFields] = useState([]);
+  const toggleField = (k) => setFields(f => f.includes(k) ? f.filter(x => x !== k) : [...f, k]);
+  const canSend = note.trim() && (mode === 'question' || fields.length > 0);
+  const seg = (m, label) => (
+    <button onClick={() => setMode(m)}
+      className={`px-3 py-1.5 ${m === 'fields' ? 'border-l border-stone-200' : ''} ${mode === m ? 'bg-amber-50 text-amber-800 font-medium' : 'text-stone-500 hover:text-stone-700'}`}>
+      {label}
+    </button>
+  );
   return (
     <div>
+      <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden mb-3 text-sm">
+        {seg('question', 'Ask a question')}
+        {seg('fields', 'Request changes')}
+      </div>
+
+      {mode === 'fields' && (
+        <div className="mb-3">
+          <p className="text-[11px] uppercase tracking-wide text-stone-400 mb-1.5">Only these will show in their WhatsApp form</p>
+          <div className="flex flex-wrap gap-2">
+            {REVISE_FIELDS.map(f => {
+              const on = fields.includes(f.key);
+              return (
+                <button key={f.key} onClick={() => toggleField(f.key)}
+                  className={`text-xs px-3 py-1.5 rounded-full border inline-flex items-center gap-1 ${on ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-stone-200 text-stone-600'}`}>
+                  {on && <Check className="w-3 h-3" />}{f.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} autoFocus
-        placeholder={`What should ${sellerName || 'the seller'} fix? (sent to them)`}
+        placeholder={mode === 'question'
+          ? `What do you want to ask ${sellerName || 'the seller'}? They'll reply right in WhatsApp.`
+          : `Tell ${sellerName || 'the seller'} what to fix${fields.length ? ` (${fields.length} field${fields.length > 1 ? 's' : ''} selected)` : ''}…`}
         className="w-full text-sm border border-stone-200 rounded-lg px-3 py-2 outline-none focus:border-stone-400 mb-3" />
+
       <div className="flex gap-2">
         <button onClick={onCancel} className="flex-1 py-2.5 text-sm rounded-xl border border-stone-200 text-stone-600">Cancel</button>
-        <button onClick={() => onConfirm(note)} disabled={busy || !note.trim()}
+        <button onClick={() => onConfirm({ mode, note, fields })} disabled={busy || !canSend}
           className="flex-1 py-2.5 text-sm rounded-xl bg-amber-600 text-white font-medium disabled:opacity-40 flex items-center justify-center gap-1.5">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pencil className="w-4 h-4" />} Send request
         </button>

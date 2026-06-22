@@ -73,7 +73,7 @@ async function main() {
   }
 
   const form = new FormDataClass();
-  form.append('name', 'revision_update_flow');
+  form.append('name', 'flow.json'); // Meta requires the FLOW_JSON asset name to be exactly 'flow.json'
   form.append('asset_type', 'FLOW_JSON');
   form.append('file', new BlobClass([flowJson], { type: 'application/json' }), 'wa-revision-flow.json');
 

@@ -268,7 +268,7 @@ export default function Dashboard() {
           <div className="flex flex-col gap-2.5">
             {reReview.length > 0 && (
               <Link
-                to="/admin/review"
+                to="/admin/review?queue=rereview"
                 className="flex items-center gap-3.5 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 active:scale-[0.99] transition p-4"
                 style={{ borderLeft: '3px solid #378ADD' }}
               >
@@ -283,7 +283,7 @@ export default function Dashboard() {
             )}
             {fresh.length > 0 && (
               <Link
-                to="/admin/review"
+                to="/admin/review?queue=new"
                 className="flex items-center gap-3.5 bg-white rounded-xl border border-gray-200 hover:bg-gray-50 active:scale-[0.99] transition p-4"
                 style={{ borderLeft: '3px solid #EF9F27' }}
               >
