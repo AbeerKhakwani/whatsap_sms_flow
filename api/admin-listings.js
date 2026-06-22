@@ -58,7 +58,7 @@ async function sendRevisionFlowMessage(phone, productTitle, note, productId, flo
           flow_token: `rev_${productId}`,
           flow_id: flowId,
           flow_cta: 'Update Listing',
-          flow_action: 'data_exchange',
+          flow_action: 'navigate',
           flow_action_payload: {
             screen: 'REVISION',
             data: screenData
@@ -537,7 +537,7 @@ export default async function handler(req, res) {
 
     // REQUEST REVISION — keep draft alive, tag as needs-revision, notify seller
     if (action === 'request-revision' && req.method === 'POST') {
-      const { shopifyProductId, note, fields, skipNotification, adminEmail } = req.body;
+      const { shopifyProductId, note, fields, mode, skipNotification, adminEmail } = req.body;
 
       if (!shopifyProductId || !note) {
         return res.status(400).json({ error: 'shopifyProductId and note required' });
@@ -560,6 +560,8 @@ export default async function handler(req, res) {
       await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_note', note, 'multi_line_text_field');
       await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_requested_at', new Date().toISOString(), 'single_line_text_field');
       if (fields?.length) await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_fields', JSON.stringify(fields), 'json');
+      // Remember which shape this was so the re-review panel reads right ("asked:" vs "asked to fix:").
+      await upsertMetafield(shopifyProductId, metafields, 'custom', 'revision_mode', mode === 'question' ? 'question' : 'fields', 'single_line_text_field');
       // Record WHO asked (2-person team needs to know which of them requested it).
       if (adminEmail) {
         const requestedByName = await getAdminName(adminEmail);
@@ -607,8 +609,10 @@ export default async function handler(req, res) {
           // can update the exact requested fields directly inside WhatsApp.
           const REVISION_FLOW_ID = process.env.WHATSAPP_REVISION_FLOW_ID;
           if (REVISION_FLOW_ID) {
-            // Build visibility flags from the selected fields array
-            const fieldSet = new Set(fields || []);
+            // Question mode: no fields to edit — the reply box is the whole point, so make
+            // it required + prominent. Field mode: show only the picked inputs.
+            const isQuestion = mode === 'question';
+            const fieldSet = new Set(isQuestion ? [] : (fields || []));
             const flowScreenData = {
               product_id:         shopifyProductId.toString(),
               product_title:      product.title,
@@ -619,12 +623,15 @@ export default async function handler(req, res) {
               show_designer:      fieldSet.has('designer'),
               show_measurements:  fieldSet.has('measurements'),
               show_description:   fieldSet.has('description'),
-              show_title:         fieldSet.has('title')
+              show_title:         fieldSet.has('title'),
+              reply_required:     isQuestion,
+              reply_label:        isQuestion ? 'Your answer' : 'Message to the team (optional)'
             };
 
-            // Fallback: if no fields provided, show all
-            if (!fields?.length) {
-              Object.keys(flowScreenData).forEach(k => { if (k.startsWith('show_')) flowScreenData[k] = true; });
+            // Field mode with nothing picked → show all (legacy fallback).
+            if (!isQuestion && !fields?.length) {
+              ['show_photos', 'show_price', 'show_designer', 'show_measurements', 'show_description', 'show_title']
+                .forEach(k => { flowScreenData[k] = true; });
             }
 
             await sendRevisionFlowMessage(seller.phone, product.title, note, shopifyProductId, REVISION_FLOW_ID, flowScreenData);

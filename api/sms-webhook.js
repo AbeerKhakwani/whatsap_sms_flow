@@ -17,13 +17,16 @@ import * as redisPhotos from '../lib/redis-photos.js';
 import * as shopifyGraphQL from '../lib/shopify-graphql.js';
 import { fetchMetafields, upsertMetafield } from '../lib/shopify-metafields.js';
 import { sendVerificationCode } from '../lib/email.js';
+import { sendEmail } from '../lib/send-email.js';
+import { logMessage } from '../lib/messages.js';
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'tps123';
-const API_BASE = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : 'https://sell.thephirstory.com';
+// API_BASE lets internal cross-calls be redirected (e.g. a local test server) instead of
+// always hitting prod. Falls back to the Vercel URL, then the prod domain.
+const API_BASE = process.env.API_BASE
+  || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://sell.thephirstory.com');
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
@@ -387,35 +390,30 @@ export default async function handler(req, res) {
       // Log to messages table on terminate (final state). The Supabase builder is a
       // thenable, not a Promise — it has no .catch, so wrap in try/catch.
       if (event === 'terminate') {
-        try {
-          await supabase.from('messages').insert({
-            seller_id: seller?.id || null,
-            type: 'call',
-            recipient: from,
-            content: isMissed ? 'Missed call' : `Call completed (${duration}s)`,
-            context: 'call',
-            metadata: { call_id: callId, event, status: call.status, from, duration },
-            status: 'received'
-          });
-        } catch {}
+        await logMessage({
+          sellerId: seller?.id || null,
+          type: 'call',
+          recipient: from,
+          content: isMissed ? 'Missed call' : `Call completed (${duration}s)`,
+          context: 'call',
+          metadata: { call_id: callId, event, status: call.status, from, duration },
+          status: 'received'
+        });
 
         // Missed call — auto-reply to seller + alert admin
         if (isMissed) {
           await sendMessage(from,
             `Hi${seller?.name ? ` ${seller.name}` : ''}! Sorry we missed your call 😊 We'll get back to you shortly. Feel free to message us here anytime!`
           );
-
-          const { Resend } = await import('resend');
-          const resend = new Resend(process.env.RESEND_API_KEY);
-          await resend.emails.send({
-            from: process.env.FROM_EMAIL || 'The Phir Story <updates@sellphirstory.com>',
+          await sendEmail({
             to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
             subject: `📞 Missed WhatsApp call from ${seller?.name || from}`,
             html: `<p>You missed a WhatsApp call.</p>
                    <p><strong>From:</strong> ${seller?.name || 'Unknown seller'} (${from})<br>
                    <strong>Call ID:</strong> ${callId}</p>
-                   <p>An auto-reply was sent. Call them back on WhatsApp when available.</p>`
-          }).catch(() => {});
+                   <p>An auto-reply was sent. Call them back on WhatsApp when available.</p>`,
+            context: 'missed_call'
+          });
         }
       }
 
@@ -581,7 +579,7 @@ export default async function handler(req, res) {
       }
 
       // Forward to the offer respond endpoint
-      const apiUrl = `https://${process.env.VERCEL_URL || 'sell.thephirstory.com'}/api/seller?action=respond-offer`;
+      const apiUrl = `${API_BASE}/api/seller?action=respond-offer`;
       const apiRes = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -612,7 +610,7 @@ export default async function handler(req, res) {
     switch (conv.state) {
       case 'new':
       case 'welcome':
-        await sendWelcome(phone);
+        await handleUnflowedMessage(phone, text, message);
         return res.status(200).json({ status: 'welcome' });
 
       case 'awaiting_email':
@@ -631,7 +629,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ status: 'awaiting flow' });
 
       default:
-        await sendWelcome(phone);
+        await handleUnflowedMessage(phone, text, message);
         return res.status(200).json({ status: 'welcome' });
     }
 
@@ -648,6 +646,54 @@ async function sendWelcome(phone) {
     `Hi! 👋 Welcome to The Phir Story.\n\n`,
     [{ id: 'sell', title: 'Click Here To SELL' }]
   );
+}
+
+// Escape user-supplied text before dropping it into a notification email body.
+function escapeHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Free-text that lands outside any active flow or known command (welcome/default states).
+// Without this it would just bounce the welcome menu back and the team would never see it.
+// Log it (in-site record) + email the team — both via the shared service helpers.
+async function forwardFreeText(phone, text, seller) {
+  await logMessage({
+    sellerId: seller?.id || null,
+    type: 'whatsapp',
+    recipient: phone,
+    content: text,
+    context: 'inbound_message',
+    metadata: { from: phone },
+    status: 'received'
+  });
+  await sendEmail({
+    to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
+    subject: `💬 WhatsApp message from ${seller?.name || phone}`,
+    html: `<p>New WhatsApp message (outside the selling flow):</p>
+           <p><strong>From:</strong> ${escapeHtml(seller?.name) || 'Unknown'} (${phone})</p>
+           <blockquote style="border-left:3px solid #ddd;margin:0;padding:8px 12px;color:#333;">${escapeHtml(text)}</blockquote>
+           <p style="color:#666;font-size:13px;">Reply on WhatsApp within 24h to respond directly.</p>`,
+    context: 'inbound_forward'
+  });
+}
+
+// Message arrived in a no-flow state (new/welcome/default). If it's genuine free text,
+// capture + forward it and acknowledge; otherwise just show the welcome menu.
+async function handleUnflowedMessage(phone, text, message) {
+  if (message?.type === 'text' && text) {
+    const { data: seller } = await supabase
+      .from('sellers')
+      .select('id, name')
+      .eq('phone', phone)
+      .maybeSingle();
+    await forwardFreeText(phone, text, seller);
+    await sendButtons(phone,
+      `Thanks for your message! 🙏 Our team will get back to you shortly.\n\nWant to list an item while you wait?`,
+      [{ id: 'sell', title: 'Click Here To SELL' }]
+    );
+    return;
+  }
+  await sendWelcome(phone);
 }
 
 async function handleSellCommand(phone, conv, res) {
@@ -1201,6 +1247,32 @@ async function handleRevisionFlowCompletion(phone, flowData, res) {
         }
       }
     }
+
+    // Notify the team that the seller sent their revision back — so it doesn't sit in
+    // the re-review queue unseen. Email ping (missed-call pattern) + a durable messages
+    // row the dashboard can surface as a "new reply" notification.
+    const changed = Object.keys(updatePayload).filter(k => !['email', 'productId'].includes(k));
+    if (photos.length) changed.push(`${photos.length} photo${photos.length > 1 ? 's' : ''}`);
+    const replyText = flowData.reply?.trim() || null;
+    const revTitle = updatePayload.title || flowData.product_title || 'their listing';
+    await logMessage({
+      sellerId: seller.id || null,
+      type: 'whatsapp',
+      recipient: phone,
+      content: replyText || '(revision submitted — no message)',
+      context: 'revision_reply',
+      metadata: { productId, changed },
+      status: 'received'
+    });
+    await sendEmail({
+      to: process.env.ADMIN_EMAIL || 'thephirstory@gmail.com',
+      subject: `✏️ ${seller.name || 'A seller'} sent a revision back — re-review needed`,
+      html: `<p><strong>${escapeHtml(seller.name) || 'A seller'}</strong> updated <strong>${escapeHtml(revTitle)}</strong> and it's back in your re-review queue.</p>
+             ${changed.length ? `<p><strong>Updated:</strong> ${changed.map(escapeHtml).join(', ')}</p>` : ''}
+             ${replyText ? `<p><strong>Their message:</strong></p><blockquote style="border-left:3px solid #ddd;margin:0;padding:8px 12px;color:#333;">${escapeHtml(replyText)}</blockquote>` : ''}
+             <p><a href="https://sell.thephirstory.com/admin/review?queue=rereview">Open re-review queue →</a></p>`,
+      context: 'revision_reply'
+    });
 
     await sendMessage(phone,
       `Thanks! Your listing has been updated and sent back to our team for review.\n\nWe'll notify you once it's approved. 🙏`

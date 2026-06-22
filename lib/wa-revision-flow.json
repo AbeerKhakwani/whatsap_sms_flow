@@ -1,10 +1,14 @@
 {
-  "version": "3.1",
+  "version": "7.3",
+  "routing_model": {
+    "REVISION": []
+  },
   "screens": [
     {
       "id": "REVISION",
       "title": "Update Your Listing",
       "terminal": true,
+      "success": true,
       "data": {
         "product_id": { "type": "string", "__example__": "9876543210" },
         "product_title": { "type": "string", "__example__": "Blue Maria B Kurta" },
@@ -15,7 +19,9 @@
         "show_designer": { "type": "boolean", "__example__": true },
         "show_measurements": { "type": "boolean", "__example__": true },
         "show_description": { "type": "boolean", "__example__": true },
-        "show_title": { "type": "boolean", "__example__": true }
+        "show_title": { "type": "boolean", "__example__": true },
+        "reply_label": { "type": "string", "__example__": "Message to the team (optional)" },
+        "reply_required": { "type": "boolean", "__example__": false }
       },
       "layout": {
         "type": "SingleColumnLayout",
@@ -26,7 +32,7 @@
           },
           {
             "type": "TextBody",
-            "text": "Requested update: ${data.revision_note}"
+            "text": "${data.revision_note}"
           },
           {
             "type": "PhotoPicker",
@@ -36,15 +42,17 @@
             "photo-source": "camera_gallery",
             "min-uploaded-photos": 1,
             "max-uploaded-photos": 5,
+            "max-file-size-kb": 10240,
             "visible": "${data.show_photos}"
           },
           {
             "type": "TextInput",
             "input-type": "number",
             "name": "price",
-            "label": "Your Asking Price (CAD)",
+            "label": "Your Asking Price (USD)",
             "init-value": "${data.current_price}",
-            "helper-text": "Enter your asking price. A platform fee will be added on checkout.",
+            "helper-text": "A platform fee is added at checkout.",
+            "required": false,
             "visible": "${data.show_price}"
           },
           {
@@ -53,6 +61,7 @@
             "name": "designer",
             "label": "Designer / Brand Name",
             "helper-text": "e.g. Maria B, Elan, Sana Safinaz",
+            "required": false,
             "visible": "${data.show_designer}"
           },
           {
@@ -61,13 +70,15 @@
             "name": "title",
             "label": "Listing Title",
             "helper-text": "e.g. Maria B Embroidered Lawn 3-Piece",
+            "required": false,
             "visible": "${data.show_title}"
           },
           {
             "type": "TextArea",
             "name": "description",
             "label": "Description",
-            "helper-text": "Describe the item, its condition, and any relevant details",
+            "helper-text": "Describe the item, its condition, and any details",
+            "required": false,
             "visible": "${data.show_description}"
           },
           {
@@ -75,19 +86,20 @@
             "input-type": "text",
             "name": "measurements",
             "label": "Measurements",
-            "helper-text": "e.g. Chest 36\" / Waist 30\" / Hip 38\" / Length 54\"",
+            "helper-text": "e.g. Chest 36\" / Hip 38\" / Length 54\"",
+            "required": false,
             "visible": "${data.show_measurements}"
           },
           {
             "type": "TextArea",
             "name": "reply",
-            "label": "Message to the team (optional)",
-            "helper-text": "Anything you want us to know about your update",
-            "required": false
+            "label": "${data.reply_label}",
+            "helper-text": "Type your response here",
+            "required": "${data.reply_required}"
           },
           {
             "type": "Footer",
-            "label": "Submit Update",
+            "label": "Submit",
             "on-click-action": {
               "name": "complete",
               "payload": {
