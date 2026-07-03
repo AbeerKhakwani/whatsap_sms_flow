@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Search, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Search, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { activityConfig, timeAgo } from '../pages/ActivityFeed';
 import SearchPalette from './SearchPalette';
 
@@ -15,6 +15,12 @@ export default function Layout({ children }) {
   const [bellOpen, setBellOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Desktop sidebar collapse (icons only) — remembered across sessions.
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('admin_nav_collapsed') === '1');
+  const toggleCollapsed = () => setCollapsed(c => {
+    localStorage.setItem('admin_nav_collapsed', c ? '0' : '1');
+    return !c;
+  });
   const bellRef = useRef(null);
 
   // Close the mobile nav drawer whenever the route changes.
@@ -164,7 +170,7 @@ export default function Layout({ children }) {
     );
   }
 
-  const NavLinks = ({ onItem }) => (
+  const NavLinks = ({ onItem, iconsOnly = false }) => (
     <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
       {navigation.map((item) => {
         const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
@@ -173,8 +179,10 @@ export default function Layout({ children }) {
             key={item.path}
             to={item.path}
             onClick={onItem}
+            title={iconsOnly ? item.name : undefined}
             className={`
-              flex items-center gap-3 px-4 py-3 rounded-lg transition-all text-sm
+              flex items-center rounded-lg transition-all text-sm
+              ${iconsOnly ? 'justify-center py-3' : 'gap-3 px-4 py-3'}
               ${isActive
                 ? 'bg-stone-800 text-white font-medium'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
@@ -182,7 +190,7 @@ export default function Layout({ children }) {
             `}
           >
             <item.icon className="w-5 h-5 flex-shrink-0" />
-            <span>{item.name}</span>
+            {!iconsOnly && <span>{item.name}</span>}
           </Link>
         );
       })}
@@ -191,20 +199,36 @@ export default function Layout({ children }) {
 
   return (
     <div className="flex h-screen bg-stone-50">
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:flex w-64 bg-stone-100 border-r border-stone-200 flex-col">
-        <div className="p-5 border-b border-stone-200">
-          <img src="/logo.svg" alt="The Phir Story" className="h-12" />
-          <p className="text-[10px] text-stone-400 mt-2 uppercase tracking-widest font-medium">Admin Dashboard</p>
+      {/* Desktop sidebar — collapsible to an icons-only rail */}
+      <aside className={`hidden lg:flex bg-stone-100 border-r border-stone-200 flex-col transition-[width] duration-200 ${collapsed ? 'w-[68px]' : 'w-64'}`}>
+        <div className={`border-b border-stone-200 ${collapsed ? 'p-3' : 'p-5'}`}>
+          {collapsed ? (
+            <button onClick={toggleCollapsed} title="Expand menu" aria-label="Expand menu"
+              className="w-full flex items-center justify-center py-2 rounded-lg text-stone-500 hover:text-stone-800 hover:bg-stone-200 transition">
+              <PanelLeftOpen className="w-5 h-5" />
+            </button>
+          ) : (
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <img src="/logo.svg" alt="The Phir Story" className="h-12" />
+                <p className="text-[10px] text-stone-400 mt-2 uppercase tracking-widest font-medium">Admin Dashboard</p>
+              </div>
+              <button onClick={toggleCollapsed} title="Collapse menu" aria-label="Collapse menu"
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition flex-shrink-0">
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
-        <NavLinks />
+        <NavLinks iconsOnly={collapsed} />
         <div className="p-3 border-t border-stone-200">
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-2 w-full text-left text-stone-400 hover:text-stone-700 transition text-sm"
+            title={collapsed ? 'Sign Out' : undefined}
+            className={`flex items-center w-full text-stone-400 hover:text-stone-700 transition text-sm ${collapsed ? 'justify-center py-2' : 'gap-3 px-4 py-2 text-left'}`}
           >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
+            <LogOut className="w-4 h-4 flex-shrink-0" />
+            {!collapsed && <span>Sign Out</span>}
           </button>
         </div>
       </aside>
