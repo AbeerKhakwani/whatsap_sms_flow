@@ -240,6 +240,7 @@ export default async function handler(req, res) {
           seller_payout: sellerPayout,
           tags: toTagArray(product.tags),
           images: (product.images || []).map(img => ({ id: img.id, src: img.src })),
+          original_listing_url: getMetafieldValue(metafields, 'custom', 'original_listing_url') || '',
           variant_id: variant.id,
           shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
           seller: seller || null,
@@ -251,7 +252,7 @@ export default async function handler(req, res) {
     // (so metafields stay authoritative). Works for drafts (pending) and active (live) products.
     if (action === 'update-listing' && req.method === 'POST') {
       const { id, designer, item_type, size, color, condition, material, chest, hip,
-              description, asking_price, original_price, commission_rate, tags } = req.body;
+              description, asking_price, original_price, commission_rate, tags, original_listing_url } = req.body;
       if (!id) return res.status(400).json({ error: 'id required' });
 
       let product;
@@ -303,6 +304,8 @@ export default async function handler(req, res) {
         if (payout != null) ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_payout', JSON.stringify({ amount: payout.toFixed(2), currency_code: 'USD' }), 'money'));
       }
       if (commission_rate != null && commission_rate !== '') ops.push(upsertMetafield(id, metafields, 'pricing', 'commission_rate', String(commission), 'number_integer'));
+      // Link to the brand's original retail listing (shown on the review card; scrape source)
+      if (original_listing_url != null) ops.push(upsertMetafield(id, metafields, 'custom', 'original_listing_url', original_listing_url, 'single_line_text_field'));
       await Promise.all(ops);
 
       // Bust caches so the dashboard / listings grid / seller portal reflect the edit

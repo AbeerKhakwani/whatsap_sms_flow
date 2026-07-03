@@ -696,7 +696,22 @@ async function handleUnflowedMessage(phone, text, message) {
   await sendWelcome(phone);
 }
 
+// US + Canada share country code +1. We can only accept sellers who can ship the item
+// domestically from North America, so anything else (e.g. +92) is turned away up front.
+function isNorthAmericaPhone(phone) {
+  const digits = (phone || '').replace(/\D/g, '');
+  return digits.length === 11 && digits.startsWith('1');
+}
+
 async function handleSellCommand(phone, conv, res) {
+  // Eligibility gate: US/Canada sellers only (we sell + ship within North America).
+  if (!isNorthAmericaPhone(phone)) {
+    await sendMessage(phone,
+      "Thanks so much for your interest! 🙏\n\nRight now we can only accept items from sellers based in the *US or Canada* — we sell and ship within North America.\n\nIf that's you and you're on an international number, email us at thephirstory@gmail.com and we'll help."
+    );
+    return res.status(200).json({ status: 'rejected_non_north_america' });
+  }
+
   // Check if already authorized
   if (conv.is_authorized && conv.seller_id) {
     console.log(`✅ ${phone} already authorized - asking for description`);
@@ -1037,6 +1052,14 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
     const seller = await smsDb.findSellerByPhone(phone);
     if (!seller) {
       throw new Error('Seller not found');
+    }
+
+    // Require at least one photo before we create anything. The Flow's PhotoPicker enforces
+    // a minimum too, but never trust the client — guard it server-side.
+    const submittedPhotos = flowData.photos || [];
+    if (!submittedPhotos.length) {
+      await sendMessage(phone, "📸 Almost there — your listing needs at least one photo. Reply SELL to start again and add photos before you submit.");
+      return res.status(200).json({ status: 'no_photos' });
     }
 
     // Step 1: Create Shopify draft product
