@@ -1154,7 +1154,7 @@ export default async function handler(req, res) {
             const itemDesc = txs.length === 1 ? txs[0].product_title : `${txs.length} items`;
             const metadata = { totalPayout, itemCount: txs.length, paymentMethod: method };
 
-            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, method, screenshotUrl);
+            const { subject, html } = payoutNotificationEmail(seller.name, itemDesc, totalPayout, method, screenshotUrl, payoutReference);
             await sendEmail({ sellerId, to: seller.email, subject, html, context: 'payout_sent', metadata });
             notificationsSent++;
 
