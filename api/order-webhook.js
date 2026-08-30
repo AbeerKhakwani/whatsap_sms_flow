@@ -118,11 +118,21 @@ export default async function handler(req, res) {
         console.warn(`Could not fetch metafields for product ${productId}:`, e.message);
       }
 
+      let productTags = [];
       try {
         const product = await getProduct(productId, false);
-        isConcierge = (product?.tags || '').split(',').map(t => t.trim()).includes('concierge');
+        productTags = (product?.tags || '').split(',').map(t => t.trim());
+        isConcierge = productTags.includes('concierge');
       } catch (e) {
         console.warn(`Could not fetch product tags for ${productId}:`, e.message);
+      }
+
+      // Service add-ons (e.g. Optional Dry Cleaning) are Phirstory revenue, not
+      // consigned items — no transaction, no seller payout, no missing-seller alert.
+      if (productTags.includes('service') || productTags.includes('add-on')) {
+        console.log(`   ↷ Skipping service add-on line item: "${productTitle}"`);
+        results.push({ productId, skipped: 'service-addon' });
+        continue;
       }
 
       // The concierge tag is authoritative — keep listing_type in sync so reminders,
