@@ -14,8 +14,9 @@ import { getAllSellerMetafields } from '../lib/shopify-graphql.js';
 import { scrapePage } from '../lib/scraper.js';
 import { canonicalCondition, isConditionTag } from '../lib/conditions.js';
 import { parseChest, parseHip, mergeMeasurements } from '../lib/measurements.js';
-import { scanCompleteness, GAP_DEFS } from '../lib/listing-completeness.js';
+import { scanCompleteness, GAP_DEFS, getListingDetail } from '../lib/listing-completeness.js';
 import { reconcileListing, setCommission } from '../lib/listing-sync.js';
+import { claim, release, claimedByOthers } from '../lib/deck-claims.js';
 import { toTagArray } from '../lib/tags.js';
 import { withCache, cacheBust } from '../lib/cache.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
@@ -1863,7 +1864,35 @@ export default async function handler(req, res) {
       const status = req.query.status === 'draft' ? 'draft' : 'active';
       const result = await withCache(`${CACHE_COMPLETENESS}:${status}`, 300,
         async () => scanCompleteness({ status }));
-      return res.status(200).json({ success: true, status, gapDefs: GAP_DEFS, ...result });
+      // Several admins work this queue at once, so hide what someone else is holding.
+      // Claims expire on their own, so an abandoned batch returns to the queue.
+      const admin = String(req.query.admin || '').trim().toLowerCase();
+      const held = admin ? await claimedByOthers(admin) : new Set();
+      const items = result.items.filter(i => !held.has(String(i.id)));
+      return res.status(200).json({ success: true, status, gapDefs: GAP_DEFS,
+        ...result, items, claimedElsewhere: result.items.length - items.length });
+    }
+
+    // Hold a batch so no one else is dealt it. Advisory only — it never blocks a write.
+    if (action === 'claim-listings' && req.method === 'POST') {
+      const { ids, admin } = req.body || {};
+      if (!admin) return res.status(400).json({ error: 'admin required' });
+      const claimed = await claim(ids || [], String(admin).trim().toLowerCase());
+      return res.status(200).json({ success: true, claimed });
+    }
+    if (action === 'release-listings' && req.method === 'POST') {
+      const { ids, admin } = req.body || {};
+      if (!admin) return res.status(400).json({ error: 'admin required' });
+      await release(ids || [], String(admin).trim().toLowerCase());
+      return res.status(200).json({ success: true });
+    }
+
+    // Full current state of ONE listing, for the once-over panel on a cleanup card.
+    if (action === 'listing-detail' && req.method === 'GET') {
+      if (!req.query.id) return res.status(400).json({ error: 'id required' });
+      const listing = await getListingDetail(req.query.id);
+      if (!listing) return res.status(404).json({ error: 'Listing not found' });
+      return res.status(200).json({ success: true, listing });
     }
 
     // Write ONLY the fields present in the body. Unlike action=update this never

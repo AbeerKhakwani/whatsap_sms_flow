@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Loader2, Check, SkipForward, ExternalLink, AlertTriangle, RefreshCw,
-  ChevronRight, Layers, Sparkles
+  ChevronRight, Layers, Sparkles, ChevronDown
 } from 'lucide-react';
 import { CONDITIONS, CONDITION_LABELS } from '../../lib/conditions.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const SHOPIFY_STORE = import.meta.env.VITE_SHOPIFY_STORE_URL || 'ba42c1.myshopify.com';
 const BATCH = 5;
+const ADMIN = () => (localStorage.getItem('admin_email') || '').trim().toLowerCase();
 const PLATFORM_FEE = 10;          // mirrors lib/payout-calculation.js
 const DEFAULT_COMMISSION = 18;    // house default applied to new listings
 const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', 'Unstitched'];
@@ -48,6 +49,110 @@ function Field({ label, hint, wide, filled, derived, children }) {
 
 const inputCls = 'w-full px-3 py-2 border border-stone-300 rounded-lg text-sm bg-white ' +
   'focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B]';
+
+
+/* Read-only "is everything actually right?" panel: the variants, every tag and every
+   metafield as they stand right now. Loaded per card so the bulk scan stays light. */
+function OnceOver({ id, sizeTagsDisagree }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  // Fetched on open rather than in an effect: it is a response to a click, and the detail
+  // is only ever needed for the card the admin actually chooses to inspect.
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (!next || data || loading) return;
+    setLoading(true); setErr('');
+    try {
+      const r = await fetch(`${API_URL}/api/admin-listings?action=listing-detail&id=${id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) throw new Error(d.error || 'Could not load');
+      setData(d.listing);
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="rounded-lg border border-stone-200 bg-stone-50/60">
+      <button type="button" onClick={toggle}
+        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left text-xs font-medium text-stone-600 hover:text-stone-900">
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? '' : '-rotate-90'}`} />
+        Once-over — variants, tags &amp; metafields
+        {sizeTagsDisagree && (
+          <span className="ml-auto px-2 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 border border-amber-200">
+            size tag differs from variant
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="px-3.5 pb-3.5 flex flex-col gap-3 text-xs">
+          {loading && <span className="text-stone-400 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Loading…</span>}
+          {err && <span className="text-red-600">{err}</span>}
+          {data && (
+            <>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">Variants</div>
+                <div className="flex flex-col gap-1">
+                  {data.variants.map(v => (
+                    <div key={v.id} className="flex flex-wrap items-center gap-x-3 font-mono text-[11px] text-stone-700">
+                      <span className="font-medium">{v.options.join(' · ') || v.title}</span>
+                      <span>${v.price}</span>
+                      <span className={v.inventory > 0 ? 'text-emerald-600' : 'text-stone-400'}>qty {v.inventory}</span>
+                      {v.sku && <span className="text-stone-400">{v.sku}</span>}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-stone-500">
+                  {data.options.map(o => (
+                    <span key={o.name}>
+                      {o.name}: <span className="font-mono text-stone-700">{o.values.map(v => v.name + (v.linked ? ' ✓' : '')).join(' / ')}</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[10px] text-stone-400 mt-1 mb-0">✓ = linked to Shopify's standard taxonomy, so storefront filters see it</p>
+              </div>
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">Tags ({data.tags.length})</div>
+                <div className="flex flex-wrap gap-1">
+                  {data.tags.map(t => (
+                    <span key={t} className="px-1.5 py-0.5 rounded bg-white border border-stone-200 font-mono text-[10px] text-stone-700">{t}</span>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-stone-400 mb-1.5">
+                  Metafields ({data.metafields.length})
+                  {data.appMetafieldCount > 0 && <span className="normal-case tracking-normal text-stone-300"> · {data.appMetafieldCount} from apps hidden</span>}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {data.metafields.map(m => (
+                    <div key={m.key} className="flex gap-2 font-mono text-[10.5px]">
+                      <span className="text-stone-500 flex-none w-[190px] truncate">{m.key}</span>
+                      <span className="text-stone-800 break-all">{String(m.value).slice(0, 120)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <a href={`https://${SHOPIFY_STORE}/admin/products/${data.id}`} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center gap-1 text-[#C91A2B] hover:underline w-fit">
+                Open in Shopify <ExternalLink className="w-3 h-3" />
+              </a>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ── the card ─────────────────────────────────────────────────────────────── */
 function Card({ item, index, total, onSave, onSkip }) {
@@ -283,6 +388,8 @@ function Card({ item, index, total, onSave, onSkip }) {
           )}
         </div>
 
+        <OnceOver id={item.id} sizeTagsDisagree={item.sizeTagsDisagree} />
+
         {err && <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{err}</div>}
       </div>
 
@@ -319,7 +426,7 @@ export default function ListingDeck() {
   const load = useCallback(async () => {
     setLoading(true); setErr('');
     try {
-      const r = await fetch(`${API_URL}/api/admin-listings?action=completeness&status=active`, {
+      const r = await fetch(`${API_URL}/api/admin-listings?action=completeness&status=active&admin=${encodeURIComponent(ADMIN())}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
       });
       const d = await r.json();
@@ -348,9 +455,23 @@ export default function ListingDeck() {
 
   const current = byId[batch[idx]];
 
+  // Hold the dealt batch so a second admin is not handed the same cards. Advisory and
+  // self-expiring, so a browser closed mid-batch releases itself after 20 minutes.
+  const post = useCallback((act, ids) => {
+    if (!ADMIN() || !ids.length) return;
+    fetch(`${API_URL}/api/admin-listings?action=${act}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('admin_token')}` },
+      body: JSON.stringify({ ids, admin: ADMIN() }),
+    }).catch(() => {});   // advisory: a failed claim must never block the queue
+  }, []);
+  useEffect(() => { if (batch.length) post('claim-listings', batch); }, [batch, post]);
+
   function next(id, result) {
     setHandled(h => ({ ...h, [id]: result }));
     if (result === 'done') setFixedTotal(n => n + 1);
+    // A finished card is no longer mine to hold; a skipped one goes back for anyone.
+    post('release-listings', [id]);
     setIdx(i => i + 1);
   }
   function dealNext() {
@@ -393,6 +514,10 @@ export default function ListingDeck() {
                <div className="text-[10px] uppercase tracking-wider text-stone-400 mt-1">in queue</div></div>
           <div><div className="text-2xl font-semibold text-emerald-600 leading-none">{fixedTotal}</div>
                <div className="text-[10px] uppercase tracking-wider text-stone-400 mt-1">fixed today</div></div>
+          {data?.claimedElsewhere > 0 && (
+            <div title="Cards another admin is working on right now"><div className="text-2xl font-semibold text-stone-400 leading-none">{data.claimedElsewhere}</div>
+                 <div className="text-[10px] uppercase tracking-wider text-stone-400 mt-1">with others</div></div>
+          )}
           <button onClick={load} title="Rescan" className="self-center p-2 rounded-lg border border-stone-300 hover:border-stone-400">
             <RefreshCw className="w-4 h-4 text-stone-500" />
           </button>
