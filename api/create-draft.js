@@ -2,6 +2,7 @@
 // Creates a Shopify DRAFT product with pending-approval tag
 
 import { createDraft } from '../lib/shopify.js';
+import { reconcileListing } from '../lib/listing-sync.js';
 import { findOrCreateSeller, addProductToSeller } from '../lib/sellers.js';
 import { validateAndSanitize } from '../lib/security.js';
 import { cors } from '../lib/cors.js';
@@ -119,6 +120,10 @@ export default async function handler(req, res) {
         console.error('Listings insert error (non-fatal):', err);
       }
     }
+
+    // Seller-portal and WhatsApp submissions come in with free-text conditions, so
+    // canonicalise before an admin ever sees it. Non-fatal by design.
+    await reconcileListing(product.id);
 
     // Notify admin of new listing
     const shopifyAdminUrl = `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`;
