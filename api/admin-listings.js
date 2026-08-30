@@ -12,8 +12,12 @@ import { resolveSellerFromProduct } from '../lib/seller-lookup.js';
 import { addProductToSeller } from '../lib/sellers.js';
 import { getAllSellerMetafields } from '../lib/shopify-graphql.js';
 import { scrapePage } from '../lib/scraper.js';
-import { withCache, cacheBust } from '../lib/cache.js';
+import { canonicalCondition, isConditionTag } from '../lib/conditions.js';
+import { parseChest, parseHip, mergeMeasurements } from '../lib/measurements.js';
+import { scanCompleteness, GAP_DEFS } from '../lib/listing-completeness.js';
+import { reconcileListing, setCommission } from '../lib/listing-sync.js';
 import { toTagArray } from '../lib/tags.js';
+import { withCache, cacheBust } from '../lib/cache.js';
 import { calculateSellerPayout, PLATFORM_FEE } from '../lib/payout-calculation.js';
 import { payViaProvider, releasePayout } from '../lib/payout-service.js';
 import { runPayoutSync } from '../lib/payout-sync.js';
@@ -23,6 +27,7 @@ import { getAdminName } from '../lib/auth-utils.js';
 
 const CACHE_PENDING = 'listings:pending';
 const CACHE_ALL = 'listings:all';
+const CACHE_COMPLETENESS = 'listings:completeness';
 
 const STORE_URL = process.env.VITE_SHOPIFY_STORE_URL?.replace('.myshopify.com', '');
 
@@ -140,7 +145,7 @@ export default async function handler(req, res) {
           product_name: product.title,
           designer: product.vendor || 'Unknown Designer',
           size: variant.option1 || 'One Size',
-          condition: variant.option3 || 'Good',
+          condition: variant.option3 || '',
           list_price: parseFloat(variant.price) || 0,       // what buyer pays (asking + $10 fee)
           asking_price_usd: sellerAskingPrice || 0,          // what seller wants (used throughout UI)
           seller_payout: sellerPayout,
@@ -208,8 +213,9 @@ export default async function handler(req, res) {
       const { commissionRate, sellerAskingPrice, sellerPayout } = extractPricing(metafields, variant.price);
 
       const measurements = getMetafieldValue(metafields, 'custom', 'measurements') || '';
-      const chestMatch = measurements.match(/Chest:\s*([\d.]+)/i);
-      const hipMatch = measurements.match(/Hip:\s*([\d.]+)/i);
+      // Tolerant parse: the store uses "Chest: 20", "Chest - 21”" and "Bust: 38" interchangeably.
+      const chestValue = getMetafieldValue(metafields, 'custom', 'chest_size') || parseChest(measurements);
+      const hipValue = parseHip(measurements);
       const titleParts = (product.title || '').split(' - ');
       const item_type = titleParts.length > 1 ? titleParts.slice(1).join(' - ') : '';
 
@@ -230,8 +236,9 @@ export default async function handler(req, res) {
           color: variant.option2 || '',
           condition: getMetafieldValue(metafields, 'custom', 'condition') || variant.option3 || '',
           material: getMetafieldValue(metafields, 'custom', 'material') || '',
-          chest: chestMatch ? chestMatch[1] : '',
-          hip: hipMatch ? hipMatch[1] : '',
+          chest: chestValue != null ? String(chestValue) : '',
+          hip: hipValue != null ? String(hipValue) : '',
+          measurements,
           description: getMetafieldValue(metafields, 'custom', 'seller_description') || product.body_html?.replace(/<[^>]*>/g, ' ').trim() || '',
           asking_price_usd: sellerAskingPrice || 0,
           original_price: parseFloat(getMetafieldValue(metafields, 'custom', 'estimated_retail_price')) || '',
@@ -274,26 +281,45 @@ export default async function handler(req, res) {
         vendor: designer || product.vendor,
         body_html: `<p>${description || ''}</p>`,
       };
-      if (Array.isArray(tags)) productUpdates.tags = tags.join(', ');
+      // Condition lives on THREE surfaces (option value, tag, metafield) and they used to
+      // drift: the tag was written once at creation and never touched again, so editing the
+      // dropdown here left the stale tag behind. Keep option + tag in lockstep, always
+      // canonicalised. The metafield is intentionally left free-text (flaw disclosures).
+      const canonCondition = canonicalCondition(condition) || canonicalCondition(variant.option3);
+      const baseTags = Array.isArray(tags) ? toTagArray(tags) : toTagArray(product.tags);
+      if (canonCondition) {
+        productUpdates.tags = [...baseTags.filter(t => !isConditionTag(t)), canonCondition].join(', ');
+      } else if (Array.isArray(tags)) {
+        productUpdates.tags = baseTags.join(', ');
+      }
       if (variant.id) {
         productUpdates.variants = [{
           id: variant.id,
           price: listPrice.toFixed(2),
           option1: size || variant.option1,
           option2: color || variant.option2,
-          option3: condition || variant.option3,
+          option3: canonCondition || condition || variant.option3,
         }];
       }
       await updateProduct(id, productUpdates);
 
-      // Metafields (same namespaces/keys/types as createDraft)
-      const measurementParts = [];
-      if (chest) measurementParts.push(`Chest: ${chest}"`);
-      if (hip) measurementParts.push(`Hip: ${hip}"`);
-      const measurements = measurementParts.join(' | ');
+      // Metafields (same namespaces/keys/types as createDraft).
+      // `custom.measurements` is author-written prose (size label, shoulder, waist, length).
+      // It used to be REGENERATED from chest+hip alone, which blanked it on 230 live products.
+      // Merge instead: an empty chest/hip can no longer erase anything.
+      const priorMeasurements = getMetafieldValue(metafields, 'custom', 'measurements') || '';
+      const measurements = req.body.measurements != null
+        ? String(req.body.measurements)
+        : mergeMeasurements(priorMeasurements, { chest, hip });
 
       const ops = [];
-      ops.push(upsertMetafield(id, metafields, 'custom', 'measurements', measurements, 'multi_line_text_field'));
+      if (measurements !== priorMeasurements) {
+        ops.push(upsertMetafield(id, metafields, 'custom', 'measurements', measurements, 'multi_line_text_field'));
+      }
+      // Structured chest lives in its own metafield so the storefront can filter on it.
+      const chestNum = chest !== undefined && chest !== null && String(chest).trim() !== ''
+        ? String(chest).trim() : (parseChest(measurements) != null ? String(parseChest(measurements)) : null);
+      if (chestNum) ops.push(upsertMetafield(id, metafields, 'custom', 'chest_size', chestNum, 'single_line_text_field'));
       if (material != null) ops.push(upsertMetafield(id, metafields, 'custom', 'material', material, 'multi_line_text_field'));
       if (condition) ops.push(upsertMetafield(id, metafields, 'custom', 'condition', condition, 'multi_line_text_field'));
       if (description != null) ops.push(upsertMetafield(id, metafields, 'custom', 'seller_description', description, 'multi_line_text_field'));
@@ -307,6 +333,11 @@ export default async function handler(req, res) {
       // Link to the brand's original retail listing (shown on the review card; scrape source)
       if (original_listing_url != null) ops.push(upsertMetafield(id, metafields, 'custom', 'original_listing_url', original_listing_url, 'single_line_text_field'));
       await Promise.all(ops);
+
+      // The editor hands us a free-text tags box, so an admin can add or remove `concierge`
+      // here without going through the toggle. Reconcile derives every mirror from the
+      // authoritative fields so an edit can never leave the listing needing cleanup.
+      await reconcileListing(id);
 
       // Bust caches so the dashboard / listings grid / seller portal reflect the edit
       await Promise.all([cacheBust(CACHE_PENDING), cacheBust(CACHE_ALL)]);
@@ -328,6 +359,9 @@ export default async function handler(req, res) {
 
       // Only activate + notify — no data overwrites (admin edits in Shopify directly)
       const product = await approveDraft(shopifyProductId);
+      // Last gate before a listing goes live: whatever route it took to get here
+      // (seller portal, WhatsApp, admin create), it leaves approval fully canonical.
+      await reconcileListing(shopifyProductId);
 
       // Get seller email + payout from metafields
       let sellerEmail = getSellerEmail(productBefore.metafields);
@@ -406,6 +440,14 @@ export default async function handler(req, res) {
         : [...tags, 'concierge'];
 
       await updateProduct(shopifyProductId, { tags: nextTags.join(', ') });
+      // Mirrors both booleans off the tag we just wrote. See lib/listing-sync.js.
+      await reconcileListing(shopifyProductId);
+      // Flipping concierge changes the arrangement with the seller, so the commission and
+      // payout are re-rated explicitly here — the one place that overwrites an existing
+      // rate. A seller-specific agreed rate still wins over the concierge rate.
+      const sellerEmailForRate = getMetafieldValue(await fetchMetafields(shopifyProductId), 'seller', 'email');
+      const rated = await setCommission(shopifyProductId, {
+        sellerEmail: sellerEmailForRate, isConcierge: !wasConcierge });
 
       // Sync open transactions so the seller dashboard reflects the change immediately.
       // pending_label <-> concierge only; don't touch label_created/shipped/delivered.
@@ -433,7 +475,9 @@ export default async function handler(req, res) {
       return res.status(200).json({
         success: true,
         concierge: !wasConcierge,
-        tags: nextTags
+        tags: nextTags,
+        commissionRate: rated.ok ? rated.rate : null,
+        commissionReason: rated.ok ? rated.reason : null
       });
     }
 
@@ -480,9 +524,7 @@ export default async function handler(req, res) {
           designer: productBefore.vendor || null,
           item_type: productBefore.product_type || null,
           size: variant.option1 || null,
-          condition: productTags.split(',').map(t => t.trim()).find(t =>
-            ['new', 'like new', 'gently used', 'used', 'fair'].includes(t.toLowerCase())
-          ) || null,
+          condition: toTagArray(productTags).map(canonicalCondition).find(Boolean) || null,
           asking_price: variant.price ? parseFloat(variant.price) : null,
           listing_price: sellerPayout || null,
           images: imageUrls,
@@ -1532,7 +1574,7 @@ export default async function handler(req, res) {
         designer,
         itemType: item_type,
         size: size || 'One Size',
-        condition: condition || 'Good',
+        condition: canonicalCondition(condition) || 'Like New',
         askingPrice: parseFloat(asking_price) || 0,
         color,
         material,
@@ -1560,6 +1602,9 @@ export default async function handler(req, res) {
 
       // Add product to seller's shopify_product_ids so it appears in their dashboard
       await addProductToSeller(seller.id, product.id);
+      // createDraft already writes canonical values, but reconciling means an
+      // admin-created listing is verified complete rather than assumed complete.
+      await reconcileListing(product.id);
 
       // Bust the seller's listings cache so the new product shows up immediately
       await cacheBust(`listings:seller:${seller.email.toLowerCase()}`);
@@ -1809,6 +1854,118 @@ export default async function handler(req, res) {
       const results = await runPayoutSync({ dryRun });
       console.log(`🔄 Sync from Shopify (${dryRun ? 'dry-run' : 'apply'}): checked ${results.checked}, updated ${results.updated}, released ${results.released}, errors ${results.errors.length}`);
       return res.status(200).json({ success: true, dryRun, ...results });
+    }
+
+    // ─── CLEANUP DECK ────────────────────────────────────────────────────────
+    // Listings with missing data, one entry per item. Scanning every product with its
+    // metafields is expensive, so it is cached; any patch below busts it.
+    if (action === 'completeness' && req.method === 'GET') {
+      const status = req.query.status === 'draft' ? 'draft' : 'active';
+      const result = await withCache(`${CACHE_COMPLETENESS}:${status}`, 300,
+        async () => scanCompleteness({ status }));
+      return res.status(200).json({ success: true, status, gapDefs: GAP_DEFS, ...result });
+    }
+
+    // Write ONLY the fields present in the body. Unlike action=update this never
+    // reconstructs the title, description or measurements from defaults, so a card that
+    // fills two fields cannot damage the other twelve.
+    if (action === 'patch-listing' && req.method === 'POST') {
+      const { id, fields } = req.body || {};
+      if (!id) return res.status(400).json({ error: 'id required' });
+      if (!fields || typeof fields !== 'object') return res.status(400).json({ error: 'fields required' });
+
+      let product;
+      try { product = await getProduct(id, true); }
+      catch { return res.status(404).json({ error: 'Listing not found' }); }
+      const metafields = product.metafields || [];
+      const variant = product.variants?.[0] || {};
+      const given = k => Object.prototype.hasOwnProperty.call(fields, k)
+        && fields[k] !== null && String(fields[k]).trim() !== '';
+
+      const productUpdates = {};
+      const ops = [];
+      const applied = [];
+
+      if (given('designer')) { productUpdates.vendor = String(fields.designer).trim(); applied.push('designer'); }
+      if (given('description')) {
+        productUpdates.body_html = `<p>${String(fields.description).trim()}</p>`;
+        ops.push(upsertMetafield(id, metafields, 'custom', 'seller_description', String(fields.description).trim(), 'multi_line_text_field'));
+        applied.push('description');
+      }
+
+      // Condition drives BOTH the option value and the tag. They are never edited apart.
+      const canonCondition = given('condition') ? canonicalCondition(fields.condition) : null;
+      if (given('condition') && !canonCondition) {
+        return res.status(400).json({ error: `Unrecognised condition "${fields.condition}"` });
+      }
+      if (canonCondition) {
+        const base = toTagArray(product.tags).filter(t => !isConditionTag(t));
+        productUpdates.tags = [...base, canonCondition].join(', ');
+        applied.push('condition');
+      }
+      if (canonCondition || given('size')) {
+        if (variant.id) productUpdates.variants = [{
+          id: variant.id,
+          option1: given('size') ? String(fields.size).trim() : variant.option1,
+          option2: variant.option2,
+          option3: canonCondition || variant.option3,
+        }];
+        if (given('size')) applied.push('size');
+      }
+      if (Object.keys(productUpdates).length) await updateProduct(id, productUpdates);
+
+      // Measurements: merge chest/hip in, never regenerate. See lib/measurements.js.
+      const prior = getMetafieldValue(metafields, 'custom', 'measurements') || '';
+      const merged = given('measurements')
+        ? mergeMeasurements(String(fields.measurements), { chest: fields.chest, hip: fields.hip })
+        : mergeMeasurements(prior, { chest: fields.chest, hip: fields.hip });
+      if (merged !== prior) {
+        ops.push(upsertMetafield(id, metafields, 'custom', 'measurements', merged, 'multi_line_text_field'));
+        applied.push('measurements');
+      }
+      if (given('chest')) {
+        ops.push(upsertMetafield(id, metafields, 'custom', 'chest_size', String(fields.chest).trim(), 'single_line_text_field'));
+        applied.push('chest');
+      }
+      if (given('material')) { ops.push(upsertMetafield(id, metafields, 'custom', 'material', String(fields.material).trim(), 'multi_line_text_field')); applied.push('material'); }
+      if (given('seller'))   { ops.push(upsertMetafield(id, metafields, 'seller', 'email', String(fields.seller).trim().toLowerCase(), 'single_line_text_field')); applied.push('seller'); }
+      if (given('retail'))   { ops.push(upsertMetafield(id, metafields, 'custom', 'estimated_retail_price', String(Math.round(parseFloat(fields.retail))), 'number_integer')); applied.push('retail'); }
+      if (given('commission')) { ops.push(upsertMetafield(id, metafields, 'pricing', 'commission_rate', String(Math.round(parseFloat(fields.commission))), 'number_integer')); applied.push('commission'); }
+      if (given('ask')) {
+        const ask = parseFloat(fields.ask);
+        if (!isNaN(ask)) {
+          const rate = parseFloat(fields.commission ?? getMetafieldValue(metafields, 'pricing', 'commission_rate')) || 18;
+          const { sellerPayout } = calculateSellerPayout({ grossPrice: ask + PLATFORM_FEE, commissionRate: rate });
+          ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_asking_price', JSON.stringify({ amount: ask.toFixed(2), currency_code: 'USD' }), 'money'));
+          ops.push(upsertMetafield(id, metafields, 'pricing', 'seller_payout', JSON.stringify({ amount: sellerPayout.toFixed(2), currency_code: 'USD' }), 'money'));
+          applied.push('ask');
+        }
+      }
+      // ── commission review decisions ──────────────────────────────────
+      // Either "this really is concierge" (tag it, which re-rates via the rules) or
+      // "the rate is deliberate, stop asking" (mark reviewed so the deck drops it).
+      if (fields.markConcierge === true) {
+        const tags = toTagArray(product.tags);
+        if (!tags.some(t => t.trim().toLowerCase() === 'concierge')) {
+          await updateProduct(id, { tags: [...tags, 'concierge'].join(', ') });
+        }
+        const email = getMetafieldValue(metafields, 'seller', 'email');
+        const r = await setCommission(id, { sellerEmail: email, isConcierge: true });
+        applied.push(`concierge (commission ${r.ok ? r.rate + '%' : 'unchanged'})`);
+      } else if (fields.rateReviewed === true) {
+        ops.push(upsertMetafield(id, metafields, 'pricing', 'rate_reviewed', 'true', 'boolean'));
+        applied.push('rate confirmed');
+      }
+
+      if (ops.length) await Promise.all(ops);
+      await reconcileListing(id);
+
+      await Promise.all([
+        cacheBust(`${CACHE_COMPLETENESS}:active`), cacheBust(`${CACHE_COMPLETENESS}:draft`),
+        cacheBust(CACHE_ALL), cacheBust(CACHE_PENDING),
+      ]);
+      console.log(`\u2713 patch-listing ${id}: ${applied.join(', ') || 'nothing'}`);
+      return res.status(200).json({ success: true, id, applied });
     }
 
     if (action === 'scrape-url' && req.method === 'POST') {
@@ -2174,19 +2331,8 @@ export default async function handler(req, res) {
           // Gender: always lowercase
           const GENDER_CANON = { women: 'women', woman: 'women', ladies: 'women', girls: 'women', men: 'men', man: 'men', boys: 'men', kids: 'kids', children: 'kids', baby: 'kids', unisex: 'unisex' };
 
-          // Conditions: exact canonical strings matching sms-webhook.js
-          const CONDITION_CANON = {
-            'new with tags': 'New with tags', 'nwt': 'New with tags', 'brand new': 'New with tags',
-            'like new': 'Like new', 'like-new': 'Like new',
-            'excellent': 'Excellent', 'very good': 'Excellent', 'very-good': 'Excellent',
-            'good': 'Good',
-            'fair': 'Fair', 'used': 'Fair',
-          };
-
-          function canonCondition(raw) {
-            if (!raw) return null;
-            return CONDITION_CANON[raw.toLowerCase().trim()] ?? raw;
-          }
+          // Conditions: resolved via lib/conditions.js, the single source of truth.
+          const canonCondition = raw => canonicalCondition(raw) ?? raw;
 
           // Start from nonChTags: normalize gender + conditions, remove legacy preloved
           const normalised = nonChTags
@@ -2194,8 +2340,7 @@ export default async function handler(req, res) {
             .map(t => {
               const lo = t.toLowerCase();
               if (GENDER_CANON[lo]) return GENDER_CANON[lo];
-              if (CONDITION_CANON[lo]) return CONDITION_CANON[lo];
-              return t;
+              return canonicalCondition(t) ?? t;
             });
 
           // Case-insensitive dedup helper
