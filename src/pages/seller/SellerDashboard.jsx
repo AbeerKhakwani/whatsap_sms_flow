@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { getThumbnail } from '../../utils/image';
 import SellerLayout from './SellerLayout';
+import { CONDITIONS, CONDITION_LABELS } from '../../../lib/conditions.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -719,10 +720,7 @@ export default function SellerDashboard() {
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Condition</label>
                 <select value={editForm.condition} onChange={e => setEditForm(f => ({ ...f, condition: e.target.value }))} className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C91A2B]/30 focus:border-[#C91A2B] bg-white">
                   <option value="">Select</option>
-                  <option value="New with tags">New with tags</option>
-                  <option value="Like new">Like new</option>
-                  <option value="Gently used">Gently used</option>
-                  <option value="Used">Used</option>
+                  {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABELS[c]}</option>)}
                 </select>
               </div>
               <div>

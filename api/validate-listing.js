@@ -55,7 +55,7 @@ Extract these fields from the user's description:
 - designer: brand name (e.g., "Sana Safinaz", "Zara Shahjahan", "Elan", "Maria B", "Khaadi", "Agha Noor")
 - pieces: how many pieces included - return one of: "1-piece", "2-piece", "3-piece", "Lehnga", "Saree", "Sharara", "Gharara", "Other"
 - size: size - return one of: "XS", "S", "M", "L", "XL", "XXL", "Unstitched", "Custom"
-- condition: item condition - return one of: "New with tags", "Like new", "Excellent", "Good", "Fair"
+- condition: return EXACTLY one of: "NWT", "NWOT", "Like New", "Excellent", "Fair" (NWT = new with tags, NWOT = new without tags; map "good"/"very good"/"gently used" -> "Excellent")
 - asking_price: asking/selling price (number only, in USD)
 - chest: chest measurement in inches (number only, e.g., "36")
 - hip: hip measurement in inches (number only, e.g., "38")

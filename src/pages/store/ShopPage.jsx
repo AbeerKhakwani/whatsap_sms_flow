@@ -4,9 +4,10 @@ import { SlidersHorizontal, X, ChevronDown } from 'lucide-react';
 import StoreNav from '../../components/store/StoreNav';
 import ListingCard from '../../components/store/ListingCard';
 import { LISTINGS, DESIGNERS } from '../../data/mockListings';
+import { CONDITIONS, CONDITION_LABELS } from '../../../lib/conditions.js';
 
 const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', 'Unstitched'];
-const CONDITIONS = ['New with tags', 'Like new', 'Excellent', 'Good', 'Fair'];
+
 const PIECES = ['Kurta', '2-piece', '3-piece', 'Unstitched'];
 
 function FilterChip({ label, onRemove }) {

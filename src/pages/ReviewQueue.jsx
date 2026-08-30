@@ -6,6 +6,7 @@ import {
   SkipForward, Link as LinkIcon, ExternalLink, Save, ChevronDown, Download
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
+import { CONDITIONS, CONDITION_LABELS } from '../../lib/conditions.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const UNDO_MS = 5000;
@@ -82,7 +83,6 @@ function Detail({ label, value }) {
 }
 
 const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', 'Unstitched'];
-const CONDITIONS = ['New with tags', 'Like new', 'Excellent', 'Good', 'Fair'];
 
 // Track a media query (used to branch mobile card flow vs desktop split-pane).
 function useIsDesktop() {
@@ -255,7 +255,7 @@ function InlineEditor({ listing, onSaved, onCancel }) {
           <span className={lbl}>Condition</span>
           <select className={inp} value={form.condition} onChange={e => set('condition', e.target.value)}>
             <option value="">—</option>
-            {CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABELS[c]}</option>)}
             {form.condition && !CONDITIONS.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
           </select>
         </div>
@@ -601,7 +601,7 @@ function DesktopDetail({ listing, onSaved, onApprove, onRevise, onReject, onSkip
               <span className={lbl}>Condition</span>
               <select className={inp} value={form.condition} onChange={e => set('condition', e.target.value)}>
                 <option value="">—</option>
-                {CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABELS[c]}</option>)}
                 {form.condition && !CONDITIONS.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
               </select>
             </div>

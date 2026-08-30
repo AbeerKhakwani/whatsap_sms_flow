@@ -5,10 +5,11 @@ import {
   Camera, Trash2, Plus, Tag as TagIcon, AlertCircle
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
+import { CONDITIONS, CONDITION_LABELS } from '../../lib/conditions.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size', 'Unstitched'];
-const CONDITIONS = ['New with tags', 'Like new', 'Excellent', 'Good', 'Fair'];
+
 const REJECTION_REASONS = [
   'Poor Photo Quality', 'Missing Information', 'Not Pakistani Designer',
   'Condition Issues', 'Pricing Too High', 'Duplicate Listing', 'Not Eligible for Resale', 'Other'

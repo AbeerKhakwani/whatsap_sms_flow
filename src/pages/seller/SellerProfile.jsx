@@ -4,6 +4,7 @@ import { MapPin, Mail, Phone, ArrowLeft, Edit2, Save, X, Loader2, Home, Plus, Lo
 import { getThumbnail } from '../../utils/image';
 import BuyerAcceptedBadge from '../../components/BuyerAcceptedBadge';
 import SellerLayout from './SellerLayout';
+import { CONDITIONS, CONDITION_LABELS } from '../../../lib/conditions.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -933,11 +934,7 @@ export default function SellerProfile() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Condition</label>
                 <select value={editForm.condition} onChange={(e) => setEditForm({ ...editForm, condition: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none">
                   <option value="">Select...</option>
-                  <option value="New with tags">New with tags</option>
-                  <option value="Like new">Like new</option>
-                  <option value="Excellent">Excellent</option>
-                  <option value="Good">Good</option>
-                  <option value="Fair">Fair</option>
+                  {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABELS[c]}</option>)}
                 </select>
               </div>
             </div>

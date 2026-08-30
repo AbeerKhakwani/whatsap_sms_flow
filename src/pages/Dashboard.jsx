@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Check, X, Clock, Sparkles, Banknote, Plus, Loader2, Search, Mic, MicOff, Camera, ChevronRight, RotateCcw } from 'lucide-react';
 import { useVoiceRecording } from '../hooks/useVoiceRecording';
 import { useImageUpload } from '../hooks/useImageUpload';
+import { CONDITIONS, CONDITION_LABELS } from '../../lib/conditions.js';
 
 // Days-since / days-left for a revision request (7-day auto-expire window).
 function revisionTiming(requestedAt) {
@@ -27,7 +28,7 @@ export default function Dashboard() {
   // Admin Create Listing state
   const [createModal, setCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState({
-    designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good',
+    designer: '', item_type: '', size: '', color: '', material: '', condition: 'Like New',
     original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '',
     concierge: false
   });
@@ -170,7 +171,7 @@ export default function Dashboard() {
           product_name: createForm.item_type || 'Designer Item',
           designer: createForm.designer,
           size: createForm.size || 'One Size',
-          condition: createForm.condition || 'Good',
+          condition: createForm.condition || 'Like New',
           list_price: (parseFloat(createForm.asking_price) || 0) + 10,
           asking_price_usd: parseFloat(createForm.asking_price) || 0,
           seller_payout: null,
@@ -198,7 +199,7 @@ export default function Dashboard() {
         setStats(prev => ({ ...prev, pending: (prev.pending || 0) + 1 }));
 
         setCreateModal(false);
-        setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Good', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '', concierge: false });
+        setCreateForm({ designer: '', item_type: '', size: '', color: '', material: '', condition: 'Like New', original_price: '', asking_price: '', description: '', chest: '', hip: '', notes: '', concierge: false });
         setSelectedSeller(null);
         setSellerSearch('');
         setAdminScrapeUrl('');
@@ -486,7 +487,7 @@ export default function Dashboard() {
                   <label className="block text-xs font-medium text-gray-600 mb-1">Condition</label>
                   <select value={createForm.condition} onChange={e => setCreateForm(f => ({ ...f, condition: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                    {['New with tags','Like new','Excellent','Good','Fair'].map(c => <option key={c} value={c}>{c}</option>)}
+                    {CONDITIONS.map(c => <option key={c} value={c}>{CONDITION_LABELS[c]}</option>)}
                   </select>
                 </div>
               </div>

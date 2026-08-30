@@ -52,10 +52,10 @@ const SIZE_OPTIONS = [
 
 const CONDITION_OPTIONS = [
   { value: '', label: 'Select...', keywords: [] },
-  { value: 'New with tags', label: 'New with tags', keywords: ['new with tags', 'nwt', 'brand new', 'never worn', 'tags attached'] },
-  { value: 'Like new', label: 'Like new', keywords: ['like new', 'worn once', 'excellent', 'perfect condition', 'mint'] },
-  { value: 'Excellent', label: 'Excellent', keywords: ['excellent', 'great condition', 'barely worn'] },
-  { value: 'Good', label: 'Good', keywords: ['good', 'good condition', 'worn few times', 'gently used'] },
+  { value: 'NWT', label: 'NWT \u2014 New with tags', keywords: ['new with tags', 'with tags', 'nwt', 'brand new', 'never worn', 'tags attached', 'new w/tags'] },
+  { value: 'NWOT', label: 'NWOT \u2014 New without tags', keywords: ['new without tags', 'without tags', 'nwot', 'no tags', 'unworn'] },
+  { value: 'Like New', label: 'Like New', keywords: ['like new', 'worn once', 'perfect condition', 'mint', 'no signs of wear'] },
+  { value: 'Excellent', label: 'Excellent', keywords: ['excellent', 'great condition', 'barely worn', 'very good', 'good condition', 'good', 'worn few times', 'gently used', 'minimal signs of wear'] },
   { value: 'Fair', label: 'Fair', keywords: ['fair', 'used', 'some wear', 'visible wear'] },
 ];
 
@@ -71,11 +71,13 @@ function matchToDropdown(text, options) {
     }
   }
 
-  // Keyword match
-  for (const opt of options) {
-    if (opt.keywords?.some(kw => lowerText.includes(kw))) {
-      return opt.value;
-    }
+  // Keyword match, longest keyword first. Order matters: with first-match-wins,
+  // "brand new without tags" hit NWT's short 'brand new' before NWOT was ever tested.
+  const ranked = options
+    .flatMap(o => (o.keywords || []).map(kw => ({ kw, value: o.value })))
+    .sort((a, b) => b.kw.length - a.kw.length);
+  for (const { kw, value } of ranked) {
+    if (lowerText.includes(kw)) return value;
   }
 
   return '';
