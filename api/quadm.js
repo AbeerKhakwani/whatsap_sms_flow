@@ -108,12 +108,21 @@ async function fetchItems() {
   return out;
 }
 
+function isAdmin(req) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return false;
+  if (token === 'email-auth') return true; // legacy admin tokens, as in api/scripts.js
+  const decoded = verifyToken(token);
+  return !!decoded && decoded.type === 'admin';
+}
+
 export default async function handler(req, res) {
   if (cors(req, res, 'GET, POST, OPTIONS')) return;
 
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  // 'email-auth' is the legacy admin token still honoured by Layout.
-  if (!token || (token !== 'email-auth' && !verifyToken(token))) {
+  // Seller and admin tokens are signed with the same JWT_SECRET and are told
+  // apart only by `type`, so checking the signature alone would let any signed-in
+  // seller read and write this page. Match the check the other admin endpoints use.
+  if (!isAdmin(req)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
