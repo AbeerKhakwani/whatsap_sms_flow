@@ -15,6 +15,10 @@ const STATUSES = [
   { id: 'sold',  label: 'Sold',      cls: 'bg-rose-50 text-rose-700 ring-rose-600/20' },
 ];
 
+// Order sizes the way a rail is arranged, not alphabetically.
+const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL'];
+const NO_SIZE = '\u2014';
+
 const money = n => (n == null ? null : `$${Number(n).toLocaleString('en-US')}`);
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('admin_token')}` });
 
@@ -34,6 +38,7 @@ export default function Quadm() {
   const [saving, setSaving] = useState({});
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
+  const [sizeF, setSizeF] = useState('all');
   const [open, setOpen] = useState(null);   // product id
   const [draft, setDraft] = useState('');
 
@@ -88,9 +93,11 @@ export default function Quadm() {
     }
   }
 
-  const groups = useMemo(() => {
+  // Status + text only. Size counts are built from this so that picking a size
+  // doesn't zero out every other size's count.
+  const preSize = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const keep = items.filter(i => {
+    return items.filter(i => {
       const s = st(i.id);
       if (filter !== 'all' && s.status !== filter) return false;
       if (!needle) return true;
@@ -98,6 +105,22 @@ export default function Quadm() {
         ...(s.notes || []).map(n => n.t)].join(' ').toLowerCase();
       return hay.includes(needle);
     });
+  }, [items, st, q, filter]);
+
+  const sizeCounts = useMemo(() => {
+    const c = new Map();
+    for (const i of preSize) {
+      const k = i.size || NO_SIZE;
+      c.set(k, (c.get(k) || 0) + 1);
+    }
+    const known = SIZE_ORDER.filter(k => c.has(k)).map(k => [k, c.get(k)]);
+    const rest = [...c.keys()].filter(k => !SIZE_ORDER.includes(k)).sort()
+      .map(k => [k, c.get(k)]);
+    return [...known, ...rest];
+  }, [preSize]);
+
+  const groups = useMemo(() => {
+    const keep = preSize.filter(i => sizeF === 'all' || (i.size || NO_SIZE) === sizeF);
     const by = new Map();
     for (const i of keep) {
       const c = st(i.id).container || 'Unassigned';
@@ -109,7 +132,7 @@ export default function Quadm() {
       const ai = order.indexOf(a[0]), bi = order.indexOf(b[0]);
       return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
     });
-  }, [items, st, q, filter, containers]);
+  }, [preSize, st, sizeF, containers]);
 
   const tally = useMemo(() => {
     let a = 0, h = 0, s = 0, val = 0;
@@ -196,6 +219,27 @@ export default function Quadm() {
             >{f.label}</button>
           ))}
         </div>
+      </div>
+
+      <div className="flex gap-1.5 flex-wrap items-center">
+        <span className="text-xs font-mono uppercase tracking-wider text-gray-400 mr-1">Size</span>
+        <button
+          onClick={() => setSizeF('all')}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
+            sizeF === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+          }`}
+        >All <span className="tabular-nums opacity-70">{preSize.length}</span></button>
+        {sizeCounts.map(([sz, n]) => (
+          <button
+            key={sz}
+            onClick={() => setSizeF(sz === sizeF ? 'all' : sz)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
+              sizeF === sz ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {sz === NO_SIZE ? 'No size' : sz} <span className="tabular-nums opacity-70">{n}</span>
+          </button>
+        ))}
       </div>
 
       {groups.length === 0 && (
