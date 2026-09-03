@@ -24,6 +24,7 @@ const ReviewQueue = lazy(() => import('./pages/ReviewQueue'));
 const ListingCleanup = lazy(() => import('./pages/ListingCleanup'));
 const ListingDeck = lazy(() => import('./pages/ListingDeck'));
 const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
+const Quadm = lazy(() => import('./pages/Quadm'));
 
 // Store — unified buyer/seller prototype
 const StoreFront  = lazy(() => import('./pages/store/StoreFront'));
@@ -93,6 +94,7 @@ export default function App() {
                 <Route path="/activity" element={<ActivityFeed />} />
                 <Route path="/cleanup" element={<ListingCleanup />} />
                 <Route path="/complete" element={<ListingDeck />} />
+                <Route path="/quadm" element={<Quadm />} />
                 <Route path="/scripts" element={<Scripts />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Layers, Search, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { LayoutDashboard, Users, DollarSign, Settings, LogOut, Loader2, Terminal, Tag, Bell, Activity, Wand2, Layers, Search, Menu, X, PanelLeftClose, PanelLeftOpen, ShoppingBag } from 'lucide-react';
 import { activityConfig, timeAgo } from '../pages/ActivityFeed';
 import SearchPalette from './SearchPalette';
 
@@ -151,6 +151,7 @@ export default function Layout({ children }) {
     { name: 'Activity', path: '/admin/activity', icon: Activity },
     { name: 'Cleanup', path: '/admin/cleanup', icon: Wand2 },
     { name: 'Complete', path: '/admin/complete', icon: Layers },
+    { name: 'QUADM', path: '/admin/quadm', icon: ShoppingBag },
     { name: 'Scripts', path: '/admin/scripts', icon: Terminal },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ];
