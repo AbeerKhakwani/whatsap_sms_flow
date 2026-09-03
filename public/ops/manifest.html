@@ -1,0 +1,1379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<title>TPS Shipment Manifest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --paper:      #FBFAF7;
+    --sheet:      #FFFFFF;
+    --ink:        #171A1F;
+    --ink-soft:   #4A5058;
+    --ink-faint:  #858C96;
+    --rule:       #E1DFD8;
+    --rule-soft:  #EDEBE5;
+    --accent:     #2E4A63;
+    --pending:    #8A6212;
+    --pending-bg: #FBF3DF;
+    --tps:        #2E4A63;
+    --tps-bg:     #E8EEF4;
+    --flag:       #8A3A24;
+    --flag-bg:    #FAEDE8;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #14161A;
+      --sheet:      #1A1D22;
+      --ink:        #ECEAE4;
+      --ink-soft:   #A9AEB6;
+      --ink-faint:  #767C85;
+      --rule:       #2E3238;
+      --rule-soft:  #23272C;
+      --accent:     #9DB8D2;
+      --pending:    #D9AE55;
+      --pending-bg: #2A2415;
+      --tps:        #9DB8D2;
+      --tps-bg:     #1D2833;
+      --flag:       #E0917A;
+      --flag-bg:    #2C1B16;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #14161A;
+    --sheet:      #1A1D22;
+    --ink:        #ECEAE4;
+    --ink-soft:   #A9AEB6;
+    --ink-faint:  #767C85;
+    --rule:       #2E3238;
+    --rule-soft:  #23272C;
+    --accent:     #9DB8D2;
+    --pending:    #D9AE55;
+    --pending-bg: #2A2415;
+    --tps:        #9DB8D2;
+    --tps-bg:     #1D2833;
+    --flag:       #E0917A;
+    --flag-bg:    #2C1B16;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 32px 20px 72px;
+  }
+
+  .sheet {
+    background: var(--sheet);
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 44px 48px 52px;
+    border: 1px solid var(--rule);
+  }
+
+  .masthead {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: flex-end;
+    justify-content: space-between;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+
+  h1 {
+    font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 700;
+    font-size: clamp(28px, 4vw, 40px);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .issued {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    text-align: right;
+    line-height: 1.7;
+  }
+  .issued strong { color: var(--ink-soft); font-weight: 500; }
+
+  .totals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 28px 0 8px;
+  }
+
+  .stat { background: var(--sheet); padding: 14px 16px 15px; }
+
+  .stat-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 5px;
+  }
+
+  .stat-value {
+    font-family: "Archivo", Arial, sans-serif;
+    font-size: 25px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    font-variant-numeric: tabular-nums;
+    margin: 0;
+    line-height: 1;
+  }
+
+  .stat-note {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    margin: 6px 0 0;
+  }
+
+  /* ---------- container sections ---------- */
+
+  .container-block { margin-top: 44px; page-break-inside: auto; }
+
+  .container-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+    border-bottom: 1.5px solid var(--ink);
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+  }
+
+  .container-head h2 {
+    font-family: "Archivo", Arial, sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  .container-meta {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .status-open {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--pending);
+    background: var(--pending-bg);
+    border: 1px solid currentColor;
+    padding: 2px 6px;
+    margin-left: 8px;
+    vertical-align: 2px;
+  }
+
+  .table-wrap { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; min-width: 800px; }
+
+  thead th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: left;
+    padding: 10px 10px 9px;
+    border-bottom: 1px solid var(--ink-soft);
+    white-space: nowrap;
+  }
+  thead th.money { text-align: right; }
+
+  tbody tr { border-bottom: 1px solid var(--rule-soft); page-break-inside: avoid; break-inside: avoid; }
+  tbody tr:last-child { border-bottom: 1px solid var(--rule); }
+
+  td { padding: 13px 10px; vertical-align: top; }
+
+  td.check { width: 34px; padding-left: 0; }
+  .box {
+    width: 15px; height: 15px;
+    border: 1.5px solid var(--ink-faint);
+    display: block;
+    margin-top: 3px;
+  }
+
+  td.idx {
+    width: 28px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    padding-left: 0;
+  }
+
+  .item-name {
+    font-family: "Archivo", Arial, sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    display: block;
+  }
+
+  .designer { font-size: 13.5px; color: var(--accent); display: block; margin-top: 1px; }
+
+  .detail {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-top: 5px;
+    line-height: 1.45;
+    max-width: 48ch;
+  }
+
+  .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
+  }
+
+  td.size .mono { font-size: 13px; font-weight: 600; color: var(--ink); }
+
+  td.money {
+    text-align: right;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13.5px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+    margin-top: 3px;
+  }
+  .tag-tps { color: var(--tps); background: var(--tps-bg); }
+  .tag-pending { color: var(--pending); background: var(--pending-bg); }
+  .tag-flag { color: var(--flag); background: var(--flag-bg); }
+
+  tr.pending .item-name { color: var(--pending); }
+  tr.pending td.money { color: var(--pending); }
+  tr.pending .designer { color: var(--pending); opacity: 0.85; }
+
+  tfoot td {
+    padding: 14px 10px 0;
+    border-top: 2px solid var(--ink);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  tfoot td.money { font-size: 15px; letter-spacing: 0; }
+
+  .callout {
+    margin-top: 16px;
+    border-left: 3px solid var(--flag);
+    background: var(--flag-bg);
+    padding: 11px 14px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .callout strong { color: var(--ink); font-weight: 600; }
+
+  .notes {
+    margin-top: 48px;
+    padding-top: 22px;
+    border-top: 2px solid var(--ink);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 28px;
+  }
+
+  .notes h3 {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 8px;
+  }
+
+  .notes p, .notes li {
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin: 0 0 6px;
+    line-height: 1.55;
+  }
+  .notes ul { margin: 0; padding-left: 16px; }
+
+  .sig {
+    margin-top: 36px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 30px;
+  }
+  .sig-line {
+    border-top: 1px solid var(--ink-faint);
+    padding-top: 6px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .sig-space { height: 34px; }
+
+  @page { margin: 13mm; size: letter; }
+
+  @media print {
+    :root {
+      --paper: #FFFFFF; --sheet: #FFFFFF;
+      --ink: #000000; --ink-soft: #333333; --ink-faint: #666666;
+      --rule: #BBBBBB; --rule-soft: #DDDDDD;
+      --accent: #1F3348;
+      --pending: #7A5400; --pending-bg: #FFFFFF;
+      --tps: #1F3348; --tps-bg: #FFFFFF;
+      --flag: #7A2E1B; --flag-bg: #FFFFFF;
+    }
+    body { padding: 0; font-size: 10pt; background: #FFFFFF; }
+    .sheet { border: none; padding: 0; max-width: none; }
+    .table-wrap { overflow: visible; }
+    table { min-width: 0; }
+    thead { display: table-header-group; }
+    .no-print { display: none; }
+    .container-block { page-break-before: auto; }
+    .totals { background: #BBBBBB; border-color: #BBBBBB; }
+  }
+
+  .print-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 9px 16px;
+    background: var(--ink);
+    color: var(--sheet);
+    border: none;
+    cursor: pointer;
+    margin-bottom: 20px;
+  }
+  .print-btn:hover { background: var(--accent); }
+  .print-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn-row { max-width: 1100px; margin: 0 auto; }
+</style>
+</head>
+<body>
+
+<div class="btn-row no-print">
+  <button class="print-btn" onclick="window.print()">Print manifest</button>
+</div>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">The Phir Story &middot; Consignment Transit</p>
+      <h1>Shipment Manifest</h1>
+    </div>
+    <div class="issued">
+      Prepared <strong>31 Aug 2026</strong> &middot; updated <strong>2 Sep</strong><br>
+      Containers <strong>4</strong><br>
+      Currency <strong>USD</strong>
+    </div>
+  </header>
+
+  <section class="totals">
+    <div class="stat">
+      <p class="stat-label">Total units</p>
+      <p class="stat-value">64</p>
+      <p class="stat-note">46 garment sets &middot; 18 other</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Declared value</p>
+      <p class="stat-value">$7,136</p>
+      <p class="stat-note">garments only</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Consignors</p>
+      <p class="stat-value">11</p>
+      <p class="stat-note">plus TPS-held stock</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Awaiting detail</p>
+      <p class="stat-value">3</p>
+      <p class="stat-note">see closing notes</p>
+    </div>
+  </section>
+
+  <!-- ============ SUITCASE 1 ============ -->
+  <section class="container-block">
+    <div class="container-head">
+      <h2>Suitcase 1 <span class="status-open">Open &middot; still filling</span></h2>
+      <span class="container-meta">11 sets &middot; 28 pieces &middot; $3,085</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th aria-label="Packed"></th>
+            <th>#</th>
+            <th>Item &amp; designer</th>
+            <th>Size</th>
+            <th>Pieces &amp; fabric</th>
+            <th>Condition</th>
+            <th>Owner</th>
+            <th class="money">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">01</td>
+            <td>
+              <span class="item-name">Tazeen</span>
+              <span class="designer">Kanwal Malik</span>
+              <p class="detail">Length 57&Prime; &middot; shoulder 14&Prime; &middot; bust 18&Prime; &middot; hip 19&Prime;. Gold tilla machine embroidery, hand embellishment front and sleeves, front slits.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">4 pc</span><p class="detail">Net shirt; raw silk trouser; cotton-silk slip; organza dupatta</p></td>
+            <td><span class="mono">Like New</span><p class="detail">Final sale</p></td>
+            <td><span class="tag tag-tps">TPS held</span></td>
+            <td class="money">$250</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">02</td>
+            <td>
+              <span class="item-name">Indian Net</span>
+              <span class="designer">Sania Maskatiya</span>
+              <p class="detail">Shoulder 17&Prime; &middot; chest 23.5&Prime; &middot; hip 25.5&Prime; &middot; length 39.5&Prime;. Trouser waist 15&Prime;, length 37.75&Prime;.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">4 pc</span><p class="detail">Indian net shirt &amp; dupatta; raw silk pants; silk camisole</p></td>
+            <td><span class="mono">Very Good</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$300</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">03</td>
+            <td>
+              <span class="item-name">Nura Festive &rsquo;24 &mdash; N241-009-3CT</span>
+              <span class="designer">Sana Safinaz</span>
+              <p class="detail">Chest 19.5&Prime; &middot; shirt 61&Prime; &middot; pants 45&Prime; &middot; belt 15.5&Prime;. Ivory.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Raw silk, organza</p></td>
+            <td><span class="mono">Very Good</span><p class="detail">Light wear near bust</p></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$250</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">04</td>
+            <td>
+              <span class="item-name">Balle Balle</span>
+              <span class="designer">Zaaviay</span>
+              <p class="detail">Chest 22.25&Prime; &middot; length 40.5&Prime;. Pink and burnt orange, gold hand embroidery, banarsi paltawa.</p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">PK raw silk shirt &amp; pants; net dupatta</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Khalida</span></td>
+            <td class="money">$300</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">05</td>
+            <td>
+              <span class="item-name">Enchanted Garden</span>
+              <span class="designer">Sumaira Aurangzeb</span>
+              <p class="detail">Jacket chest 18&Prime;, length 54.5&Prime; &middot; crop top pit-to-pit 18&Prime; &middot; pants waist 15&Prime;, inseam 13&Prime;. Blue.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Raw silk jacket (lined), pants, crop top</p></td>
+            <td><span class="mono">Like New</span><p class="detail">Loose threads; slight seam stretch</p></td>
+            <td><span class="mono">Faqiha</span></td>
+            <td class="money">$280</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">06</td>
+            <td>
+              <span class="item-name">Zyra</span>
+              <span class="designer">Zaaviay</span>
+              <p class="detail">A-line kalidar, kora / dabka / zaari embroidery, lace daman. Ships with wider straight pants. No measurements on file.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">PK raw silk; gold screen-printed silk dupatta</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Faqiha</span></td>
+            <td class="money">$250</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">07</td>
+            <td>
+              <span class="item-name">Dusty Rose</span>
+              <span class="designer">Mahgul</span>
+              <p class="detail">Bust 21.5&Prime; &middot; waist 20&Prime; &middot; trouser thigh opening 13.5&Prime;. Sharara silhouette.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Silk shirt &amp; sharara; net dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="tag tag-tps">TPS held</span></td>
+            <td class="money">$475</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">08</td>
+            <td>
+              <span class="item-name">Aria 05</span>
+              <span class="designer">Rozina Munib</span>
+              <p class="detail">Shoulder 14.5&Prime; &middot; bust 40&Prime; &middot; hip 24&Prime;. Chalk blue; 3D floral neckline in pearls, resham, beads, sequins.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Khaadi net shirt; cotton slip; net dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="tag tag-tps">TPS held</span></td>
+            <td class="money">$320</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">09</td>
+            <td>
+              <span class="item-name">Jewelled Black Beauty (D-04)</span>
+              <span class="designer">Ammara Khan</span>
+              <p class="detail">Chest 22.5&Prime; &middot; shirt 38&Prime; &middot; trouser 36&Prime;. Black and silver, dense embroidery, sequin and crystal work.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Blended raw silk shirt, pants, slip</p></td>
+            <td><span class="mono">Like New</span><p class="detail">A few missing beads</p></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$510</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">10</td>
+            <td>
+              <span class="item-name">White &mdash; floral print</span>
+              <span class="designer">Suffuse</span>
+              <p class="detail">Now listed &mdash; <a href="https://admin.shopify.com/store/ba42c1/products/8616084373799">8616084373799</a>. Listing gives size Large; manifest recorded Medium.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Nadia</span></td>
+            <td class="money">$150</td>
+          </tr>
+          <tr class="pending">
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">11</td>
+            <td>
+              <span class="item-name">Zarih</span>
+              <span class="designer">Zarih</span>
+              <p class="detail">Not listed. Awaiting condition, fabric, measurements and value.</p>
+            </td>
+            <td class="size"><span class="mono">XS</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">Faqiha</span></td>
+            <td class="money"><span class="tag tag-pending">TBC</span></td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="7">Suitcase 1 &mdash; 10 priced items</td>
+            <td class="money">$3,085</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ SUITCASE 2 ============ -->
+  <section class="container-block">
+    <div class="container-head">
+      <h2>Suitcase 2</h2>
+      <span class="container-meta">25 units &middot; 7 garment sets + 18 other &middot; $1,800</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th aria-label="Packed"></th>
+            <th>#</th>
+            <th>Item &amp; designer</th>
+            <th>Size</th>
+            <th>Pieces &amp; fabric</th>
+            <th>Condition</th>
+            <th>Owner</th>
+            <th class="money">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">01</td>
+            <td>
+              <span class="item-name">Lilac</span>
+              <span class="designer">Farah Talib Aziz</span>
+              <p class="detail">Chest 23.5&Prime; &middot; hip 24&Prime; &middot; length 40&Prime;. Purple.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Cotton net shirt; silk dupatta; synthetic shameez</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$250</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">02</td>
+            <td>
+              <span class="item-name">Semi-Formal</span>
+              <span class="designer">Farah Talib Aziz</span>
+              <p class="detail">Chest 23&Prime; &middot; hip 25&Prime;. Green and pink. No length recorded.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Net</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$140</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">03</td>
+            <td>
+              <span class="item-name">Nimr Kurti &amp; Dupatta &mdash; Miraka, Eid &rsquo;22</span>
+              <span class="designer">Misha Lakhani</span>
+              <p class="detail">Chest 21.75&Prime; &middot; hip 23&Prime; &middot; length 35.5&Prime;. Green.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Cotton voile kurti; organza dupatta</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$210</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">04</td>
+            <td>
+              <span class="item-name">LF-163 &ldquo;Yezamine&rdquo;</span>
+              <span class="designer">Republic Womenswear</span>
+              <p class="detail">Chest 19&Prime; &middot; shirt 56&Prime; &middot; trouser 42&Prime;. Ivory; sequins, organza borders, pearl detail and tassels.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Brazilian raw silk shirt &amp; trouser; woven net dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$140</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">05</td>
+            <td>
+              <span class="item-name">Sharara Set &mdash; MNR Luxury Pret</span>
+              <span class="designer">Mohsin Naveed Ranjha</span>
+              <p class="detail">Chest 23.5&Prime; &middot; length 43.5&Prime; &middot; pants waist 20.5&Prime;, length 43.5&Prime;. Blue, block print with gota work, dori back.</p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Cotton silk shirt &amp; pants; organza dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Consignor</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$290</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">06</td>
+            <td>
+              <span class="item-name">Dusty Rose &mdash; &ldquo;Rose Dust&rdquo;</span>
+              <span class="designer">Elan</span>
+              <p class="detail">Shoulder 15.5&Prime; &middot; chest 21&Prime; &middot; length 48&Prime;. Dusky mauve with ivory floral stitchwork, chatta patti border.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Silk shirt; chiffon dupatta <span class="tag tag-flag">Piece count unconfirmed</span></p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Nadia?</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$160</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">07</td>
+            <td>
+              <span class="item-name">Sabz Gota Silk</span>
+              <span class="designer">Farah Talib Aziz</span>
+              <p class="detail">Chest 21.75&Prime; &middot; hip 25.5&Prime; &middot; length 41.5&Prime;. Yellow. Persian motifs on raw crepe silk, charmeuse trimmings, zardozi / aari / gota neckline, handcrafted tassels; ombre colour-blocked dupatta.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Silk shirt; pure medium silk dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$220</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">08</td>
+            <td>
+              <span class="item-name">Room &amp; linen spray &mdash; &ldquo;Flower Bouquet&rdquo;</span>
+              <span class="designer">The Kandle Co</span>
+              <p class="detail">White musk and clove leaf; snowdrop, lily, peony; cardamom and jasmine. Fragrance and essential oils in distilled water.</p>
+            </td>
+            <td class="size"><span class="mono">&times;13</span></td>
+            <td><span class="mono">Liquid</span><p class="detail">$30 each <span class="tag tag-flag">Checked baggage only</span></p></td>
+            <td><span class="mono">New</span></td>
+            <td><span class="tag tag-tps">TPS held</span></td>
+            <td class="money">$390</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">09</td>
+            <td>
+              <span class="item-name">Spray testers</span>
+              <span class="designer">The Kandle Co</span>
+              <p class="detail">Sample bottles, not for resale. Count toward the liquid allowance.</p>
+            </td>
+            <td class="size"><span class="mono">&times;2</span></td>
+            <td><span class="mono">Liquid</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="tag tag-tps">TPS held</span></td>
+            <td class="money">n/a</td>
+          </tr>
+          <tr class="pending">
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">10</td>
+            <td>
+              <span class="item-name">Necklaces</span>
+              <span class="designer">&mdash;</span>
+              <p class="detail">Awaiting brand, metal or stone, and value. Declare separately if precious metal.</p>
+            </td>
+            <td class="size"><span class="mono">&times;3</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td class="money"><span class="tag tag-pending">TBC</span></td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="7">Suitcase 2 &mdash; 8 priced lines</td>
+            <td class="money">$1,800</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <p class="callout"><strong>Liquids.</strong> 15 bottles travel in this case. Checked baggage only &mdash; airlines cap toiletries and perfumes at roughly 2 L per passenger with no single container over 500 ml. Bottle volume is not recorded on the listing; confirm before packing all 15 together.</p>
+  </section>
+
+  <!-- ============ BOX 1 ============ -->
+  <section class="container-block">
+    <div class="container-head">
+      <h2>Box 1</h2>
+      <span class="container-meta">18 sets &middot; $1,501</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th aria-label="Packed"></th>
+            <th>#</th>
+            <th>Item &amp; designer</th>
+            <th>Size</th>
+            <th>Pieces &amp; fabric</th>
+            <th>Condition</th>
+            <th>Owner</th>
+            <th class="money">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">01</td>
+            <td>
+              <span class="item-name">Solstice</span>
+              <span class="designer">Jugnu by Hussain Rehar</span>
+              <p class="detail">Chest 20&Prime; &middot; front length 40&Prime; &middot; back length 45.5&Prime; &middot; shalwar 38.5&Prime;. Black monochrome embroidery, multi-colour bell sleeves, green printed shawl.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Khaddar shirt &amp; shalwar; wool shawl</p></td>
+            <td><span class="mono">Very Good</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$55</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">02</td>
+            <td>
+              <span class="item-name">Fable</span>
+              <span class="designer">Jugnu by Hussain Rehar</span>
+              <p class="detail">Chest 20&Prime; &middot; trouser 30.5&Prime;. Navy with linear embroidery, multi-colour bell sleeves, rust printed shawl. No shirt length recorded.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Khaddar shirt &amp; culotte; wool shawl</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$110</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">03</td>
+            <td>
+              <span class="item-name">ZC-1678 &mdash; Coco</span>
+              <span class="designer">Zara Shahjahan</span>
+              <p class="detail">Chest 21&Prime; &middot; length 42&Prime;. Chai pink flared kurta with gota, tilla, ghungru and resham thread; tapered shalwar; dupatta with gota and pearl finishing.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Lawn jacquard shirt &amp; dupatta; cambric trouser</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$110</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">04</td>
+            <td>
+              <span class="item-name">Ava &mdash; Basics 2024</span>
+              <span class="designer">Suffuse</span>
+              <p class="detail">Black textured lawn, drop-corner silhouette. Straight shirt with embroidery, square neck with elongated V and lace. Culotte pant with stitching detail. No chest measurement recorded. <span class="tag tag-flag">Archived in Shopify</span></p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Textured lawn shirt &amp; culotte; silk printed dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">House</span></td>
+            <td class="money">$80</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">05</td>
+            <td>
+              <span class="item-name">Silk Kaftan</span>
+              <span class="designer">Luxe Soiree</span>
+              <p class="detail">Chest 20&Prime; &middot; length 55.25&Prime;. Premium sheesha silk with embroidered neckline, sleeves and hem. Unworn gift.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Pure sheesha silk</p></td>
+            <td><span class="mono">NWOT</span></td>
+            <td><span class="mono">Faqiha</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$120</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">06</td>
+            <td>
+              <span class="item-name">Embroidered Black Kurta</span>
+              <span class="designer">Pretty Attire</span>
+              <p class="detail">Chest 20.25&Prime; &middot; length 36&Prime;. Black.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton blend</p></td>
+            <td><span class="mono">Good</span></td>
+            <td><span class="mono">Ammara</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$60</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">07</td>
+            <td>
+              <span class="item-name">Pearl Embellished Fustaan</span>
+              <span class="designer">Nishat</span>
+              <p class="detail">US 16 &middot; shoulder 38&Prime; &middot; bust 38&Prime; &middot; length 57&Prime;. Green, pearl embellished, boxy silhouette with straight armhole. Fustaan Summer 2021 Eid collection.</p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Super fine lawn cotton</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Amna</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$50</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">08</td>
+            <td>
+              <span class="item-name">Blue Panel</span>
+              <span class="designer">Nishat</span>
+              <p class="detail">No measurements beyond size recorded. Includes a matching mask.</p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Lawn shirt; cambric trouser; mask</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Amna</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$35</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">09</td>
+            <td>
+              <span class="item-name">Sahar</span>
+              <span class="designer">Hussain Rehar</span>
+              <p class="detail">Chest 20.5&Prime; &middot; shirt 43&Prime; &middot; shalwar 39.5&Prime;. Red block print with floral bunches and sequined border.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Korean raw silk shirt, shalwar, shawl</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Sadia</span></td>
+            <td class="money">$140</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">10</td>
+            <td>
+              <span class="item-name">Aaji</span>
+              <span class="designer">Hussain Rehar</span>
+              <p class="detail">Jacket chest 21.5&Prime;, length 45&Prime; &middot; inner chest 20.5&Prime;, length 42.5&Prime; &middot; shalwar 40&Prime;. Rose gold separates with ivory printed jacket, embroidered borders; 3-yard chiffon dupatta with four-sided border.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">4 pc</span><p class="detail">Korean raw silk jacket, inner shirt, trouser; ivory chiffon dupatta</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Sadia</span></td>
+            <td class="money">$185</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">11</td>
+            <td>
+              <span class="item-name">Printed Kurta</span>
+              <span class="designer">Zaha</span>
+              <p class="detail">Chest 21.5&Prime; &middot; hip 24&Prime;. Navy blue print. No length recorded.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$40</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">12</td>
+            <td>
+              <span class="item-name">One-piece</span>
+              <span class="designer">Sana Safinaz</span>
+              <p class="detail">Chest 22&Prime; &middot; hip 23&Prime;. Yellow, brighter in person than in photos. No length recorded.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton blend, heavier than light cotton</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$35</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">13</td>
+            <td>
+              <span class="item-name">Embroidered Shirt</span>
+              <span class="designer">Sania Maskatiya</span>
+              <p class="detail">Shoulder 15.5&Prime; &middot; length 34.5&Prime;. Embroidered chiffon with dolman (batwing) sleeves. No chest measurement recorded.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Embroidered chiffon shirt; silk slip</p></td>
+            <td><span class="mono">Very Good</span><p class="detail">Small pin hole in slip near top</p></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$136</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">14</td>
+            <td>
+              <span class="item-name">Verona</span>
+              <span class="designer">Jugnu by Hussain Rehar</span>
+              <p class="detail">Chest 20&Prime; &middot; shirt length 36&Prime;. Pink with olive floral shawl. Listed &mdash; <a href="https://admin.shopify.com/store/ba42c1/products/10361108627751">10361108627751</a>.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Khaddar shirt &amp; trousers; wool shawl</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$55</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">15</td>
+            <td>
+              <span class="item-name">Ashen</span>
+              <span class="designer">Jugnu by Hussain Rehar</span>
+              <p class="detail">Chest 20&Prime; &middot; shirt length 33.5&Prime;. Teal. Listed &mdash; <a href="https://admin.shopify.com/store/ba42c1/products/10361815564583">10361815564583</a>. <span class="tag tag-flag">Hang tag says $50</span></p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Khaddar shirt &amp; trousers; wool shawl</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$55</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">16</td>
+            <td>
+              <span class="item-name">SS Signature &mdash; black and gold</span>
+              <span class="designer">Sana Safinaz</span>
+              <p class="detail">Chest 21.5&Prime; &middot; shirt 43.5&Prime; &middot; trouser 35&Prime;. Listed &mdash; <a href="https://admin.shopify.com/store/ba42c1/products/10361990152487">10361990152487</a>.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Silk <span class="tag tag-flag">Piece count unconfirmed</span></p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$155</td>
+          </tr>
+          <tr class="pending">
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">17</td>
+            <td>
+              <span class="item-name">Indigenie</span>
+              <span class="designer">Elan</span>
+              <p class="detail">Not in Shopify. Awaiting size, pieces, colour, condition and value.</p>
+            </td>
+            <td class="size"><span class="mono">&mdash;</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">&mdash;</span></td>
+            <td><span class="mono">Annie</span></td>
+            <td class="money"><span class="tag tag-pending">TBC</span></td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">18</td>
+            <td>
+              <span class="item-name">Guzel (M-117)</span>
+              <span class="designer">Republic Womenswear</span>
+              <p class="detail">Chest 22&Prime; &middot; shirt 47&Prime; &middot; trouser 38&Prime;. Teal. Listed &mdash; <a href="https://admin.shopify.com/store/ba42c1/products/10361846006055">10361846006055</a>.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Digital print lawn shirt; jacquard dupatta; cambric trouser</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Sadia</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$80</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="7">Box 1 &mdash; 17 priced items</td>
+            <td class="money">$1,501</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ============ BOX 2 ============ -->
+  <section class="container-block">
+    <div class="container-head">
+      <h2>Box 2</h2>
+      <span class="container-meta">10 garments + display equipment &middot; $750</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th aria-label="Packed"></th>
+            <th>#</th>
+            <th>Item &amp; designer</th>
+            <th>Size</th>
+            <th>Pieces &amp; fabric</th>
+            <th>Condition</th>
+            <th>Owner</th>
+            <th class="money">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">01</td>
+            <td>
+              <span class="item-name">Kurta</span>
+              <span class="designer">Image</span>
+              <p class="detail">Embroidered front. No measurements beyond size recorded.</p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Faqiha</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$40</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">02</td>
+            <td>
+              <span class="item-name">Printed Jacket &mdash; Nishat Pret 2021</span>
+              <span class="designer">Nishat</span>
+              <p class="detail">EUR 36/38 &middot; US 6. Actual print differs slightly from the model shot.</p>
+            </td>
+            <td class="size"><span class="mono">S</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Amna</span></td>
+            <td class="money">$40</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">03</td>
+            <td>
+              <span class="item-name">Pink Delphi</span>
+              <span class="designer">Farida Hasan</span>
+              <p class="detail">Shoulder 15&Prime; &middot; chest 20&Prime; &middot; length 37&Prime;. Hand-embroidered french knot flowers on cotton net and lace; lace panel lined in cotton silk so it is not sheer.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Cotton net shirt; cotton silk slip</p></td>
+            <td><span class="mono">Very Good</span></td>
+            <td><span class="mono">Consignor</span></td>
+            <td class="money">$90</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">04</td>
+            <td>
+              <span class="item-name">Silk Kurta</span>
+              <span class="designer">Sana Safinaz</span>
+              <p class="detail">Chest 26&Prime; &middot; hip 28&Prime;. Purple with white, pink and green. From the Sana Safinaz silk collection. No length recorded.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">100% silk</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$60</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">05</td>
+            <td>
+              <span class="item-name">Purple ZC-2020</span>
+              <span class="designer">Zara Shahjahan</span>
+              <p class="detail">Shoulder 18&Prime; &middot; chest 23.5&Prime; &middot; shirt length 42.5&Prime;. Lavender monotone with schiffli motifs and crystal-embellished neckline; amethyst izaar; scalloped dupatta.</p>
+            </td>
+            <td class="size"><span class="mono">XL</span></td>
+            <td><span class="mono">3 pc</span><p class="detail">Dobby top &amp; bottom; georgette chiffon dupatta</p></td>
+            <td><span class="mono">New w/ tags</span><p class="detail">Never worn</p></td>
+            <td><span class="mono">House</span></td>
+            <td class="money">$70</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">06</td>
+            <td>
+              <span class="item-name">Polka Dot Kurta</span>
+              <span class="designer">Sana Safinaz</span>
+              <p class="detail">Chest 23.5&Prime; &middot; hip 27&Prime;. Blue and white polka dot, A-line. No length recorded.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$35</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">07</td>
+            <td>
+              <span class="item-name">Alisha Kurti</span>
+              <span class="designer">Misha Lakhani</span>
+              <p class="detail">Chest 23&Prime; &middot; hip 24.5&Prime; &middot; length 43&Prime;. Burgundy with geometric floral embroidery, elongated silhouette.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton voile</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Consignor</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$120</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">08</td>
+            <td>
+              <span class="item-name">Naryman Kurti &mdash; Miraka</span>
+              <span class="designer">Misha Lakhani</span>
+              <p class="detail">Chest 23&Prime; &middot; length 36&Prime;. Loose embroidered kurti with pockets, embroidered sleeves, scalloped neckline.</p>
+            </td>
+            <td class="size"><span class="mono">M</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton silk</p></td>
+            <td><span class="mono">New w/ tags</span></td>
+            <td><span class="mono">Amna A.</span></td>
+            <td class="money">$75</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">09</td>
+            <td>
+              <span class="item-name">Red Shirt &mdash; Miraka</span>
+              <span class="designer">Misha Lakhani</span>
+              <p class="detail">Chest 23&Prime; &middot; front length 34.5&Prime; &middot; back length 42&Prime;. Flowy silhouette with side pockets.</p>
+            </td>
+            <td class="size"><span class="mono">L</span></td>
+            <td><span class="mono">1 pc</span><p class="detail">Cotton</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Aatika</span></td>
+            <td class="money">$160</td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">10</td>
+            <td>
+              <span class="item-name">Blue &mdash; Basics</span>
+              <span class="designer">Zara Shahjahan</span>
+              <p class="detail">Mirror work on shirt neckline and pant cuffs. No measurements beyond size recorded.</p>
+            </td>
+            <td class="size"><span class="mono">XS</span></td>
+            <td><span class="mono">2 pc</span><p class="detail">Cambric cotton</p></td>
+            <td><span class="mono">Like New</span></td>
+            <td><span class="mono">Faqiha</span> <span class="tag tag-tps">TPS ships</span></td>
+            <td class="money">$60</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="7">Box 2 merchandise &mdash; 10 items</td>
+            <td class="money">$750</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <h3 style="font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink-faint);margin:30px 0 0;">Display equipment &mdash; not for sale</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th aria-label="Packed"></th>
+            <th>#</th>
+            <th>Item</th>
+            <th>Qty</th>
+            <th>Notes</th>
+            <th class="money">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">01</td>
+            <td><span class="item-name">Garment stands</span></td>
+            <td class="size"><span class="mono">&mdash;</span></td>
+            <td><p class="detail">Type and count to confirm</p></td>
+            <td class="money"><span class="mono">n/a</span></td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">02</td>
+            <td><span class="item-name">Clear stand</span></td>
+            <td class="size"><span class="mono">1</span></td>
+            <td><p class="detail">Acrylic display stand</p></td>
+            <td class="money"><span class="mono">n/a</span></td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">03</td>
+            <td><span class="item-name">Rack clips</span></td>
+            <td class="size"><span class="mono">&mdash;</span></td>
+            <td><p class="detail">Count to confirm</p></td>
+            <td class="money"><span class="mono">n/a</span></td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">04</td>
+            <td><span class="item-name">Plastic garment bags</span></td>
+            <td class="size"><span class="mono">&mdash;</span></td>
+            <td><p class="detail">Packaging stock; count to confirm</p></td>
+            <td class="money"><span class="mono">n/a</span></td>
+          </tr>
+          <tr>
+            <td class="check"><span class="box"></span></td>
+            <td class="idx">05</td>
+            <td><span class="item-name">Sign stands</span></td>
+            <td class="size"><span class="mono">&mdash;</span></td>
+            <td><p class="detail">Count to confirm</p></td>
+            <td class="money"><span class="mono">n/a</span></td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="5">Box 2 &mdash; display equipment, no resale value</td>
+            <td class="money">&mdash;</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <p class="callout"><strong>Declare separately.</strong> These are trade-show and display fixtures, not goods for sale. Keep them out of the merchandise value so the declared figure covers garments only.</p>
+  </section>
+
+  <section class="notes">
+    <div>
+      <h3>Contents summary</h3>
+      <p>Forty-six preloved and new-with-tags Pakistani designer garment sets, plus fifteen room sprays and three necklaces. Personal effects for resale consignment. No leather, fur or animal product; no restricted materials among the garments.</p>
+    </div>
+    <div>
+      <h3>Fabrics carried</h3>
+      <ul>
+        <li>Raw silk &mdash; incl. Brazilian and PK raw silk</li>
+        <li>Silk, cotton silk, cotton voile, chiffon</li>
+        <li>Net &mdash; Indian, khaadi, French, plain</li>
+        <li>Organza, khaddar, lawn, lawn jacquard, cambric, wool</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Still outstanding</h3>
+      <ul>
+        <li>Suitcase 1 &mdash; Zarih still not in Shopify; needs condition, fabric, measurements, value.</li>
+        <li>Suitcase 2 &mdash; necklace details; Elan piece count (2 or 3); spray bottle volume.</li>
+        <li>Box 1 &mdash; Elan Indigenie still not in Shopify. SS Signature piece count unconfirmed.</li>
+        <li>Ashen is $55 in Shopify but $50 on its hang tag. Confirm which is right before the pop-up.</li>
+        <li>Box 2 &mdash; confirm counts for stands, rack clips, bags and sign stands.</li>
+        <li>Suitcase 1 remains open for additions.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="sig">
+    <div><div class="sig-space"></div><div class="sig-line">Packed by &middot; date</div></div>
+    <div><div class="sig-space"></div><div class="sig-line">Checked by &middot; date</div></div>
+    <div><div class="sig-space"></div><div class="sig-line">Received by &middot; date</div></div>
+  </section>
+
+</div>
+
+</body>
+</html>
