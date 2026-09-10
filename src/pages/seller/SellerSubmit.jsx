@@ -128,7 +128,9 @@ export default function SellerSubmit() {
     condition: '',
     original_price: '',
     asking_price: '',
-    additional_details: ''
+    additional_details: '',
+    ships_from: 'United States',
+    dry_cleaned: ''
   });
 
   const mediaRecorderRef = useRef(null);
@@ -548,6 +550,7 @@ export default function SellerSubmit() {
         body: JSON.stringify({
           email: seller?.email,
           description: formData.additional_details,
+          source: 'portal',
           extracted: {
             designer: formData.designer,
             pieces: finalPieces,
@@ -558,7 +561,9 @@ export default function SellerSubmit() {
             material: formData.material,
             condition: formData.condition,
             original_price: formData.original_price,
-            asking_price: formData.asking_price
+            asking_price: formData.asking_price,
+            ships_from: formData.ships_from,
+            dry_cleaned: formData.dry_cleaned
           }
         })
       });
@@ -764,6 +769,14 @@ export default function SellerSubmit() {
               <div className="text-center">
                 <h2 className="text-lg font-medium text-gray-900">Describe Your Item</h2>
                 <p className="text-gray-500 text-sm mt-1">Tell us about your outfit in your own words</p>
+              </div>
+
+              {/* Eligibility is easier to accept up front than after a full submission. */}
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <MapPin className="w-4 h-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-amber-800">
+                  We currently only work with sellers in the <span className="font-medium">US and Canada</span>, since we sell and ship within North America.
+                </p>
               </div>
 
               <div className="flex gap-2">
@@ -995,6 +1008,45 @@ export default function SellerSubmit() {
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
+                  </div>
+                </div>
+
+                {/* Ships from + Dry cleaned Row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Shipping from <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={formData.ships_from}
+                      onChange={(e) => setFormData({ ...formData, ships_from: e.target.value })}
+                      className={`w-full px-3 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none ${
+                        formData.ships_from ? 'border-green-300 bg-green-50' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="United States">United States</option>
+                      <option value="Canada">Canada</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">We can only accept items shipped from the US or Canada.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Dry cleaned? <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={formData.dry_cleaned}
+                      onChange={(e) => setFormData({ ...formData, dry_cleaned: e.target.value })}
+                      className={`w-full px-3 py-3 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none ${
+                        formData.dry_cleaned ? 'border-green-300 bg-green-50' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">Select...</option>
+                      <option value="Yes">Yes — cleaned since last worn</option>
+                      <option value="Buyer pays">No — but I'll clean it if the buyer pays</option>
+                      <option value="No">No</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">Buyers can add dry cleaning for $20 at checkout.</p>
                   </div>
                 </div>
 

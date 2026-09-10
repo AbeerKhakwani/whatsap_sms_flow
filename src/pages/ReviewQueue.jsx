@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Check, X, Pencil, ArrowLeft, ArrowRight, Loader2, Image as ImageIcon,
   Sparkles, Globe, MessageCircle, User, RotateCcw, PartyPopper, Maximize2, Plus,
-  SkipForward, Link as LinkIcon, ExternalLink, Save, ChevronDown, Download
+  SkipForward, Link as LinkIcon, ExternalLink, Save, ChevronDown, Download, MapPin
 } from 'lucide-react';
 import { getThumbnail } from '../utils/image';
 import { CONDITIONS, CONDITION_LABELS } from '../../lib/conditions.js';
@@ -29,18 +29,45 @@ function sourceOf(tags) {
   return src ? src.replace('source:', '') : null;
 }
 
-function SourceBadge({ tags }) {
-  const s = sourceOf(tags);
+function SourceBadge({ source, tags }) {
+  const s = source || sourceOf(tags);
   if (!s) return null;
   const map = {
-    portal: { icon: Globe, label: 'Portal' },
-    whatsapp: { icon: MessageCircle, label: 'WhatsApp' },
-    admin: { icon: User, label: 'Admin' },
+    portal: { icon: Globe, label: 'Portal', cls: 'bg-violet-50 text-violet-700' },
+    whatsapp: { icon: MessageCircle, label: 'WhatsApp', cls: 'bg-emerald-50 text-emerald-700' },
+    admin: { icon: User, label: 'Admin', cls: 'bg-stone-100 text-stone-600' },
+    unknown: { icon: Globe, label: 'Unknown', cls: 'bg-stone-100 text-stone-500' },
   };
-  const { icon: Icon, label } = map[s] || { icon: Globe, label: s };
+  const { icon: Icon, label, cls } = map[s] || { icon: Globe, label: s, cls: 'bg-stone-100 text-stone-600' };
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-stone-400">
-      <Icon className="w-3.5 h-3.5" /> {label}
+    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md ${cls}`}>
+      <Icon className="w-3 h-3" /> {label}
+    </span>
+  );
+}
+
+// WhatsApp sellers never sign in to the portal, so "Never" here is normal for them
+// and only worth a second look on a portal submission.
+function lastLoginLabel(iso) {
+  if (!iso) return 'Never signed in';
+  const days = Math.floor((Date.now() - new Date(iso)) / 86400000);
+  if (days <= 0) return 'Signed in today';
+  if (days === 1) return 'Signed in yesterday';
+  if (days < 30) return `Signed in ${days}d ago`;
+  return `Signed in ${new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
+function SellerMeta({ listing }) {
+  const shipsFrom = listing?.shipsFrom || listing?.seller?.shipsFrom;
+  const eligible = !shipsFrom || ['United States', 'Canada'].includes(shipsFrom);
+  return (
+    <span className="inline-flex items-center gap-2 flex-wrap text-xs text-stone-500">
+      <span>{lastLoginLabel(listing?.seller?.lastLogin)}</span>
+      {shipsFrom && (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium ${eligible ? 'bg-stone-100 text-stone-600' : 'bg-red-50 text-red-700'}`}>
+          <MapPin className="w-3 h-3" /> {shipsFrom}
+        </span>
+      )}
     </span>
   );
 }
@@ -523,7 +550,7 @@ function DesktopDetail({ listing, onSaved, onApprove, onRevise, onReject, onSkip
             <div className="flex items-center gap-2 flex-wrap mt-1">
               <span className="text-sm text-stone-600">{listing.seller?.name || listing.seller?.email || 'Unknown seller'}</span>
               <SellerFlag seller={listing.seller} />
-              <SourceBadge tags={listing.tags} />
+              <SourceBadge source={listing.submissionSource} tags={listing.tags} />
               {full?.shopify_admin_url && (
                 <a href={full.shopify_admin_url} target="_blank" rel="noreferrer" className="text-xs text-stone-400 hover:text-stone-700 inline-flex items-center gap-1">
                   <ExternalLink className="w-3 h-3" /> Shopify
@@ -1076,8 +1103,10 @@ export default function ReviewQueue() {
               </div>
               <span className="text-sm font-medium text-stone-800">{current.seller?.name || current.seller?.email || 'Unknown seller'}</span>
               <SellerFlag seller={current.seller} />
-              <span className="ml-auto"><SourceBadge tags={current.tags} /></span>
+              <span className="ml-auto"><SourceBadge source={current.submissionSource} tags={current.tags} /></span>
             </div>
+
+            <div className="mb-2"><SellerMeta listing={current} /></div>
 
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-lg font-semibold text-stone-900 leading-tight">{current.designer} <span className="text-stone-300">·</span> <span className="text-stone-600 font-normal">{current.product_name}</span></h1>

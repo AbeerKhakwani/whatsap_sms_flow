@@ -93,6 +93,8 @@ export default async function handler(req, res) {
       hip: fields.hip || '',
       notes: fields.notes || '',
       originalPrice: fields.original_price || '',
+      dryCleaned: fields.dry_cleaned || '',
+      shipsFrom: fields.ships_from || '',
       source: requestSource || 'portal'
     });
 
@@ -106,18 +108,33 @@ export default async function handler(req, res) {
         console.error('Product linking error (non-fatal):', err);
       }
 
-      // Insert into listings table
-      try {
-        await supabase.from('listings').insert({
-          seller_id: seller.id,
-          shopify_product_id: product.id.toString(),
-          source: requestSource || 'portal',
-          status: 'draft',
-          extracted_data: safeFields,
-          photo_urls: []
+      // Insert into listings table.
+      // supabase-js resolves with { error } instead of throwing, so a try/catch
+      // alone silently drops failures — this insert was rejected for months on
+      // columns that didn't exist and never logged a thing. Check the result.
+      const listingRow = {
+        seller_id: seller.id,
+        shopify_product_id: product.id.toString(),
+        source: requestSource || 'portal',
+        input_method: requestSource || 'portal',
+        status: 'draft',
+        designer: safeFields.designer || null,
+        item_type: safeFields.item_type || null,
+        size: fields.size || null,
+        condition: safeFields.condition || null,
+        asking_price_usd: parseFloat(safeFields.asking_price) || null,
+        ships_from: fields.ships_from || null,
+        dry_cleaned: fields.dry_cleaned || null,
+        extracted_data: safeFields,
+        photo_urls: []
+      };
+      const { error: listingErr } = await supabase.from('listings').insert(listingRow);
+      if (listingErr) {
+        console.error('Listings insert FAILED (non-fatal) —', listingErr.message, {
+          code: listingErr.code,
+          details: listingErr.details,
+          columns: Object.keys(listingRow)
         });
-      } catch (err) {
-        console.error('Listings insert error (non-fatal):', err);
       }
     }
 

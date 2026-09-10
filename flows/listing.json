@@ -1,0 +1,502 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "REQUIRED_DETAILS": [
+      "OPTIONAL_DETAILS"
+    ],
+    "OPTIONAL_DETAILS": [
+      "PHOTOS"
+    ],
+    "PHOTOS": []
+  },
+  "screens": [
+    {
+      "id": "REQUIRED_DETAILS",
+      "title": "Item Details",
+      "terminal": false,
+      "data": {
+        "brand": {
+          "type": "string",
+          "__example__": "Sana Safinaz"
+        },
+        "pieces": {
+          "type": "string",
+          "__example__": "3-piece"
+        },
+        "size": {
+          "type": "string",
+          "__example__": "M"
+        },
+        "condition": {
+          "type": "string",
+          "__example__": "Like new"
+        },
+        "price": {
+          "type": "string",
+          "__example__": "95"
+        },
+        "chest": {
+          "type": "string",
+          "__example__": "36"
+        },
+        "hip": {
+          "type": "string",
+          "__example__": "38"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Dropdown",
+            "name": "ships_from",
+            "label": "Shipping from",
+            "required": true,
+            "data-source": [
+              {
+                "id": "United States",
+                "title": "United States"
+              },
+              {
+                "id": "Canada",
+                "title": "Canada"
+              },
+              {
+                "id": "Other",
+                "title": "Somewhere else"
+              }
+            ]
+          },
+          {
+            "type": "TextCaption",
+            "text": "We can only accept items shipped from the US or Canada."
+          },
+          {
+            "type": "TextInput",
+            "name": "brand",
+            "label": "Brand",
+            "input-type": "text",
+            "required": true,
+            "init-value": "${data.brand}",
+            "helper-text": "e.g. Sana Safinaz, Maria B"
+          },
+          {
+            "type": "Dropdown",
+            "name": "pieces",
+            "label": "Pieces",
+            "required": true,
+            "init-value": "${data.pieces}",
+            "data-source": [
+              {
+                "id": "1-piece",
+                "title": "1-piece"
+              },
+              {
+                "id": "2-piece",
+                "title": "2-piece"
+              },
+              {
+                "id": "3-piece",
+                "title": "3-piece"
+              },
+              {
+                "id": "Lehnga",
+                "title": "Lehnga"
+              },
+              {
+                "id": "Saree",
+                "title": "Saree"
+              },
+              {
+                "id": "Sharara",
+                "title": "Sharara"
+              },
+              {
+                "id": "Gharara",
+                "title": "Gharara"
+              },
+              {
+                "id": "Other",
+                "title": "Other"
+              }
+            ]
+          },
+          {
+            "type": "Dropdown",
+            "name": "size",
+            "label": "Size",
+            "required": true,
+            "init-value": "${data.size}",
+            "data-source": [
+              {
+                "id": "XS",
+                "title": "XS"
+              },
+              {
+                "id": "S",
+                "title": "S"
+              },
+              {
+                "id": "M",
+                "title": "M"
+              },
+              {
+                "id": "L",
+                "title": "L"
+              },
+              {
+                "id": "XL",
+                "title": "XL"
+              },
+              {
+                "id": "XXL",
+                "title": "XXL"
+              },
+              {
+                "id": "Unstitched",
+                "title": "Unstitched"
+              },
+              {
+                "id": "Custom",
+                "title": "Custom"
+              }
+            ]
+          },
+          {
+            "type": "Dropdown",
+            "name": "condition",
+            "label": "Condition",
+            "required": true,
+            "init-value": "${data.condition}",
+            "data-source": [
+              {
+                "id": "New with tags",
+                "title": "New with tags"
+              },
+              {
+                "id": "Like new",
+                "title": "Like new"
+              },
+              {
+                "id": "Excellent",
+                "title": "Excellent"
+              },
+              {
+                "id": "Good",
+                "title": "Good"
+              },
+              {
+                "id": "Fair",
+                "title": "Fair"
+              }
+            ]
+          },
+          {
+            "type": "Dropdown",
+            "name": "dry_cleaned",
+            "label": "Dry cleaned?",
+            "required": true,
+            "data-source": [
+              {
+                "id": "Yes",
+                "title": "Yes — cleaned since last worn"
+              },
+              {
+                "id": "Buyer pays",
+                "title": "No — but I'll clean it if the buyer pays"
+              },
+              {
+                "id": "No",
+                "title": "No"
+              }
+            ]
+          },
+          {
+            "type": "TextCaption",
+            "text": "Buyers can add dry cleaning for $20 at checkout."
+          },
+          {
+            "type": "TextInput",
+            "name": "price",
+            "label": "Price",
+            "input-type": "text",
+            "required": true,
+            "init-value": "${data.price}",
+            "helper-text": "e.g. Your asking price in USD"
+          },
+          {
+            "type": "TextSubheading",
+            "text": "Measurements"
+          },
+          {
+            "type": "TextInput",
+            "name": "chest",
+            "label": "Chest (in)",
+            "input-type": "text",
+            "required": true,
+            "init-value": "${data.chest}",
+            "helper-text": "e.g. 36"
+          },
+          {
+            "type": "TextInput",
+            "name": "hip",
+            "label": "Hip (in)",
+            "input-type": "text",
+            "required": true,
+            "init-value": "${data.hip}",
+            "helper-text": "e.g. 38"
+          },
+          {
+            "type": "Footer",
+            "label": "Next",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {
+                "type": "screen",
+                "name": "OPTIONAL_DETAILS"
+              },
+              "payload": {
+                "brand": "${form.brand}",
+                "pieces": "${form.pieces}",
+                "size": "${form.size}",
+                "condition": "${form.condition}",
+                "price": "${form.price}",
+                "chest": "${form.chest}",
+                "hip": "${form.hip}",
+                "color": "",
+                "fabric": "",
+                "notes": "",
+                "ships_from": "${form.ships_from}",
+                "dry_cleaned": "${form.dry_cleaned}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "OPTIONAL_DETAILS",
+      "title": "More Details",
+      "terminal": false,
+      "data": {
+        "brand": {
+          "type": "string",
+          "__example__": "Sana Safinaz"
+        },
+        "pieces": {
+          "type": "string",
+          "__example__": "3-piece"
+        },
+        "size": {
+          "type": "string",
+          "__example__": "M"
+        },
+        "condition": {
+          "type": "string",
+          "__example__": "Like new"
+        },
+        "price": {
+          "type": "string",
+          "__example__": "95"
+        },
+        "chest": {
+          "type": "string",
+          "__example__": "36"
+        },
+        "hip": {
+          "type": "string",
+          "__example__": "38"
+        },
+        "color": {
+          "type": "string",
+          "__example__": ""
+        },
+        "fabric": {
+          "type": "string",
+          "__example__": ""
+        },
+        "notes": {
+          "type": "string",
+          "__example__": ""
+        },
+        "ships_from": {
+          "type": "string",
+          "__example__": "United States"
+        },
+        "dry_cleaned": {
+          "type": "string",
+          "__example__": "Yes"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextBody",
+            "text": "Optional - helps buyers find your item"
+          },
+          {
+            "type": "TextInput",
+            "name": "color",
+            "label": "Color",
+            "input-type": "text",
+            "required": false,
+            "init-value": "${data.color}",
+            "helper-text": "e.g. Maroon, Gold"
+          },
+          {
+            "type": "TextInput",
+            "name": "fabric",
+            "label": "Fabric",
+            "input-type": "text",
+            "required": false,
+            "init-value": "${data.fabric}",
+            "helper-text": "e.g. Chiffon, Silk, Lawn"
+          },
+          {
+            "type": "TextArea",
+            "name": "notes",
+            "label": "Notes",
+            "required": false,
+            "init-value": "${data.notes}",
+            "helper-text": "Flaws, alterations, extras"
+          },
+          {
+            "type": "Footer",
+            "label": "Add Photos",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {
+                "type": "screen",
+                "name": "PHOTOS"
+              },
+              "payload": {
+                "brand": "${data.brand}",
+                "pieces": "${data.pieces}",
+                "size": "${data.size}",
+                "condition": "${data.condition}",
+                "price": "${data.price}",
+                "chest": "${data.chest}",
+                "hip": "${data.hip}",
+                "color": "${form.color}",
+                "fabric": "${form.fabric}",
+                "notes": "${form.notes}",
+                "ships_from": "${data.ships_from}",
+                "dry_cleaned": "${data.dry_cleaned}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "PHOTOS",
+      "title": "Photos",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "brand": {
+          "type": "string",
+          "__example__": "Sana Safinaz"
+        },
+        "pieces": {
+          "type": "string",
+          "__example__": "3-piece"
+        },
+        "size": {
+          "type": "string",
+          "__example__": "M"
+        },
+        "condition": {
+          "type": "string",
+          "__example__": "Like new"
+        },
+        "price": {
+          "type": "string",
+          "__example__": "95"
+        },
+        "chest": {
+          "type": "string",
+          "__example__": "36"
+        },
+        "hip": {
+          "type": "string",
+          "__example__": "38"
+        },
+        "color": {
+          "type": "string",
+          "__example__": ""
+        },
+        "fabric": {
+          "type": "string",
+          "__example__": ""
+        },
+        "notes": {
+          "type": "string",
+          "__example__": ""
+        },
+        "ships_from": {
+          "type": "string",
+          "__example__": "United States"
+        },
+        "dry_cleaned": {
+          "type": "string",
+          "__example__": "Yes"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextBody",
+            "text": "Add 3+ clear photos (front, back, details)"
+          },
+          {
+            "type": "PhotoPicker",
+            "name": "photos",
+            "label": "Photos",
+            "description": "Tap to add photos",
+            "photo-source": "camera_gallery",
+            "min-uploaded-photos": 3,
+            "max-uploaded-photos": 10,
+            "max-file-size-kb": 10240
+          },
+          {
+            "type": "OptIn",
+            "name": "terms",
+            "label": "I agree to the consignment terms",
+            "required": true,
+            "on-click-action": {
+              "name": "open_url",
+              "url": "https://thephirstory.com/pages/consignment-sales-agreement"
+            }
+          },
+          {
+            "type": "Footer",
+            "label": "Submit Listing",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "brand": "${data.brand}",
+                "pieces": "${data.pieces}",
+                "size": "${data.size}",
+                "condition": "${data.condition}",
+                "price": "${data.price}",
+                "chest": "${data.chest}",
+                "hip": "${data.hip}",
+                "color": "${data.color}",
+                "fabric": "${data.fabric}",
+                "notes": "${data.notes}",
+                "photos": "${form.photos}",
+                "ships_from": "${data.ships_from}",
+                "dry_cleaned": "${data.dry_cleaned}",
+                "terms": "${form.terms}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

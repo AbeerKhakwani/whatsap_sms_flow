@@ -133,12 +133,19 @@ export default async function handler(req, res) {
         const sellerReply = (sellerReplyRaw && (!revisionRequestedAt || (sellerReplyAt && sellerReplyAt >= revisionRequestedAt))) ? sellerReplyRaw : null;
 
         // More detail for the review card so admins don't have to click through.
+        // Where the submission came from. The source:<x> tag is authoritative going
+        // forward; older products predate it being set correctly, so fall back to the
+        // listings row rather than mislabelling everything "portal".
+        const sourceTag = tags.find(t => t.startsWith('source:'));
+        const submissionSource = sourceTag ? sourceTag.slice('source:'.length) : null;
+        const shipsFrom = getMetafieldValue(metafields, 'custom', 'ships_from') || null;
+
         const material = getMetafieldValue(metafields, 'custom', 'material') || '';
         const measurements = getMetafieldValue(metafields, 'custom', 'measurements') || '';
         const sellerDescription = getMetafieldValue(metafields, 'custom', 'seller_description') || '';
 
         // Find seller in DB (try ID, email, then product ID fallback)
-        const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone');
+        const seller = await resolveSellerFromProduct(sellerEmail, sellerId, product.id, 'id, name, email, phone, last_dashboard_login, ships_from');
 
         return {
           id: product.id,
@@ -156,6 +163,8 @@ export default async function handler(req, res) {
           measurements,
           images: product.images?.map(img => img.src) || [],
           created_at: product.created_at,
+          submissionSource,
+          shipsFrom,
           shopify_admin_url: `https://${process.env.VITE_SHOPIFY_STORE_URL}/admin/products/${product.id}`,
           tags,
           revisionNote,
@@ -167,10 +176,28 @@ export default async function handler(req, res) {
             id: seller.id,
             name: seller.name,
             email: seller.email,
-            phone: seller.phone
+            phone: seller.phone,
+            lastLogin: seller.last_dashboard_login || null,
+            shipsFrom: seller.ships_from || null
           } : null
         };
       })));
+
+      // Products created before create-draft declared a source carry no usable tag.
+      // listings.input_method is the accurate record for those, so fill the gaps.
+      const unsourced = listingsWithSeller.filter(l => !l.submissionSource).map(l => String(l.id));
+      if (unsourced.length) {
+        const { data: rows } = await supabase
+          .from('listings').select('shopify_product_id, source, input_method').in('shopify_product_id', unsourced);
+        const byProduct = {};
+        (rows || []).forEach(r => {
+          const v = r.source || r.input_method;
+          if (v) byProduct[r.shopify_product_id] = v.startsWith('whatsapp') ? 'whatsapp' : v;
+        });
+        for (const l of listingsWithSeller) {
+          if (!l.submissionSource) l.submissionSource = byProduct[String(l.id)] || 'unknown';
+        }
+      }
 
       // Flag each listing's seller as new (never sold) vs returning, for the review queue.
       // Sales (transactions) are a clean signal independent of the in-flight ownership refactor.

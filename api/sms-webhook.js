@@ -33,6 +33,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
+// We sell and ship within North America, so an item has to start there.
+const ELIGIBLE_ORIGINS = ['United States', 'Canada'];
+
 // Required fields (in order)
 const REQUIRED_FIELDS = ['designer', 'pieces_included', 'size', 'condition', 'asking_price_usd'];
 
@@ -1054,6 +1057,27 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
       throw new Error('Seller not found');
     }
 
+    // Eligibility: the Flow asks every seller where they ship from. The +1 phone
+    // check in handleSellCommand is a weak proxy (a US number proves nothing about
+    // where someone lives), so this is the answer we actually act on. Guarded on
+    // presence so submissions from the previous Flow version still go through.
+    const shipsFrom = flowData.ships_from;
+    if (shipsFrom && !ELIGIBLE_ORIGINS.includes(shipsFrom)) {
+      await sendMessage(phone,
+        "Thanks so much for listing! 🙏\n\nRight now we can only take items shipped from the *US or Canada* — that's where we sell and ship.\n\nIf you're actually based in the US or Canada, reply SELL and pick the right country, or email us at thephirstory@gmail.com."
+      );
+      await smsDb.resetConversation(phone);
+      return res.status(200).json({ status: 'rejected_non_north_america' });
+    }
+
+    // The consignment OptIn is required in the Flow, so a false here means the
+    // client was bypassed. Same reasoning as the photo guard below.
+    if (flowData.terms === false) {
+      await sendMessage(phone, "We can't list an item without agreement to the consignment terms. Reply SELL to start again.");
+      await smsDb.resetConversation(phone);
+      return res.status(200).json({ status: 'terms_not_accepted' });
+    }
+
     // Require at least one photo before we create anything. The Flow's PhotoPicker enforces
     // a minimum too, but never trust the client — guard it server-side.
     const submittedPhotos = flowData.photos || [];
@@ -1071,6 +1095,7 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
         email: seller.email,
         phone: seller.phone,
         description: conv.context?.original_description || '',
+        source: 'whatsapp',
         extracted: {
           designer: flowData.brand,
           item_type: flowData.pieces,
@@ -1081,7 +1106,9 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
           material: flowData.fabric || '',
           chest: flowData.chest || '',
           hip: flowData.hip || '',
-          notes: flowData.notes || ''
+          notes: flowData.notes || '',
+          dry_cleaned: flowData.dry_cleaned || '',
+          ships_from: shipsFrom || ''
         }
       })
     });
@@ -1093,6 +1120,16 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
 
     const productId = draftData.productId;
     console.log('✅ Draft created:', productId);
+
+    // Remember the seller's latest declared origin so admins can see it on the
+    // seller record without opening a listing. Non-fatal — the listing is what matters.
+    if (shipsFrom) {
+      const { error: sellerErr } = await supabase
+        .from('sellers')
+        .update({ ships_from: shipsFrom, ships_from_updated: new Date().toISOString() })
+        .eq('id', conv.seller_id);
+      if (sellerErr) console.error('Seller ships_from update failed (non-fatal):', sellerErr.message);
+    }
 
     // Step 2: Upload photos from PhotoPicker
     const photos = flowData.photos || [];
@@ -1168,7 +1205,10 @@ async function handleFlowCompletion(phone, flowData, conv, res) {
         asking_price_usd: parseInt(flowData.price) || 0,
         details: detailsParts.join('. ') || null,
         shopify_product_id: productId,
-        input_method: 'whatsapp_flow'
+        input_method: 'whatsapp_flow',
+        ships_from: shipsFrom || null,
+        dry_cleaned: flowData.dry_cleaned || null,
+        terms_accepted_at: flowData.terms === true ? new Date().toISOString() : null
       })
       .select()
       .single();
